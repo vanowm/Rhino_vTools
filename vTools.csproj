@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AssemblyName>vTools</AssemblyName>
+    <Product>vTools</Product>
+    <Title>vTools</Title>
+    <RootNamespace>vTools</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Version>26.04.23.190749</Version>
+    <InformationalVersion>26.04.23.190749</InformationalVersion>
+    <AssemblyVersion>26.4.2319.749</AssemblyVersion>
+    <FileVersion>26.4.2319.749</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+
+    <Reference Include="RhinoCommon">
+      <HintPath>$(ProgramFiles)\Rhino 8\System\RhinoCommon.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="vTools.config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

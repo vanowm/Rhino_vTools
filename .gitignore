@@ -1,0 +1,21 @@
+# Build outputs
+bin/
+obj/
+
+# User/IDE files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs and local runtime output
+logs/
+*.log
+
+# Backup artifacts
+backups/
+
+# OS files
+Thumbs.db
+Desktop.ini

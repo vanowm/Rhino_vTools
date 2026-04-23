@@ -1,0 +1,90 @@
+{
+  "vUZIP": {
+    "label": "",
+    "tail": 0.75,
+    "layers": {
+      "reference": {
+        "name": "Reference",
+        "color": "#FFFFFF"
+      },
+      "plot": {
+        "name": "PLOT",
+        "color": "#0F8A8A"
+      },
+      "cut": {
+        "name": "CUT1",
+        "color": "#CC3333"
+      }
+    },
+    "parts": [
+      {
+        "name": "zipper",
+        "centerLayer": "PLOT",
+        "centerEndMode": "extend_trim",
+        "note": "FACE DOWN",
+        "mirrorPart": false,
+        "offsets": [
+          {
+            "name": "",
+            "offset": -0.75,
+            "layer": null
+          },
+          {
+            "name": "",
+            "offset": 0.75,
+            "layer": null
+          }
+        ],
+        "bandInsideName": "",
+        "bandOutsideName": ""
+      },
+      {
+        "name": "inner",
+        "centerLayer": "Reference",
+        "centerEndMode": "trim",
+        "note": "",
+        "mirrorPart": false,
+        "offsets": [
+          {
+            "name": "",
+            "offset": -0.75,
+            "layer": null
+          },
+          {
+            "name": "",
+            "offset": 1.125,
+            "layer": null
+          }
+        ],
+        "bandInsideName": "",
+        "bandOutsideName": ""
+      },
+      {
+        "name": "outer",
+        "centerLayer": "Reference",
+        "centerEndMode": "trim",
+        "note": "",
+        "mirrorPart": true,
+        "offsets": [
+          {
+            "name": "",
+            "offset": -0.75,
+            "layer": "PLOT"
+          },
+          {
+            "name": "",
+            "offset": -1.5,
+            "layer": null
+          },
+          {
+            "name": "",
+            "offset": 1.125,
+            "layer": null
+          }
+        ],
+        "bandInsideName": "",
+        "bandOutsideName": ""
+      }
+    ]
+  }
+}
