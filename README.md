@@ -6,13 +6,13 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 
 - Rhino plug-in entry point: vToolsPlugIn
 - Native commands:
-  - vCurveToSpline
-  - vFitBox
-  - vOrient2pt
-  - vOrient3pt
-  - vTogglePerpGumball
-  - vTrim
-  - vUzip
+  - [vCurveToSpline](#vcurvetospline-flow)
+  - [vFitBox](#vfitbox-flow)
+  - [vOrient2pt](#vorient2pt-flow)
+  - [vOrient3pt](#vorient3pt-flow)
+  - [vTogglePerpGumball](#vtoggleperpgumball-flow)
+  - [vTrim](#vtrim-flow)
+  - [vUzip](#vuzip-flow)
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
 
@@ -55,20 +55,10 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vTogglePerpGumball, vTrim, vUzip.
+Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
-
-### Command Flow Quick Links
-
-- [vCurveToSpline flow](#vcurvetospline-flow)
-- [vFitBox flow](#vfitbox-flow)
-- [vOrient2pt flow](#vorient2pt-flow)
-- [vOrient3pt flow](#vorient3pt-flow)
-- [vTogglePerpGumball flow](#vtoggleperpgumball-flow)
-- [vTrim flow](#vtrim-flow)
-- [vUzip flow](#vuzip-flow)
 
 ### vCurveToSpline flow
 
