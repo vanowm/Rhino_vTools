@@ -428,27 +428,8 @@ internal static class PerpGumballMonitor
         perp2d = cameraUp;
       perp2d = Unit(perp2d);
 
-      // Force the curve branch to use the computed perpendicular as Y axis.
-      var y = perp2d;
-      var x = Unit(Vector3d.CrossProduct(y, z));
-      if (x.IsTiny())
-        x = cameraRight;
-      if (x.IsTiny())
-        x = Vector3d.XAxis;
-
-      y = Unit(Vector3d.CrossProduct(z, x));
-      if (y.IsTiny())
-        y = perp2d;
-
-      // Keep Y aligned with the requested perpendicular direction.
-      if ((y * perp2d) < 0)
-      {
-        x = -x;
-        y = -y;
-      }
-
-      var result = new Plane(origin, x, y);
-      debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, hasCurveReference, curveReferencePoint, curveReferenceTangent, usedGripToCurve, basisDirection, perp2d, cameraRight, cameraUp, result, tolerance);
+      var result = BuildCurvePerpendicularPlane(origin, z, perp2d, cameraRight, cameraUp, out var perpendicularOnXAxis);
+      debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, hasCurveReference, curveReferencePoint, curveReferenceTangent, usedGripToCurve, basisDirection, perp2d, cameraRight, cameraUp, result, tolerance, perpendicularOnXAxis);
       return result;
     }
 
@@ -480,6 +461,71 @@ internal static class PerpGumballMonitor
     return nonCurveResult;
   }
 
+  private static Plane BuildCurvePerpendicularPlane(
+    Point3d origin,
+    Vector3d viewDirection,
+    Vector3d perpendicularDirection,
+    Vector3d cameraRight,
+    Vector3d cameraUp,
+    out bool perpendicularOnXAxis)
+  {
+    perpendicularOnXAxis = false;
+
+    var z = Unit(viewDirection);
+    var perp = Unit(perpendicularDirection);
+    if (z.IsTiny() || perp.IsTiny())
+      return new Plane(origin, cameraRight, cameraUp);
+
+    // Candidate A: X axis is the perpendicular direction.
+    var ax = perp;
+    var ay = Unit(Vector3d.CrossProduct(z, ax));
+    if (ay.IsTiny())
+      ay = Unit(ProjectToPlane(cameraUp, z));
+    if (ay.IsTiny())
+      ay = cameraUp;
+    if ((ax * cameraRight) < 0)
+    {
+      ax = -ax;
+      ay = -ay;
+    }
+
+    // Candidate B: Y axis is the perpendicular direction.
+    var by = perp;
+    var bx = Unit(Vector3d.CrossProduct(by, z));
+    if (bx.IsTiny())
+      bx = Unit(ProjectToPlane(cameraRight, z));
+    if (bx.IsTiny())
+      bx = cameraRight;
+    if ((by * cameraRight) < 0)
+    {
+      bx = -bx;
+      by = -by;
+    }
+
+    var eps = RhinoMath.SqrtEpsilon;
+    var aRight = (ax * cameraRight) >= -eps && (ay * cameraRight) >= -eps;
+    var bRight = (bx * cameraRight) >= -eps && (by * cameraRight) >= -eps;
+
+    if (aRight && !bRight)
+    {
+      perpendicularOnXAxis = true;
+      return new Plane(origin, ax, ay);
+    }
+
+    if (bRight && !aRight)
+      return new Plane(origin, bx, by);
+
+    var scoreA = (ax * cameraRight) + (ay * cameraRight);
+    var scoreB = (bx * cameraRight) + (by * cameraRight);
+    if (scoreA > scoreB + eps)
+    {
+      perpendicularOnXAxis = true;
+      return new Plane(origin, ax, ay);
+    }
+
+    return new Plane(origin, bx, by);
+  }
+
   private static OrientationDebugData BuildDebugData(
     string viewId,
     Point3d origin,
@@ -494,7 +540,8 @@ internal static class PerpGumballMonitor
     Vector3d cameraRight,
     Vector3d cameraUp,
     Plane resultPlane,
-    double tolerance)
+    double tolerance,
+    bool perpendicularOnXAxis = false)
   {
     var drawScale = Math.Max(tolerance * 100.0, 1.0);
 
@@ -520,7 +567,8 @@ internal static class PerpGumballMonitor
       cameraRight: Unit(cameraRight),
       cameraUp: Unit(cameraUp),
       resultPlane: resultPlane,
-      drawScale: drawScale);
+        drawScale: drawScale,
+        perpendicularOnXAxis: perpendicularOnXAxis);
   }
 
   private static bool TryGripToCurvePerpendicularDirection(Curve curve, Point3d gripPoint, double tolerance, out Vector3d direction, out Point3d footPoint, out Vector3d footTangent)
@@ -848,6 +896,14 @@ internal static class PerpGumballMonitor
       DrawDebugVector(e, origin, debug.ResultPlane.XAxis, debug.DrawScale, System.Drawing.Color.Red);
       DrawDebugVector(e, origin, debug.ResultPlane.YAxis, debug.DrawScale, System.Drawing.Color.Lime);
       DrawDebugVector(e, origin, debug.ResultPlane.ZAxis, debug.DrawScale, System.Drawing.Color.DeepSkyBlue);
+
+      if (debug.HasCurveReference)
+      {
+        var selectedPerpAxis = debug.PerpendicularOnXAxis
+          ? debug.ResultPlane.XAxis
+          : debug.ResultPlane.YAxis;
+        DrawDebugVector(e, origin, selectedPerpAxis, debug.DrawScale * 1.12, System.Drawing.Color.White);
+      }
     }
   }
 
@@ -898,7 +954,8 @@ internal static class PerpGumballMonitor
       cameraRight: Vector3d.Zero,
       cameraUp: Vector3d.Zero,
       resultPlane: Plane.Unset,
-      drawScale: 1.0);
+      drawScale: 1.0,
+      perpendicularOnXAxis: false);
 
     public OrientationDebugData(
       bool isValid,
@@ -915,7 +972,8 @@ internal static class PerpGumballMonitor
       Vector3d cameraRight,
       Vector3d cameraUp,
       Plane resultPlane,
-      double drawScale)
+      double drawScale,
+      bool perpendicularOnXAxis)
     {
       IsValid = isValid;
       ViewId = viewId;
@@ -932,6 +990,7 @@ internal static class PerpGumballMonitor
       CameraUp = cameraUp;
       ResultPlane = resultPlane;
       DrawScale = drawScale;
+      PerpendicularOnXAxis = perpendicularOnXAxis;
     }
 
     public bool IsValid { get; }
@@ -949,6 +1008,7 @@ internal static class PerpGumballMonitor
     public Vector3d CameraUp { get; }
     public Plane ResultPlane { get; }
     public double DrawScale { get; }
+    public bool PerpendicularOnXAxis { get; }
   }
 
   private readonly struct GripContext
