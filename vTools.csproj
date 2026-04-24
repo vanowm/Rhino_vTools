@@ -9,10 +9,14 @@
     <Title>vTools</Title>
     <RootNamespace>vTools</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>26.04.23.190749</Version>
-    <InformationalVersion>26.04.23.190749</InformationalVersion>
-    <AssemblyVersion>26.4.2319.749</AssemblyVersion>
-    <FileVersion>26.4.2319.749</FileVersion>
+    <Version>26.04.23.203849</Version>
+    <InformationalVersion>26.04.23.203849</InformationalVersion>
+    <AssemblyVersion>26.4.2320.3849</AssemblyVersion>
+    <FileVersion>26.4.2320.3849</FileVersion>
+    <!-- Fail fast when output files are locked (no retry loop). -->
+    <CopyRetryCount>0</CopyRetryCount>
+    <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>
+    <AutoCommitVersionOnRelease>true</AutoCommitVersionOnRelease>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,5 +33,60 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- Create a timestamped snapshot of build outputs after every successful Release build. -->
+  <Target Name="CreateReleaseBackup" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <PropertyGroup>
+      <BackupTimestamp>$([System.DateTime]::Now.ToString('yy.MM.dd.HHmmss'))</BackupTimestamp>
+      <BackupOutputRoot>$(MSBuildProjectDirectory)\bin\Release\backups\$(BackupTimestamp)</BackupOutputRoot>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <BackupFiles Include="$(TargetDir)**\*.*" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(BackupOutputRoot)" />
+    <Copy
+      SourceFiles="@(BackupFiles)"
+      DestinationFolder="$(BackupOutputRoot)\%(RecursiveDir)"
+      SkipUnchangedFiles="false" />
+
+    <Message Importance="high" Text="vTools backup created: $(BackupOutputRoot)" />
+  </Target>
+
+  <!-- Commit updated version metadata and release plugin binary after successful Release builds. -->
+  <Target Name="CommitReleaseVersion" AfterTargets="CreateReleaseBackup" Condition="'$(Configuration)' == 'Release' and '$(AutoCommitVersionOnRelease)' == 'true'">
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; add -- &quot;vTools.csproj&quot; &quot;Properties/AssemblyInfo.cs&quot; &quot;bin/Release/net7.0-windows/vTools.dll&quot;"
+      IgnoreExitCode="true" />
+
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; diff --cached --quiet -- &quot;vTools.csproj&quot; &quot;Properties/AssemblyInfo.cs&quot; &quot;bin/Release/net7.0-windows/vTools.dll&quot;"
+      IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="VersionCommitDiffExitCode" />
+    </Exec>
+
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; commit -m &quot;vTools $(Version)&quot; -- &quot;vTools.csproj&quot; &quot;Properties/AssemblyInfo.cs&quot; &quot;bin/Release/net7.0-windows/vTools.dll&quot;"
+      IgnoreExitCode="true"
+      Condition="'$(VersionCommitDiffExitCode)' != '0'">
+      <Output TaskParameter="ExitCode" PropertyName="VersionCommitExitCode" />
+    </Exec>
+
+    <Message
+      Importance="high"
+      Text="vTools version commit created: $(Version)"
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0'" />
+
+    <Message
+      Importance="high"
+      Text="vTools version commit skipped (git commit failed; check git identity, branch, or repo state)."
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' != '0'" />
+
+    <Message
+      Importance="high"
+      Text="vTools version commit skipped (no tracked version artifact changes)."
+      Condition="'$(VersionCommitDiffExitCode)' == '0'" />
+  </Target>
 
 </Project>
