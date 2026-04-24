@@ -1,6 +1,6 @@
 # vTools
 
-vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper generation and orient workflows.
+vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, and trim/extend workflows.
 
 ## What this project includes
 
@@ -10,6 +10,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - vFitBox
   - vOrient2pt
   - vOrient3pt
+  - vTrim
   - vUzip
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
@@ -59,7 +60,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vUzip.
+Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vTrim, vUzip.
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -85,6 +86,26 @@ Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vUzip.
     - `Fit`: optimize by `Height` or `Area`.
 
 1. Confirm selection to generate the fit result.
+
+### vTrim flow
+
+1. Select cutting curves first, or press Enter to use `AutoClosest` mode.
+1. Click target curves to trim against the selected cutters, or against auto-detected cutters when in `AutoClosest` mode.
+1. Hold Shift before clicking to switch to extend mode for that click.
+1. Adjust options while picking targets.
+
+    - `Extend`: `Line` or `Smooth` extension style.
+    - `Join`: `Yes` or `No` for joining kept trim pieces.
+
+1. Preview highlights:
+
+    - Trim removal preview: red.
+    - Extend addition preview: green.
+
+Hidden keywords while picking targets:
+
+- `u` or `undo`: undo last vTrim action in the current command session.
+- `r` or `redo`: redo last undone vTrim action in the current command session.
 
 ### vOrient2pt flow
 
@@ -118,7 +139,7 @@ Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vUzip.
 
 ## Configuration
 
-The command reads and writes vTools.config.json next to the plug-in assembly. The active command section is vUzip.
+Commands read and write vTools.config.json next to the plug-in assembly. Sections are created per command as options are used.
 
 Example:
 

@@ -9,10 +9,10 @@
     <Title>vTools</Title>
     <RootNamespace>vTools</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>26.04.24.134802</Version>
-    <InformationalVersion>26.04.24.134802</InformationalVersion>
-    <AssemblyVersion>26.4.24.1348</AssemblyVersion>
-    <FileVersion>26.4.24.1348</FileVersion>
+    <Version>26.04.24.163301</Version>
+    <InformationalVersion>26.04.24.163301</InformationalVersion>
+    <AssemblyVersion>26.4.24.1633</AssemblyVersion>
+    <FileVersion>26.4.24.1633</FileVersion>
     <!-- Fail fast when output files are locked (no retry loop). -->
     <CopyRetryCount>0</CopyRetryCount>
     <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>
@@ -58,16 +58,15 @@
   <!-- Commit updated version metadata and release plugin binary after successful Release builds. -->
   <Target Name="CommitReleaseVersion" AfterTargets="CreateReleaseBackup" Condition="'$(Configuration)' == 'Release' and '$(AutoCommitVersionOnRelease)' == 'true'">
     <PropertyGroup>
-      <VersionCommitMessage>Update release artifacts</VersionCommitMessage>
       <ShortTagVersion>$([System.Text.RegularExpressions.Regex]::Match('$(Version)', '^\d{2}\.\d{2}\.\d{2}').Value)</ShortTagVersion>
     </PropertyGroup>
 
     <Exec
-      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; add -- &quot;vTools.csproj&quot; &quot;Properties/AssemblyInfo.cs&quot; &quot;bin/Release/net7.0-windows/vTools.dll&quot;"
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; add -A -- ."
       IgnoreExitCode="true" />
 
     <Exec
-      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; diff --cached --quiet -- &quot;vTools.csproj&quot; &quot;Properties/AssemblyInfo.cs&quot; &quot;bin/Release/net7.0-windows/vTools.dll&quot;"
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; diff --cached --quiet -- ."
       IgnoreExitCode="true">
       <Output TaskParameter="ExitCode" PropertyName="VersionCommitDiffExitCode" />
     </Exec>
@@ -80,9 +79,16 @@
     </Exec>
 
     <Exec
-      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; commit -m &quot;$(VersionCommitMessage)&quot; -- &quot;vTools.csproj&quot; &quot;Properties/AssemblyInfo.cs&quot; &quot;bin/Release/net7.0-windows/vTools.dll&quot;"
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$repo='$(MSBuildProjectDirectory)'; $files=@(git -C $repo diff --cached --name-only); $names=New-Object System.Collections.Generic.List[string]; foreach($f in $files){$n=[System.IO.Path]::GetFileNameWithoutExtension($f); if([string]::IsNullOrWhiteSpace($n)){continue}; if(-not $names.Contains($n)){[void]$names.Add($n)}}; if($names.Count -eq 0){$summary='artifacts'} elseif($names.Count -le 4){$summary=($names -join ', ')} else {$summary=(($names[0..3] -join ', ') + ', +' + ($names.Count - 4))}; $msg='Release $(Version): ' + $summary; Set-Content -Path (Join-Path $repo '.git\\vtools-autocommit-message.txt') -Value $msg -NoNewline -Encoding utf8&quot;"
       IgnoreExitCode="true"
       Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionDllDiffExitCode)' != '0'">
+      <Output TaskParameter="ExitCode" PropertyName="VersionCommitMessageExitCode" />
+    </Exec>
+
+    <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; commit -F &quot;.git/vtools-autocommit-message.txt&quot;"
+      IgnoreExitCode="true"
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionDllDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' == '0'">
       <Output TaskParameter="ExitCode" PropertyName="VersionCommitExitCode" />
     </Exec>
 
@@ -127,12 +133,17 @@
 
     <Message
       Importance="high"
-      Text="vTools version commit skipped (git commit failed; check git identity, branch, or repo state)."
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionDllDiffExitCode)' != '0' and '$(VersionCommitExitCode)' != '0'" />
+      Text="vTools version commit skipped (failed to build auto commit message)."
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionDllDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' != '0'" />
 
     <Message
       Importance="high"
-      Text="vTools version commit skipped (no tracked version artifact changes)."
+      Text="vTools version commit skipped (git commit failed; check git identity, branch, or repo state)."
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionDllDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' == '0' and '$(VersionCommitExitCode)' != '0'" />
+
+    <Message
+      Importance="high"
+      Text="vTools version commit skipped (no staged changes)."
       Condition="'$(VersionCommitDiffExitCode)' == '0'" />
   </Target>
 

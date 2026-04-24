@@ -6,9 +6,9 @@ using Rhino.PlugIns;
 [assembly: AssemblyProduct("vTools")]
 [assembly: ComVisible(false)]
 [assembly: Guid("2607512e-a1fc-4cf9-9329-a293431437a0")]
-[assembly: AssemblyVersion("26.4.24.1348")]
-[assembly: AssemblyFileVersion("26.4.24.1348")]
-[assembly: AssemblyInformationalVersion("26.04.24.134802")]
+[assembly: AssemblyVersion("26.4.24.1633")]
+[assembly: AssemblyFileVersion("26.4.24.1633")]
+[assembly: AssemblyInformationalVersion("26.04.24.163301")]
 
 [assembly: PlugInDescription(DescriptionType.Address, "")]
 [assembly: PlugInDescription(DescriptionType.Country, "")]
