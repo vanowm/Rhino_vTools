@@ -187,7 +187,10 @@ internal static class PerpGumballMonitor
       return;
 
     if (!TryGetActiveGripContext(doc, out var ctx))
+    {
+      InvalidateLastApplyState();
       return;
+    }
 
     var cameraKey = CameraKey(ctx.Viewport);
     var cameraChanged = !string.Equals(cameraKey, _lastCameraKey, StringComparison.Ordinal);
@@ -297,7 +300,10 @@ internal static class PerpGumballMonitor
   private static void UpdateGumballForActiveGrip(RhinoDoc doc, bool force, bool allowCommandFallback)
   {
     if (!TryGetActiveGripContext(doc, out var ctx))
+    {
+      InvalidateLastApplyState();
       return;
+    }
 
     UpdateGumballForActiveGrip(doc, force, ctx, allowCommandFallback);
   }
@@ -334,6 +340,16 @@ internal static class PerpGumballMonitor
     _lastGripPointKey = PointKey(ctx.Grip.CurrentLocation);
 
     ctx.View.Redraw();
+  }
+
+  private static void InvalidateLastApplyState()
+  {
+    _lastGripKey = null;
+    _lastViewId = null;
+    _lastPlaneKey = null;
+    _lastCameraKey = null;
+    _lastGripPointKey = null;
+    _idleSettle = 0;
   }
 
   private static Plane ComputePlaneForGrip(RhinoViewport viewport, GripObject grip, GeometryBase geometry, double tolerance)
