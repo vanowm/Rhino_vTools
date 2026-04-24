@@ -109,10 +109,13 @@ public sealed class vTrim : Command
         if (record != null)
           history.Push(record);
 
+        doc.Objects.UnselectAll();
         doc.Views.Redraw();
       }
       else
       {
+        doc.Objects.UnselectAll();
+        doc.Views.Redraw();
         RhinoApp.WriteLine("vTrim: click did not produce a valid trim/extend result.");
       }
     }
