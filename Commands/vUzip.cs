@@ -689,55 +689,88 @@ public class vUzip : Command
     return OffsetSingle(doc, centerCurve, plane, -sign * distanceAbs);
   }
 
+  private static double ClosestPointDistance(Curve curve, Point3d point)
+  {
+    if (!curve.ClosestPoint(point, out var t))
+      return double.PositiveInfinity;
+
+    return curve.PointAt(t).DistanceTo(point);
+  }
+
+  private static double CenterDistanceToEnd(Curve centerCurve, double parameter, bool toStart)
+  {
+    var d0 = centerCurve.Domain.T0;
+    var d1 = centerCurve.Domain.T1;
+    var min = Math.Min(d0, d1);
+    var max = Math.Max(d0, d1);
+    var p = Math.Max(min, Math.Min(max, parameter));
+
+    var span = toStart ? new Interval(d0, p) : new Interval(p, d1);
+    if (Math.Abs(span.Length) <= RhinoMath.ZeroTolerance)
+      return 0.0;
+
+    try
+    {
+      var part = centerCurve.Trim(span);
+      if (part != null)
+        return Math.Max(0.0, part.GetLength());
+    }
+    catch
+    {
+    }
+
+    var point = centerCurve.PointAt(p);
+    return point.DistanceTo(toStart ? centerCurve.PointAtStart : centerCurve.PointAtEnd);
+  }
+
   private static CurveItem? SelectEndCapCurve(
+    RhinoDoc doc,
     IReadOnlyList<CurveItem> items,
-    Point3d endPoint,
-    Point3d centerMid,
-    double centerLength,
+    Curve centerCurve,
+    bool forStart,
     double tolerance,
     HashSet<Guid>? excludedObjectIds = null)
   {
-    var scored = new List<(CurveItem Item, double EndDist, double AnchorDist)>();
+    CurveItem? best = null;
+    var bestSideDist = double.PositiveInfinity;
+    var endPoint = forStart ? centerCurve.PointAtStart : centerCurve.PointAtEnd;
+    var tieDistance = double.PositiveInfinity;
 
     foreach (var item in items)
     {
       if (excludedObjectIds != null && item.ObjectId.HasValue && excludedObjectIds.Contains(item.ObjectId.Value))
         continue;
 
-      if (!item.Curve.ClosestPoint(endPoint, out var t))
+      var centerParams = UniqueParams(IntersectionParams(doc, centerCurve, item.Curve), tolerance);
+      if (centerParams.Count == 0)
         continue;
 
-      var cp = item.Curve.PointAt(t);
-      var anchorDist = cp.DistanceTo(centerMid);
-      var endDist = cp.DistanceTo(endPoint);
-      scored.Add((item, endDist, anchorDist));
+      var itemBest = double.PositiveInfinity;
+      foreach (var p in centerParams)
+      {
+        var sideDist = CenterDistanceToEnd(centerCurve, p, toStart: forStart);
+        var oppositeDist = CenterDistanceToEnd(centerCurve, p, toStart: !forStart);
+
+        // This crossing must actually belong to the requested end side.
+        if (sideDist <= oppositeDist + tolerance)
+          itemBest = Math.Min(itemBest, sideDist);
+      }
+
+      if (!double.IsFinite(itemBest))
+        continue;
+
+      var itemEndDist = ClosestPointDistance(item.Curve, endPoint);
+      if (best == null
+          || itemBest < bestSideDist - tolerance
+          || (Math.Abs(itemBest - bestSideDist) <= tolerance && itemEndDist < tieDistance - tolerance))
+      {
+        best = item;
+        bestSideDist = itemBest;
+        tieDistance = itemEndDist;
+      }
     }
 
-    if (scored.Count == 0)
-      return null;
-
-    // Keep candidates local to this end first, then choose the far-most one among them.
-    var localBand = Math.Max(tolerance * 20.0, centerLength * 0.15);
-    var minEndDist = scored.Min(s => s.EndDist);
-
-    var local = scored
-      .Where(s => s.EndDist <= minEndDist + localBand)
-      .OrderByDescending(s => s.AnchorDist)
-      .ThenBy(s => s.EndDist)
-      .ToList();
-
-    if (local.Count > 0)
-      return local[0].Item;
-
-    var fallback = scored
-      .OrderByDescending(s => s.AnchorDist)
-      .ThenBy(s => s.EndDist)
-      .ToList();
-
-    if (fallback.Count > 0)
-      return fallback[0].Item;
-
-    return null;
+    return best;
   }
 
   private static (List<Curve> EndCurves, HashSet<Guid> EndParentIds) BuildEndCurves(
@@ -753,7 +786,6 @@ public class vUzip : Command
       return (endCurves, parentIds);
 
     var centerMid = CurveMidpoint(centerCurve);
-    var centerLength = CurveLength(centerCurve);
     var tol = doc.ModelAbsoluteTolerance;
     var endSources = new List<(CurveItem Item, Point3d EndPoint)>();
     var usedObjectIds = new HashSet<Guid>();
@@ -761,7 +793,7 @@ public class vUzip : Command
     var startEndPoint = centerCurve.PointAtStart;
     var endEndPoint = centerCurve.PointAtEnd;
 
-    var start = SelectEndCapCurve(preselected, startEndPoint, centerMid, centerLength, tol);
+    var start = SelectEndCapCurve(doc, preselected, centerCurve, forStart: true, tol);
     if (start != null)
     {
       endSources.Add((start, startEndPoint));
@@ -770,9 +802,9 @@ public class vUzip : Command
     }
 
     // Choose end cap independently. Prefer a different source curve when available.
-    var end = SelectEndCapCurve(preselected, endEndPoint, centerMid, centerLength, tol, usedObjectIds);
+    var end = SelectEndCapCurve(doc, preselected, centerCurve, forStart: false, tol, usedObjectIds);
     if (end == null)
-      end = SelectEndCapCurve(preselected, endEndPoint, centerMid, centerLength, tol);
+      end = SelectEndCapCurve(doc, preselected, centerCurve, forStart: false, tol);
 
     if (end != null)
       endSources.Add((end, endEndPoint));
