@@ -689,21 +689,36 @@ public class vUzip : Command
     return OffsetSingle(doc, centerCurve, plane, -sign * distanceAbs);
   }
 
-  private static CurveItem? ClosestCurveToPoint(IEnumerable<CurveItem> items, Point3d point)
+  private static CurveItem? SelectEndCapCurve(
+    IReadOnlyList<CurveItem> items,
+    Point3d endPoint,
+    Point3d centerMid,
+    double tolerance,
+    HashSet<Guid>? excludedObjectIds = null)
   {
     CurveItem? best = null;
-    double? bestDist = null;
+    var bestAnchorDist = double.NegativeInfinity;
+    var bestEndDist = double.PositiveInfinity;
 
     foreach (var item in items)
     {
-      if (!item.Curve.ClosestPoint(point, out var t))
+      if (excludedObjectIds != null && item.ObjectId.HasValue && excludedObjectIds.Contains(item.ObjectId.Value))
         continue;
+
+      if (!item.Curve.ClosestPoint(endPoint, out var t))
+        continue;
+
       var cp = item.Curve.PointAt(t);
-      var dist = cp.DistanceTo(point);
-      if (best == null || dist < bestDist)
+      var anchorDist = cp.DistanceTo(centerMid);
+      var endDist = cp.DistanceTo(endPoint);
+
+      if (best == null
+          || anchorDist > bestAnchorDist + tolerance
+          || (Math.Abs(anchorDist - bestAnchorDist) <= tolerance && endDist < bestEndDist - tolerance))
       {
         best = item;
-        bestDist = dist;
+        bestAnchorDist = anchorDist;
+        bestEndDist = endDist;
       }
     }
 
@@ -723,15 +738,28 @@ public class vUzip : Command
       return (endCurves, parentIds);
 
     var centerMid = CurveMidpoint(centerCurve);
+    var tol = doc.ModelAbsoluteTolerance;
     var endSources = new List<(CurveItem Item, Point3d EndPoint)>();
+    var usedObjectIds = new HashSet<Guid>();
 
-    var start = ClosestCurveToPoint(preselected, centerCurve.PointAtStart);
+    var startEndPoint = centerCurve.PointAtStart;
+    var endEndPoint = centerCurve.PointAtEnd;
+
+    var start = SelectEndCapCurve(preselected, startEndPoint, centerMid, tol);
     if (start != null)
-      endSources.Add((start, centerCurve.PointAtStart));
+    {
+      endSources.Add((start, startEndPoint));
+      if (start.ObjectId.HasValue)
+        usedObjectIds.Add(start.ObjectId.Value);
+    }
 
-    var end = ClosestCurveToPoint(preselected, centerCurve.PointAtEnd);
+    // Choose end cap independently. Prefer a different source curve when available.
+    var end = SelectEndCapCurve(preselected, endEndPoint, centerMid, tol, usedObjectIds);
+    if (end == null)
+      end = SelectEndCapCurve(preselected, endEndPoint, centerMid, tol);
+
     if (end != null)
-      endSources.Add((end, centerCurve.PointAtEnd));
+      endSources.Add((end, endEndPoint));
 
     var tailAbs = Math.Abs(tail);
     foreach (var (item, endPoint) in endSources)
