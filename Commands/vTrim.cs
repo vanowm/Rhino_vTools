@@ -415,6 +415,7 @@ public sealed class vTrim : Command
       go.DeselectAllBeforePostSelect = false;
       go.EnableClearObjectsOnEntry(false);
       go.EnableUnselectObjectsOnExit(true);
+      go.EnableHighlight(false);
 
       var extendToggle = new OptionToggle(extendAsLine, "Smooth", "Line");
       var joinToggle = new OptionToggle(joinAfterTrim, "No", "Yes");
@@ -499,6 +500,7 @@ public sealed class vTrim : Command
         }
 
         RhinoApp.Idle -= OnIdleShiftRefresh;
+        doc.Objects.UnselectAll();
         hover.Enabled = false;
         preview.Enabled = false;
         doc.Views.Redraw();
