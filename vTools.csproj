@@ -9,14 +9,15 @@
     <Title>vTools</Title>
     <RootNamespace>vTools</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>26.04.24.101344</Version>
-    <InformationalVersion>26.04.24.101344</InformationalVersion>
-    <AssemblyVersion>26.4.24.1013</AssemblyVersion>
-    <FileVersion>26.4.24.1013</FileVersion>
+    <Version>26.04.24.101745</Version>
+    <InformationalVersion>26.04.24.101745</InformationalVersion>
+    <AssemblyVersion>26.4.24.1017</AssemblyVersion>
+    <FileVersion>26.4.24.1017</FileVersion>
     <!-- Fail fast when output files are locked (no retry loop). -->
     <CopyRetryCount>0</CopyRetryCount>
     <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>
-    <AutoCommitVersionOnRelease>true</AutoCommitVersionOnRelease>
+    <!-- Keep false for normal/dev builds; set true explicitly for final release commit build. -->
+    <AutoCommitVersionOnRelease>false</AutoCommitVersionOnRelease>
   </PropertyGroup>
 
   <ItemGroup>
