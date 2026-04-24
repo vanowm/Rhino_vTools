@@ -1,6 +1,13 @@
 # Build outputs
-bin/
+bin/*
 obj/
+
+# Keep the release plugin binary under source control.
+!bin/Release/
+bin/Release/*
+!bin/Release/net7.0-windows/
+bin/Release/net7.0-windows/*
+!bin/Release/net7.0-windows/vTools.dll
 
 # User/IDE files
 .vs/
