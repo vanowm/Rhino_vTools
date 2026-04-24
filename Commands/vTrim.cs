@@ -430,6 +430,7 @@ public sealed class vTrim : Command
 
       var lastShiftState = ShiftPressed();
       preview.HoverExtendMode = lastShiftState;
+      System.Windows.Forms.Timer? shiftTimer = null;
 
       void OnIdleShiftRefresh(object? _sender, EventArgs _args)
       {
@@ -444,6 +445,20 @@ public sealed class vTrim : Command
 
       RhinoApp.Idle += OnIdleShiftRefresh;
 
+      try
+      {
+        shiftTimer = new System.Windows.Forms.Timer
+        {
+          Interval = 30
+        };
+        shiftTimer.Tick += OnIdleShiftRefresh;
+        shiftTimer.Start();
+      }
+      catch
+      {
+        shiftTimer = null;
+      }
+
       doc.Views.Redraw();
 
       GetResult result;
@@ -453,6 +468,33 @@ public sealed class vTrim : Command
       }
       finally
       {
+        if (shiftTimer != null)
+        {
+          try
+          {
+            shiftTimer.Stop();
+          }
+          catch
+          {
+          }
+
+          try
+          {
+            shiftTimer.Tick -= OnIdleShiftRefresh;
+          }
+          catch
+          {
+          }
+
+          try
+          {
+            shiftTimer.Dispose();
+          }
+          catch
+          {
+          }
+        }
+
         RhinoApp.Idle -= OnIdleShiftRefresh;
         hover.Enabled = false;
         preview.Enabled = false;
@@ -759,7 +801,7 @@ public sealed class vTrim : Command
   private static ScreenPickSample CurveBestScreenPick(Curve curve, Rhino.Display.RhinoViewport viewport, RhinoPoint2d vpPoint)
   {
     var lineSample = LineBestScreenPick(curve, viewport, vpPoint);
-    if (lineSample.Point.IsValid)
+    if (lineSample.Point.IsValid && lineSample.DistanceSquared.HasValue)
       return lineSample;
 
     if (!TryGetDomain(curve, out var d0, out var d1) || Math.Abs(d1 - d0) <= 1.0e-12)
