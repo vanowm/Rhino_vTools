@@ -205,8 +205,7 @@ internal static class PerpGumballMonitor
     else if (_idleSettle > 0)
       _idleSettle -= 1;
 
-    var perspectiveMode = IsPerspectiveMode(ctx.Viewport);
-    if (!perspectiveMode && !cameraChanged && !gripOrViewChanged && !gripPointChanged && _idleSettle <= 0)
+    if (!cameraChanged && !gripOrViewChanged && !gripPointChanged && _idleSettle <= 0)
       return;
 
     UpdateGumballForActiveGrip(doc, force: cameraChanged || _idleSettle > 0, ctx, allowCommandFallback: true);
@@ -313,15 +312,13 @@ internal static class PerpGumballMonitor
       return;
 
     var planeKey = PlaneKey(plane);
-    var isPerspectiveMode = IsPerspectiveMode(ctx.Viewport);
 
     if (!force &&
         string.Equals(_lastGripKey, ctx.GripKey, StringComparison.Ordinal) &&
         string.Equals(_lastViewId, ctx.ViewId, StringComparison.Ordinal) &&
         string.Equals(_lastPlaneKey, planeKey, StringComparison.Ordinal))
     {
-      if (!isPerspectiveMode || !NeedsPerspectiveReapply(doc, plane))
-        return;
+      return;
     }
 
     var applied = TrySetGumballFrame(ctx.Viewport, plane);
@@ -337,23 +334,6 @@ internal static class PerpGumballMonitor
     _lastGripPointKey = PointKey(ctx.Grip.CurrentLocation);
 
     ctx.View.Redraw();
-  }
-
-  private static bool NeedsPerspectiveReapply(RhinoDoc doc, Plane expectedPlane)
-  {
-    try
-    {
-      if (doc.GetGumballPlane(out var current) && current.IsValid)
-      {
-        return !string.Equals(PlaneKey(current), PlaneKey(expectedPlane), StringComparison.Ordinal);
-      }
-    }
-    catch
-    {
-    }
-
-    // If we cannot read current state, keep perspective resilient by retrying.
-    return true;
   }
 
   private static Plane ComputePlaneForGrip(RhinoViewport viewport, GripObject grip, GeometryBase geometry, double tolerance)
@@ -376,7 +356,7 @@ internal static class PerpGumballMonitor
     {
       var tangent = CurveTangentAtGrip(curve, grip, tolerance);
       if (tangent.IsTiny())
-        return ConstrainPerspectiveRotationToWorldZ(viewport, new Plane(origin, cameraRight, cameraUp));
+        return new Plane(origin, cameraRight, cameraUp);
 
       var z = viewDirection;
       var tangent2d = ProjectToPlane(tangent, z);
@@ -407,7 +387,7 @@ internal static class PerpGumballMonitor
       if (y.IsTiny())
         y = cameraUp;
 
-      return ConstrainPerspectiveRotationToWorldZ(viewport, new Plane(origin, x, y));
+      return new Plane(origin, x, y);
     }
 
     var hasNormal = TrySurfaceNormalAtPoint(geometry, origin, out var normal);
@@ -432,71 +412,7 @@ internal static class PerpGumballMonitor
     }
 
     yAxis = -yAxis;
-    return ConstrainPerspectiveRotationToWorldZ(viewport, new Plane(origin, xAxis, yAxis));
-  }
-
-  private static Plane ConstrainPerspectiveRotationToWorldZ(RhinoViewport viewport, Plane plane)
-  {
-    if (!IsPerspectiveMode(viewport))
-      return plane;
-
-    var viewDirection = Unit(viewport.CameraDirection);
-    if (viewDirection.IsTiny())
-      viewDirection = Unit(viewport.ConstructionPlane().ZAxis);
-    if (viewDirection.IsTiny())
-      viewDirection = Vector3d.ZAxis;
-
-    var worldZ = Vector3d.ZAxis;
-    var worldPlanX = ProjectToPlane(plane.XAxis, worldZ);
-    if (worldPlanX.IsTiny())
-    {
-      worldPlanX = ProjectToPlane(Unit(viewport.CameraX), worldZ);
-      if (worldPlanX.IsTiny())
-        worldPlanX = Vector3d.XAxis;
-    }
-
-    worldPlanX = Unit(worldPlanX);
-    var azimuth = Math.Atan2(worldPlanX.Y, worldPlanX.X);
-
-    var basisX = ProjectToPlane(Vector3d.XAxis, viewDirection);
-    if (basisX.IsTiny())
-      basisX = ProjectToPlane(Unit(viewport.CameraX), viewDirection);
-    if (basisX.IsTiny())
-      basisX = Vector3d.XAxis;
-    basisX = Unit(basisX);
-
-    var basisY = ProjectToPlane(Vector3d.YAxis, viewDirection);
-    if (basisY.IsTiny())
-      basisY = Unit(Vector3d.CrossProduct(viewDirection, basisX));
-    if (basisY.IsTiny())
-      basisY = Unit(viewport.CameraY);
-    if (basisY.IsTiny())
-      basisY = Vector3d.YAxis;
-    basisY = Unit(basisY);
-
-    var xAxis = Unit((Math.Cos(azimuth) * basisX) + (Math.Sin(azimuth) * basisY));
-    if (xAxis.IsTiny())
-      xAxis = basisX;
-
-    var yAxis = Unit(Vector3d.CrossProduct(viewDirection, xAxis));
-    if (yAxis.IsTiny())
-      yAxis = Unit(viewport.CameraY);
-    if (yAxis.IsTiny())
-      yAxis = Vector3d.YAxis;
-
-    var cameraUp = Unit(viewport.CameraY);
-    if (!cameraUp.IsTiny() && (yAxis * cameraUp) < 0)
-    {
-      xAxis = -xAxis;
-      yAxis = -yAxis;
-    }
-
-    return new Plane(plane.Origin, xAxis, yAxis);
-  }
-
-  private static bool IsPerspectiveMode(RhinoViewport viewport)
-  {
-    return viewport.IsPerspectiveProjection || IsPerspectiveNamedViewport(viewport);
+    return new Plane(origin, xAxis, yAxis);
   }
 
   private static Vector3d CurveTangentAtGrip(Curve curve, GripObject grip, double tolerance)
@@ -702,6 +618,13 @@ internal static class PerpGumballMonitor
 
   private static bool IsSupportedViewport(RhinoViewport viewport)
   {
+    if (viewport.IsPerspectiveProjection)
+      return false;
+
+    // Keep default gumball in Perspective viewport even when switched to Parallel.
+    if (viewport.IsParallelProjection && IsPerspectiveNamedViewport(viewport))
+      return false;
+
     return true;
   }
 

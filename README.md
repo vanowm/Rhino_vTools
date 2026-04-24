@@ -60,6 +60,16 @@ Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vTogglePerpGum
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
 
+### Command Flow Quick Links
+
+- [vCurveToSpline flow](#vcurvetospline-flow)
+- [vFitBox flow](#vfitbox-flow)
+- [vOrient2pt flow](#vorient2pt-flow)
+- [vOrient3pt flow](#vorient3pt-flow)
+- [vTogglePerpGumball flow](#vtoggleperpgumball-flow)
+- [vTrim flow](#vtrim-flow)
+- [vUzip flow](#vuzip-flow)
+
 ### vCurveToSpline flow
 
 1. Select source curves (preselect or postselect is supported).
@@ -82,34 +92,6 @@ Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vTogglePerpGum
 
 1. Confirm selection to generate the fit result.
 
-### vTrim flow
-
-1. Select cutting curves first, or press Enter to use `AutoClosest` mode.
-1. Click target curves to trim against the selected cutters, or against auto-detected cutters when in `AutoClosest` mode.
-1. Hold Shift before clicking to switch to extend mode for that click.
-1. Adjust options while picking targets.
-
-    - `Extend`: `Line` or `Smooth` extension style.
-    - `Join`: `Yes` or `No` for joining kept trim pieces.
-
-1. Preview highlights:
-
-    - Trim removal preview: red.
-    - Extend addition preview: green.
-
-Hidden keywords while picking targets:
-
-- `u` or `undo`: undo last vTrim action in the current command session.
-- `r` or `redo`: redo last undone vTrim action in the current command session.
-
-### vTogglePerpGumball flow
-
-1. Run `vTogglePerpGumball` to toggle monitor state (`ON`/`OFF`).
-1. While `ON`, select exactly one grip in the active view.
-1. The command auto-orients gumball so it stays perpendicular and view-stable without changing the viewport CPlane.
-1. In `Perspective` viewports, orientation is constrained to rotate around world `Z` axis.
-1. When turning `OFF`, gumball orientation is reset to Rhino default.
-
 ### vOrient2pt flow
 
 1. Select objects to orient.
@@ -129,6 +111,34 @@ Hidden keywords while picking targets:
 1. Pick source third point.
 1. Pick target third point.
 1. Toggle `Copy` option as needed during point picking.
+
+### vTogglePerpGumball flow
+
+1. Run `vTogglePerpGumball` to toggle monitor state (`ON`/`OFF`).
+1. While `ON`, select exactly one grip in a supported viewport.
+1. The command auto-orients gumball so it stays perpendicular and view-stable without changing the viewport CPlane.
+1. `Perspective` viewports keep default gumball, including when switched to `Parallel` projection.
+1. When turning `OFF`, gumball orientation is reset to Rhino default.
+
+### vTrim flow
+
+1. Select cutting curves first, or press Enter to use `AutoClosest` mode.
+1. Click target curves to trim against the selected cutters, or against auto-detected cutters when in `AutoClosest` mode.
+1. Hold Shift before clicking to switch to extend mode for that click.
+1. Adjust options while picking targets.
+
+    - `Extend`: `Line` or `Smooth` extension style.
+    - `Join`: `Yes` or `No` for joining kept trim pieces.
+
+1. Preview highlights:
+
+    - Trim removal preview: red.
+    - Extend addition preview: green.
+
+Hidden keywords while picking targets:
+
+- `u` or `undo`: undo last vTrim action in the current command session.
+- `r` or `redo`: redo last undone vTrim action in the current command session.
 
 ### vUzip flow
 
