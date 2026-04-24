@@ -356,7 +356,7 @@ internal static class PerpGumballMonitor
     {
       var tangent = CurveTangentAtGrip(curve, grip, tolerance);
       if (tangent.IsTiny())
-        return new Plane(origin, cameraRight, cameraUp);
+        return ConstrainPerspectiveRotationToWorldZ(viewport, new Plane(origin, cameraRight, cameraUp));
 
       var z = viewDirection;
       var tangent2d = ProjectToPlane(tangent, z);
@@ -387,7 +387,7 @@ internal static class PerpGumballMonitor
       if (y.IsTiny())
         y = cameraUp;
 
-      return new Plane(origin, x, y);
+      return ConstrainPerspectiveRotationToWorldZ(viewport, new Plane(origin, x, y));
     }
 
     var hasNormal = TrySurfaceNormalAtPoint(geometry, origin, out var normal);
@@ -412,7 +412,29 @@ internal static class PerpGumballMonitor
     }
 
     yAxis = -yAxis;
-    return new Plane(origin, xAxis, yAxis);
+    return ConstrainPerspectiveRotationToWorldZ(viewport, new Plane(origin, xAxis, yAxis));
+  }
+
+  private static Plane ConstrainPerspectiveRotationToWorldZ(RhinoViewport viewport, Plane plane)
+  {
+    if (!viewport.IsPerspectiveProjection && !IsPerspectiveNamedViewport(viewport))
+      return plane;
+
+    var zAxis = Vector3d.ZAxis;
+    var xAxis = ProjectToPlane(plane.XAxis, zAxis);
+    if (xAxis.IsTiny())
+    {
+      xAxis = ProjectToPlane(Unit(viewport.CameraX), zAxis);
+      if (xAxis.IsTiny())
+        xAxis = Vector3d.XAxis;
+    }
+
+    xAxis = Unit(xAxis);
+    var yAxis = Unit(Vector3d.CrossProduct(zAxis, xAxis));
+    if (yAxis.IsTiny())
+      yAxis = Vector3d.YAxis;
+
+    return new Plane(plane.Origin, xAxis, yAxis);
   }
 
   private static Vector3d CurveTangentAtGrip(Curve curve, GripObject grip, double tolerance)
@@ -618,13 +640,6 @@ internal static class PerpGumballMonitor
 
   private static bool IsSupportedViewport(RhinoViewport viewport)
   {
-    if (viewport.IsPerspectiveProjection)
-      return false;
-
-    // Keep default gumball in Perspective viewport even when switched to Parallel.
-    if (viewport.IsParallelProjection && IsPerspectiveNamedViewport(viewport))
-      return false;
-
     return true;
   }
 
