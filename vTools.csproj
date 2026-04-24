@@ -9,10 +9,10 @@
     <Title>vTools</Title>
     <RootNamespace>vTools</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>26.04.24.171217</Version>
-    <InformationalVersion>26.04.24.171217</InformationalVersion>
-    <AssemblyVersion>26.4.24.1712</AssemblyVersion>
-    <FileVersion>26.4.24.1712</FileVersion>
+    <Version>26.04.24.171457</Version>
+    <InformationalVersion>26.04.24.171457</InformationalVersion>
+    <AssemblyVersion>26.4.24.1714</AssemblyVersion>
+    <FileVersion>26.4.24.1714</FileVersion>
     <!-- Fail fast when output files are locked (no retry loop). -->
     <CopyRetryCount>0</CopyRetryCount>
     <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>
@@ -79,7 +79,7 @@
     </Exec>
 
     <Exec
-      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$repo='$(MSBuildProjectDirectory)'; $files=@(git -C $repo diff --cached --name-only); $names=New-Object System.Collections.Generic.List[string]; foreach($f in $files){$n=[System.IO.Path]::GetFileNameWithoutExtension($f); if([string]::IsNullOrWhiteSpace($n)){continue}; if(-not $names.Contains($n)){[void]$names.Add($n)}}; if($names.Count -eq 0){$summary='artifacts'} elseif($names.Count -le 4){$summary=($names -join ', ')} else {$summary=(($names[0..3] -join ', ') + ', +' + ($names.Count - 4))}; $msg='Release $(Version): ' + $summary; Set-Content -Path (Join-Path $repo '.git\\vtools-autocommit-message.txt') -Value $msg -NoNewline -Encoding utf8&quot;"
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$repo='$(MSBuildProjectDirectory)'; $lines=@(git -C $repo diff --cached --name-status -- .); $changes=New-Object System.Collections.Generic.List[object]; foreach($line in $lines){ if([string]::IsNullOrWhiteSpace($line)){continue}; $parts=$line -split '\t+',2; if($parts.Count -lt 2){continue}; $changes.Add([pscustomobject]@{Status=$parts[0]; Path=$parts[1]}) }; $cmdAdds=New-Object System.Collections.Generic.List[string]; $cmdMods=New-Object System.Collections.Generic.List[string]; $hasReadme=$false; $hasBuildCfg=$false; $hasDll=$false; foreach($c in $changes){ $p=($c.Path -replace '\\','/'); if($p -eq 'README.md'){$hasReadme=$true}; if($p -eq 'vTools.csproj' -or $p -eq 'Properties/AssemblyInfo.cs'){$hasBuildCfg=$true}; if($p -eq 'bin/Release/net7.0-windows/vTools.dll'){$hasDll=$true}; if($p -like 'Commands/*.cs'){ $n=[System.IO.Path]::GetFileNameWithoutExtension($p); if($n -like 'v*'){ if($c.Status -like 'A*'){ if(-not $cmdAdds.Contains($n)){[void]$cmdAdds.Add($n)} } else { if(-not $cmdMods.Contains($n)){[void]$cmdMods.Add($n)} } } } }; $parts=New-Object System.Collections.Generic.List[string]; if($cmdAdds.Count -eq 1){ $parts.Add('add ' + $cmdAdds[0] + ' command') } elseif($cmdAdds.Count -gt 1){ $parts.Add('add new commands') }; if($cmdMods.Count -eq 1){ $parts.Add('update ' + $cmdMods[0] + ' behavior') } elseif($cmdMods.Count -gt 1){ $parts.Add('update command behaviors') }; if($hasReadme){ $parts.Add('refresh docs') }; if($hasBuildCfg -and $parts.Count -eq 0){ $parts.Add('update build and version settings') }; if($hasDll -and $parts.Count -eq 0){ $parts.Add('publish release build') }; if($parts.Count -eq 0){ $parts.Add('apply project updates') }; $summary=($parts -join '; '); $msg='Release $(Version): ' + $summary; Set-Content -Path (Join-Path $repo '.git\\vtools-autocommit-message.txt') -Value $msg -NoNewline -Encoding utf8&quot;"
       IgnoreExitCode="true"
       Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionDllDiffExitCode)' != '0'">
       <Output TaskParameter="ExitCode" PropertyName="VersionCommitMessageExitCode" />
