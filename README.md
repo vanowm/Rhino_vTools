@@ -1,6 +1,6 @@
 # vTools
 
-vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, and trim/extend workflows.
+vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, and gumball workflows.
 
 ## What this project includes
 
@@ -10,6 +10,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - vFitBox
   - vOrient2pt
   - vOrient3pt
+  - vTogglePerpGumball
   - vTrim
   - vUzip
 - Shared command configuration file: vTools.config.json
@@ -34,18 +35,12 @@ Build behavior:
 1. Release builds fail fast if output files are locked (for example, if Rhino holds `vTools.dll`).
 2. After every successful Release build, a timestamped backup snapshot is created automatically.
 
-Manual compile commands:
+Compile command:
 
 1. Standard Release build:
 
 ```powershell
 dotnet build d:/github/rhino/vTools/vTools.csproj -c Release
-```
-
-1. Manual compile to an alternate output folder (when default output is locked):
-
-```powershell
-dotnet build d:/github/rhino/vTools/vTools.csproj -c Release -p:OutDir=d:/github/rhino/vTools/bin/Release/manual/
 ```
 
 ## Output
@@ -60,7 +55,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vTrim, vUzip.
+Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vTogglePerpGumball, vTrim, vUzip.
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -106,6 +101,13 @@ Hidden keywords while picking targets:
 
 - `u` or `undo`: undo last vTrim action in the current command session.
 - `r` or `redo`: redo last undone vTrim action in the current command session.
+
+### vTogglePerpGumball flow
+
+1. Run `vTogglePerpGumball` to toggle monitor state (`ON`/`OFF`).
+1. While `ON`, select exactly one grip in a non-perspective view.
+1. The command auto-orients gumball so it stays perpendicular and view-stable without changing the viewport CPlane.
+1. When turning `OFF`, gumball orientation is reset to Rhino default.
 
 ### vOrient2pt flow
 

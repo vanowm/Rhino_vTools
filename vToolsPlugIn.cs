@@ -41,7 +41,7 @@ public class vToolsPlugIn : PlugIn
   {
     var version = GetType().Assembly.GetName().Version?.ToString() ?? "unknown";
     TryLog($"OnLoad OK. Version={version}. Assembly={GetType().Assembly.Location}");
-    RhinoApp.WriteLine($"vTools v{version} loaded. Commands registered: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vTrim, vUzip");
+    RhinoApp.WriteLine($"vTools v{version} loaded. Commands registered: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vTogglePerpGumball, vTrim, vUzip");
     return LoadReturnCode.Success;
   }
 
