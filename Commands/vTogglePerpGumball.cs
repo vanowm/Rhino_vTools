@@ -370,17 +370,30 @@ internal static class PerpGumballMonitor
 
     if (geometry is Curve curve)
     {
-      var tangent = CurveTangentAtGrip(curve, grip, tolerance);
-      if (tangent.IsTiny())
-        return new Plane(origin, cameraRight, cameraUp);
-
       var z = viewDirection;
-      var tangent2d = ProjectToPlane(tangent, z);
-      if (tangent2d.IsTiny())
-        tangent2d = cameraRight;
-      tangent2d = Unit(tangent2d);
+      Vector3d perp2d;
 
-      var perp2d = Vector3d.CrossProduct(tangent2d, z);
+      // For off-curve grips, use the direction from grip point to its closest point on curve.
+      if (TryGripToCurvePerpendicularDirection(curve, origin, tolerance, out var gripToCurve))
+      {
+        perp2d = ProjectToPlane(gripToCurve, z);
+        if (perp2d.IsTiny())
+          perp2d = gripToCurve;
+      }
+      else
+      {
+        var tangent = CurveTangentAtGrip(curve, grip, tolerance);
+        if (tangent.IsTiny())
+          return new Plane(origin, cameraRight, cameraUp);
+
+        var tangent2d = ProjectToPlane(tangent, z);
+        if (tangent2d.IsTiny())
+          tangent2d = cameraRight;
+        tangent2d = Unit(tangent2d);
+
+        perp2d = Vector3d.CrossProduct(tangent2d, z);
+      }
+
       if (perp2d.IsTiny())
         perp2d = cameraUp;
       perp2d = Unit(perp2d);
@@ -429,6 +442,22 @@ internal static class PerpGumballMonitor
 
     yAxis = -yAxis;
     return new Plane(origin, xAxis, yAxis);
+  }
+
+  private static bool TryGripToCurvePerpendicularDirection(Curve curve, Point3d gripPoint, double tolerance, out Vector3d direction)
+  {
+    direction = Vector3d.Zero;
+
+    if (!curve.ClosestPoint(gripPoint, out var t))
+      return false;
+
+    var footPoint = curve.PointAt(t);
+    var toCurve = footPoint - gripPoint;
+    if (toCurve.Length <= tolerance)
+      return false;
+
+    direction = toCurve;
+    return true;
   }
 
   private static Vector3d CurveTangentAtGrip(Curve curve, GripObject grip, double tolerance)
