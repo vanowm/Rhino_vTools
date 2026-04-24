@@ -464,7 +464,7 @@ public class vUzip : Command
     {
       var tailOpt = new OptionDouble(tail, 0.0, 1e9);
       var go = new GetObject();
-      go.SetCommandPrompt("Select curve: Center of u-zip");
+      go.SetCommandPrompt("Select center curve of U-Zip");
       go.GeometryFilter = ObjectType.Curve;
       go.SubObjectSelect = false;
       go.EnablePreSelect(false, true);
@@ -1087,18 +1087,24 @@ public class vUzip : Command
     }
     else
     {
-      var trimmedOuter = TrimCurveEndsOutsideOuter(doc, source, outerBoundary, centerCurve);
-      if (trimmedOuter != null)
+      var splitOuter = source.Split(outParams) ?? Array.Empty<Curve>();
+      var classifiedOuter = splitOuter
+        .Where(c => c != null)
+        .Where(c => CurveInsideOuterBoundary(doc, c, outerBoundary, centerCurve))
+        .Select(c => c.DuplicateCurve())
+        .ToList();
+
+      if (classifiedOuter.Count > 0)
       {
-        afterOuter = new List<Curve> { trimmedOuter };
+        afterOuter = classifiedOuter;
       }
       else
       {
-        var split = source.Split(outParams) ?? Array.Empty<Curve>();
-        afterOuter = split.Where(c => c != null)
-          .Where(c => CurveInsideOuterBoundary(doc, c, outerBoundary, centerCurve))
-          .Select(c => c.DuplicateCurve())
-          .ToList();
+        var trimmedOuter = TrimCurveEndsOutsideOuter(doc, source, outerBoundary, centerCurve);
+        if (trimmedOuter != null && trimmedOuter.GetLength() > tol && !CurvesNearlySame(doc, trimmedOuter, source))
+          afterOuter = new List<Curve> { trimmedOuter };
+        else
+          afterOuter = new List<Curve>();
       }
     }
 
@@ -1892,7 +1898,7 @@ public class vUzip : Command
         var useEndpointSideKeep = !item.ObjectId.HasValue || !touchingIds.Contains(item.ObjectId.Value);
         var pieces = SplitAndFilterForBand(doc, source, insideBoundary, outsideBoundary, centerCurve, useEndpointSideKeep);
         if (pieces.Count == 0)
-          pieces.Add(source.DuplicateCurve());
+          continue;
 
         foreach (var piece in pieces)
         {
