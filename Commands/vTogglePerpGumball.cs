@@ -361,8 +361,9 @@ internal static class PerpGumballMonitor
   {
     debugData = OrientationDebugData.Empty;
 
-    var cameraRight = Unit(viewport.CameraX);
-    var cameraUp = Unit(viewport.CameraY);
+    var cameraFrame = GetCameraFramePlane(viewport);
+    var cameraRight = Unit(cameraFrame.XAxis);
+    var cameraUp = Unit(cameraFrame.YAxis);
 
     if (cameraRight.IsTiny())
       cameraRight = Unit(viewport.ConstructionPlane().XAxis);
@@ -390,7 +391,6 @@ internal static class PerpGumballMonitor
       // For off-curve grips, use the direction from grip point to its closest point on curve.
       if (TryGripToCurvePerpendicularDirection(curve, origin, tolerance, out var gripToCurve, out footPoint, out var footTangent))
       {
-        usedGripToCurve = true;
         hasFootPoint = true;
         hasCurveReference = true;
         curveReferencePoint = footPoint;
@@ -399,7 +399,21 @@ internal static class PerpGumballMonitor
 
         perp2d = ProjectToPlane(gripToCurve, z);
         if (perp2d.IsTiny())
-          perp2d = gripToCurve;
+        {
+          // If grip->curve projects to near-zero in this viewport, use local curve tangent to keep view-consistent orientation.
+          var tangent2d = ProjectToPlane(footTangent, z);
+          if (tangent2d.IsTiny())
+            tangent2d = cameraRight;
+          tangent2d = Unit(tangent2d);
+
+          basisDirection = tangent2d;
+          perp2d = Vector3d.CrossProduct(tangent2d, z);
+          usedGripToCurve = false;
+        }
+        else
+        {
+          usedGripToCurve = true;
+        }
       }
       else
       {
