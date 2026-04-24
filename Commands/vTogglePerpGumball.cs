@@ -383,12 +383,18 @@ internal static class PerpGumballMonitor
       var hasFootPoint = false;
       var footPoint = Point3d.Unset;
       var usedGripToCurve = false;
+      var hasCurveReference = false;
+      var curveReferencePoint = Point3d.Unset;
+      var curveReferenceTangent = Vector3d.Zero;
 
       // For off-curve grips, use the direction from grip point to its closest point on curve.
-      if (TryGripToCurvePerpendicularDirection(curve, origin, tolerance, out var gripToCurve, out footPoint))
+      if (TryGripToCurvePerpendicularDirection(curve, origin, tolerance, out var gripToCurve, out footPoint, out var footTangent))
       {
         usedGripToCurve = true;
         hasFootPoint = true;
+        hasCurveReference = true;
+        curveReferencePoint = footPoint;
+        curveReferenceTangent = footTangent;
         basisDirection = gripToCurve;
 
         perp2d = ProjectToPlane(gripToCurve, z);
@@ -401,7 +407,7 @@ internal static class PerpGumballMonitor
         if (tangent.IsTiny())
         {
           var fallback = new Plane(origin, cameraRight, cameraUp);
-          debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, usedGripToCurve, Vector3d.Zero, Vector3d.Zero, cameraRight, cameraUp, fallback, tolerance);
+          debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, hasCurveReference, curveReferencePoint, curveReferenceTangent, usedGripToCurve, Vector3d.Zero, Vector3d.Zero, cameraRight, cameraUp, fallback, tolerance);
           return fallback;
         }
 
@@ -409,6 +415,10 @@ internal static class PerpGumballMonitor
         if (tangent2d.IsTiny())
           tangent2d = cameraRight;
         tangent2d = Unit(tangent2d);
+
+        hasCurveReference = true;
+        curveReferencePoint = origin;
+        curveReferenceTangent = tangent;
         basisDirection = tangent2d;
 
         perp2d = Vector3d.CrossProduct(tangent2d, z);
@@ -437,7 +447,7 @@ internal static class PerpGumballMonitor
         y = cameraUp;
 
       var result = new Plane(origin, x, y);
-      debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, usedGripToCurve, basisDirection, perp2d, cameraRight, cameraUp, result, tolerance);
+      debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, hasCurveReference, curveReferencePoint, curveReferenceTangent, usedGripToCurve, basisDirection, perp2d, cameraRight, cameraUp, result, tolerance);
       return result;
     }
 
@@ -465,7 +475,7 @@ internal static class PerpGumballMonitor
 
     yAxis = -yAxis;
     var nonCurveResult = new Plane(origin, xAxis, yAxis);
-    debugData = BuildDebugData(viewId, origin, false, Point3d.Unset, false, basisNormal, yAxis, cameraRight, cameraUp, nonCurveResult, tolerance);
+    debugData = BuildDebugData(viewId, origin, false, Point3d.Unset, false, Point3d.Unset, Vector3d.Zero, false, basisNormal, yAxis, cameraRight, cameraUp, nonCurveResult, tolerance);
     return nonCurveResult;
   }
 
@@ -474,6 +484,9 @@ internal static class PerpGumballMonitor
     Point3d origin,
     bool hasFootPoint,
     Point3d footPoint,
+    bool hasCurveReference,
+    Point3d curveReferencePoint,
+    Vector3d curveReferenceTangent,
     bool usedGripToCurve,
     Vector3d basisDirection,
     Vector3d perpDirection,
@@ -497,6 +510,9 @@ internal static class PerpGumballMonitor
       origin: origin,
       hasFootPoint: hasFootPoint,
       footPoint: footPoint,
+      hasCurveReference: hasCurveReference,
+      curveReferencePoint: curveReferencePoint,
+      curveReferenceTangent: Unit(curveReferenceTangent),
       usedGripToCurve: usedGripToCurve,
       basisDirection: Unit(basisDirection),
       perpDirection: Unit(perpDirection),
@@ -506,10 +522,11 @@ internal static class PerpGumballMonitor
       drawScale: drawScale);
   }
 
-  private static bool TryGripToCurvePerpendicularDirection(Curve curve, Point3d gripPoint, double tolerance, out Vector3d direction, out Point3d footPoint)
+  private static bool TryGripToCurvePerpendicularDirection(Curve curve, Point3d gripPoint, double tolerance, out Vector3d direction, out Point3d footPoint, out Vector3d footTangent)
   {
     direction = Vector3d.Zero;
     footPoint = Point3d.Unset;
+    footTangent = Vector3d.Zero;
 
     if (!curve.ClosestPoint(gripPoint, out var t))
       return false;
@@ -520,6 +537,7 @@ internal static class PerpGumballMonitor
       return false;
 
     direction = toCurve;
+    footTangent = curve.TangentAt(t);
     return true;
   }
 
@@ -776,6 +794,23 @@ internal static class PerpGumballMonitor
     if (debug.HasFootPoint)
       e.Display.DrawLine(origin, debug.FootPoint, System.Drawing.Color.Gold, 2);
 
+    if (debug.HasCurveReference)
+    {
+      var tangentDirection = Unit(debug.CurveReferenceTangent);
+      if (!tangentDirection.IsTiny())
+      {
+        var tangentHalf = debug.DrawScale * 0.9;
+        e.Display.DrawLine(
+          debug.CurveReferencePoint - (tangentDirection * tangentHalf),
+          debug.CurveReferencePoint + (tangentDirection * tangentHalf),
+          System.Drawing.Color.Magenta,
+          2);
+      }
+
+      if (!debug.HasFootPoint)
+        DrawDebugVector(e, debug.CurveReferencePoint, debug.BasisDirection, debug.DrawScale, System.Drawing.Color.Gold);
+    }
+
     var basisColor = debug.UsedGripToCurve ? System.Drawing.Color.Orange : System.Drawing.Color.Cyan;
     DrawDebugVector(e, origin, debug.BasisDirection, debug.DrawScale, basisColor);
     DrawDebugVector(e, origin, debug.PerpDirection, debug.DrawScale, System.Drawing.Color.YellowGreen);
@@ -828,6 +863,9 @@ internal static class PerpGumballMonitor
       origin: Point3d.Unset,
       hasFootPoint: false,
       footPoint: Point3d.Unset,
+      hasCurveReference: false,
+      curveReferencePoint: Point3d.Unset,
+      curveReferenceTangent: Vector3d.Zero,
       usedGripToCurve: false,
       basisDirection: Vector3d.Zero,
       perpDirection: Vector3d.Zero,
@@ -842,6 +880,9 @@ internal static class PerpGumballMonitor
       Point3d origin,
       bool hasFootPoint,
       Point3d footPoint,
+      bool hasCurveReference,
+      Point3d curveReferencePoint,
+      Vector3d curveReferenceTangent,
       bool usedGripToCurve,
       Vector3d basisDirection,
       Vector3d perpDirection,
@@ -855,6 +896,9 @@ internal static class PerpGumballMonitor
       Origin = origin;
       HasFootPoint = hasFootPoint;
       FootPoint = footPoint;
+      HasCurveReference = hasCurveReference;
+      CurveReferencePoint = curveReferencePoint;
+      CurveReferenceTangent = curveReferenceTangent;
       UsedGripToCurve = usedGripToCurve;
       BasisDirection = basisDirection;
       PerpDirection = perpDirection;
@@ -869,6 +913,9 @@ internal static class PerpGumballMonitor
     public Point3d Origin { get; }
     public bool HasFootPoint { get; }
     public Point3d FootPoint { get; }
+    public bool HasCurveReference { get; }
+    public Point3d CurveReferencePoint { get; }
+    public Vector3d CurveReferenceTangent { get; }
     public bool UsedGripToCurve { get; }
     public Vector3d BasisDirection { get; }
     public Vector3d PerpDirection { get; }
