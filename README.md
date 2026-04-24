@@ -1,11 +1,16 @@
 # vTools
 
-vTools is a Rhino 8 plug-in project (C# / .NET 7) that currently provides the vUZIP command for generating multi-part zipper-style toolpath geometry from a selected center curve.
+vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper generation and orient workflows.
 
 ## What this project includes
 
 - Rhino plug-in entry point: vToolsPlugIn
-- Main command: vUZIP
+- Native commands:
+  - vCurveToSpline
+  - vFitBox
+  - vOrient2pt
+  - vOrient3pt
+  - vUzip
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
 
@@ -23,30 +28,103 @@ From this folder:
 dotnet build .\vTools.csproj -c Release
 ```
 
+Build behavior:
+
+1. Release builds fail fast if output files are locked (for example, if Rhino holds `vTools.dll`).
+2. After every successful Release build, a timestamped backup snapshot is created automatically.
+
+Manual compile commands:
+
+1. Standard Release build:
+
+```powershell
+dotnet build d:/github/rhino/vTools/vTools.csproj -c Release
+```
+
+1. Manual compile to an alternate output folder (when default output is locked):
+
+```powershell
+dotnet build d:/github/rhino/vTools/vTools.csproj -c Release -p:OutDir=d:/github/rhino/vTools/bin/Release/manual/
+```
+
 ## Output
 
 Release output is written to:
 
 - bin/Release/net7.0-windows/vTools.dll
 - bin/Release/net7.0-windows/vTools.config.json
+- Automatic backups: bin/Release/backups/YY.MM.DD.HHMMSS/
 
 ## Rhino usage
 
+All command options persist by default unless stated otherwise.
+
+Native commands: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vUzip.
+
 1. Load the plug-in assembly in Rhino.
-2. Run command vUZIP.
-3. Select the center curve.
-4. Adjust runtime options (label/tail) in the command prompt.
-5. Pick placement point for generated groups, or cancel placement to remove generated objects.
+1. Run one of the native commands.
+
+### vCurveToSpline flow
+
+1. Select source curves (preselect or postselect is supported).
+1. Set `Join` option.
+
+    - `None`: one spline per selected curve.
+    - `Connected`: one spline per connected curve island.
+    - `All`: one spline through all selected curves.
+
+1. Confirm to create interpolated curve output and select results.
+
+### vFitBox flow
+
+1. Select objects to fit.
+1. Adjust options in command line.
+
+    - `AngleStep`: sampling step in degrees and accepts direct numeric input during object picking.
+    - `Rotate`: applies final rotation to both fit box and selected objects, keeps the longest in-plane side horizontal, and prefers the equivalent orientation that avoids unnecessary 180-degree flips.
+    - `Fit`: optimize by `Height` or `Area`.
+
+1. Confirm selection to generate the fit result.
+
+### vOrient2pt flow
+
+1. Select objects to orient.
+1. Pick source first point.
+1. Pick target first point.
+1. Pick source second point.
+1. Pick target second point.
+1. Toggle `Copy` option as needed during point picking.
+
+### vOrient3pt flow
+
+1. Select objects to orient.
+1. Pick source first point.
+1. Pick target first point.
+1. Pick source second point.
+1. Pick target second point.
+1. Pick source third point.
+1. Pick target third point.
+1. Toggle `Copy` option as needed during point picking.
+
+### vUzip flow
+
+1. Select the center curve.
+1. Adjust runtime options in the command prompt.
+
+    - `Label`: text used when naming generated output.
+    - `Tail`: tail distance used when building end curves.
+
+1. Pick placement point for generated groups, or cancel placement to remove generated objects.
 
 ## Configuration
 
-The command reads and writes vTools.config.json next to the plug-in assembly. The active command section is vUZIP.
+The command reads and writes vTools.config.json next to the plug-in assembly. The active command section is vUzip.
 
 Example:
 
 ```json
 {
-  "vUZIP": {
+  "vUzip": {
     "label": "",
     "tail": 0.75,
     "layers": {
@@ -62,7 +140,6 @@ Example:
 ## Logging
 
 - Plug-in startup log: logs/vTools.log
-- Command run log: logs/vUzip.log
 
 The code resolves a project-local logs folder first and falls back to an assembly-local logs folder.
 

@@ -18,14 +18,14 @@ namespace vTools.Commands;
 /// Builds multi-part zipper-style geometry from a selected center curve and
 /// preselected helper curves, driven by the shared <c>vTools.config.json</c> file.
 /// </summary>
-public class vUZIPCommand : Command
+public class vUzip : Command
 {
   /// <summary>
   /// Rhino command name.
   /// </summary>
-  public override string EnglishName => "vUZIP";
+  public override string EnglishName => "vUzip";
 
-  // Shared config and default runtime values for vUZIP.
+  // Shared config and default runtime values for vUzip.
   private const string ToolsConfigFileName = "vTools.config.json";
   private const string DefaultLayerCutName = "CUT1";
   private const string DefaultLayerPlotName = "PLOT";
@@ -62,7 +62,7 @@ public class vUZIPCommand : Command
   }
 
   /// <summary>
-  /// Layer configuration block used by vUZIP.
+  /// Layer configuration block used by vUzip.
   /// </summary>
   private sealed class UZipLayersConfig
   {
@@ -72,7 +72,7 @@ public class vUZIPCommand : Command
   }
 
   /// <summary>
-  /// vUZIP section inside the shared tools configuration file.
+  /// vUzip section inside the shared tools configuration file.
   /// </summary>
   private sealed class UZipConfigSection
   {
@@ -90,7 +90,12 @@ public class vUZIPCommand : Command
   /// </summary>
   private sealed class ToolsConfigRoot
   {
-    public UZipConfigSection vUZIP { get; set; } = new();
+    public UZipConfigSection? vUzip { get; set; } = new();
+
+    // Backward compatibility for existing config files that still use the old section key.
+    [JsonPropertyName("vUZIP")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UZipConfigSection? LegacyVUZIP { get; set; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? AdditionalSections { get; set; }
@@ -123,102 +128,6 @@ public class vUZIPCommand : Command
   }
 
   /// <summary>
-  /// Lightweight file logger for a single command run.
-  /// </summary>
-  private static class Log
-  {
-    private static string _path = string.Empty;
-
-    /// <summary>
-    /// Resolves and stores the command log file path.
-    /// </summary>
-    public static void Configure()
-    {
-      try
-      {
-        var logDir = ResolveProjectLogsDir();
-        if (string.IsNullOrWhiteSpace(logDir))
-        {
-          _path = string.Empty;
-          return;
-        }
-
-        _path = Path.Combine(logDir, "vUzip.log");
-      }
-      catch
-      {
-        _path = string.Empty;
-      }
-    }
-
-    /// <summary>
-    /// Starts a new run section in the command log.
-    /// </summary>
-    public static void ResetRun()
-    {
-      if (string.IsNullOrWhiteSpace(_path))
-        return;
-
-      try
-      {
-        File.AppendAllText(_path, $"\n=== vUZIP run {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===\n");
-      }
-      catch
-      {
-      }
-    }
-
-    /// <summary>
-    /// Writes one timestamped log line.
-    /// </summary>
-    public static void Write(string message)
-    {
-      if (string.IsNullOrWhiteSpace(_path))
-        return;
-
-      try
-      {
-        File.AppendAllText(_path, $"[{DateTime.Now:HH:mm:ss}] {message}\n");
-      }
-      catch
-      {
-      }
-    }
-
-    /// <summary>
-    /// Resolves a project-local logs directory with assembly-directory fallback.
-    /// </summary>
-    private static string ResolveProjectLogsDir()
-    {
-      try
-      {
-        var asmDir = Path.GetDirectoryName(typeof(vUZIPCommand).Assembly.Location) ?? ".";
-        var dir = new DirectoryInfo(asmDir);
-
-        while (dir != null)
-        {
-          if (File.Exists(Path.Combine(dir.FullName, "vTools.csproj")))
-          {
-            var projectLogs = Path.Combine(dir.FullName, "logs");
-            Directory.CreateDirectory(projectLogs);
-            return projectLogs;
-          }
-
-          dir = dir.Parent;
-        }
-
-        var fallbackLogs = Path.Combine(asmDir, "logs");
-        Directory.CreateDirectory(fallbackLogs);
-        return fallbackLogs;
-      }
-      catch
-      {
-        return string.Empty;
-      }
-    }
-  }
-
-  /// <summary>
   /// Curve payload plus source metadata used during part construction.
   /// </summary>
   private sealed record CurveItem(Curve Curve, string LayerName, Guid? ObjectId);
@@ -234,7 +143,7 @@ public class vUZIPCommand : Command
   }
 
   /// <summary>
-  /// One generated part definition consumed by the vUZIP build pipeline.
+  /// One generated part definition consumed by the vUzip build pipeline.
   /// </summary>
   private sealed class PartSpec
   {
@@ -249,14 +158,11 @@ public class vUZIPCommand : Command
   }
 
   /// <summary>
-  /// Executes vUZIP: reads config, gathers inputs, builds parts, and updates config.
+  /// Executes vUzip: reads config, gathers inputs, builds parts, and updates config.
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     var configPath = GetToolsConfigPath();
-    Log.Configure();
-    Log.ResetRun();
-    Log.Write($"Run started. Config={configPath}");
 
     var toolsConfig = LoadToolsConfig(configPath);
     var uZipConfig = EnsureUZipSection(toolsConfig);
@@ -269,8 +175,7 @@ public class vUZIPCommand : Command
     uZipConfig.Label = defaultLabel;
     uZipConfig.Tail = defaultTail;
     uZipConfig.Layers = layerRuntime.ToConfig();
-    var initConfigSaveOk = SaveToolsConfig(configPath, toolsConfig);
-    Log.Write($"Loaded config label='{defaultLabel}' tail={defaultTail} initSave={initConfigSaveOk}");
+    SaveToolsConfig(configPath, toolsConfig);
 
     var preselected = doc.Objects.GetSelectedObjects(false, false)
       .Where(o => o != null)
@@ -280,10 +185,12 @@ public class vUZIPCommand : Command
     var selected = SelectCenterCurve(doc, defaultLabel, defaultTail);
     if (selected.CenterId == Guid.Empty)
     {
-      Log.Write("Center selection cancelled");
+      uZipConfig.Label = (selected.Label ?? DefaultLabel).Trim();
+      uZipConfig.Tail = Math.Max(0.0, selected.Tail);
+      uZipConfig.Layers = layerRuntime.ToConfig();
+      SaveToolsConfig(configPath, toolsConfig);
       return Result.Cancel;
     }
-    Log.Write($"Center selected={selected.CenterId} label='{selected.Label}' tail={selected.Tail}");
 
     var centerCurve = CurveFromId(doc, selected.CenterId);
     if (centerCurve == null)
@@ -294,13 +201,11 @@ public class vUZIPCommand : Command
 
     var touching = CollectPreselected(doc, selected.CenterId, centerCurve, preselected, requireTouch: true);
     var allPreselected = CollectPreselected(doc, selected.CenterId, centerCurve, preselected, requireTouch: false);
-    Log.Write($"Preselected count all={allPreselected.Count}, touching={touching.Count}");
 
     var plane = GetCurvePlane(centerCurve);
     var insideSign = SolveInsideSign(doc, centerCurve, plane);
 
     var (endCurves, endParentIds) = BuildEndCurves(doc, touching, centerCurve, plane, selected.Tail);
-    Log.Write($"End curves built count={endCurves.Count}");
     if (Math.Abs(selected.Tail) <= RhinoMath.ZeroTolerance && endParentIds.Count > 0)
     {
       allPreselected = allPreselected.Where(i => !i.ObjectId.HasValue || !endParentIds.Contains(i.ObjectId.Value)).ToList();
@@ -312,8 +217,7 @@ public class vUZIPCommand : Command
     uZipConfig.Parts = specs;
     if (specs.Count == 0)
     {
-      RhinoApp.WriteLine("vUZIP: no part definitions found in config.");
-      Log.Write("No part definitions found in config");
+      RhinoApp.WriteLine("vUzip: no part definitions found in config.");
       return Result.Failure;
     }
     var stamp = DateTime.Now.ToString("yyMMddHHmmss", CultureInfo.InvariantCulture);
@@ -328,7 +232,6 @@ public class vUZIPCommand : Command
     {
       for (var i = 0; i < specs.Count; i++)
       {
-        Log.Write($"Building part {i + 1}:{specs[i].Name}");
         var (partIds, groupName) = MakePart(
           doc,
           i + 1,
@@ -344,7 +247,6 @@ public class vUZIPCommand : Command
           specs[i]);
 
         allPartObjectIds.Add(partIds);
-        Log.Write($"Part {i + 1} objects={partIds.Count} group='{groupName ?? ""}'");
         if (!string.IsNullOrWhiteSpace(groupName))
           createdGroups.Add(groupName);
       }
@@ -358,19 +260,17 @@ public class vUZIPCommand : Command
     }
 
     watch.Stop();
-    RhinoApp.WriteLine($"vUZIP built in {watch.Elapsed.TotalSeconds:F3}s");
+    RhinoApp.WriteLine($"vUzip built in {watch.Elapsed.TotalSeconds:F3}s");
 
     var anchorGroup = createdGroups.Count > 0 ? createdGroups[0] : null;
     PlaceGroupsWithPickOrDelete(doc, createdGroups, anchorGroup);
-    Log.Write($"Placement done groups={createdGroups.Count}");
 
     uZipConfig.Label = (selected.Label ?? DefaultLabel).Trim();
     uZipConfig.Tail = Math.Max(0.0, selected.Tail);
     uZipConfig.Layers = layerRuntime.ToConfig();
     uZipConfig.Parts = specs;
 
-    var saveOk = SaveToolsConfig(configPath, toolsConfig);
-    Log.Write($"Saved config ok={saveOk} label='{uZipConfig.Label}' tail={uZipConfig.Tail}");
+    SaveToolsConfig(configPath, toolsConfig);
     doc.Views.Redraw();
     return Result.Success;
   }
@@ -380,7 +280,7 @@ public class vUZIPCommand : Command
   /// </summary>
   private static string GetPluginDataDirectory()
   {
-    var pluginDir = Path.GetDirectoryName(typeof(vUZIPCommand).Assembly.Location) ?? string.Empty;
+    var pluginDir = Path.GetDirectoryName(typeof(vUzip).Assembly.Location) ?? string.Empty;
     if (string.IsNullOrWhiteSpace(pluginDir))
       pluginDir = ".";
 
@@ -446,14 +346,14 @@ public class vUZIPCommand : Command
   }
 
   /// <summary>
-  /// Creates a default tools configuration document with vUZIP defaults.
+  /// Creates a default tools configuration document with vUzip defaults.
   /// </summary>
   private static ToolsConfigRoot CreateDefaultToolsConfigRoot()
   {
     var layers = NormalizeLayerRuntime(null);
     return new ToolsConfigRoot
     {
-      vUZIP = new UZipConfigSection
+      vUzip = new UZipConfigSection
       {
         Label = DefaultLabel,
         Tail = DefaultTail,
@@ -464,14 +364,16 @@ public class vUZIPCommand : Command
   }
 
   /// <summary>
-  /// Ensures the vUZIP section exists and is normalized for safe runtime use.
+  /// Ensures the vUzip section exists and is normalized for safe runtime use.
   /// </summary>
   private static UZipConfigSection EnsureUZipSection(ToolsConfigRoot root)
   {
-    if (root.vUZIP == null)
-      root.vUZIP = new UZipConfigSection();
+    if (root.vUzip == null)
+      root.vUzip = root.LegacyVUZIP ?? new UZipConfigSection();
 
-    var section = root.vUZIP;
+    root.LegacyVUZIP = null;
+
+    var section = root.vUzip!;
     section.Label = (section.Label ?? DefaultLabel).Trim();
     section.Tail = Math.Max(0.0, section.Tail);
 
