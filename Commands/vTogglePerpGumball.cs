@@ -790,21 +790,46 @@ internal static class PerpGumballMonitor
       return;
 
     var origin = debug.Origin;
+    var footDistance = debug.HasFootPoint ? origin.DistanceTo(debug.FootPoint) : 0.0;
 
     if (debug.HasFootPoint)
-      e.Display.DrawLine(origin, debug.FootPoint, System.Drawing.Color.Gold, 2);
+    {
+      // Raw grip-to-curve vector actually used as off-curve basis candidate.
+      e.Display.DrawLine(origin, debug.FootPoint, System.Drawing.Color.DodgerBlue, 3);
+
+      // Projected direction used for screen-space orientation solve (same length for easy comparison).
+      if (footDistance > RhinoMath.ZeroTolerance)
+        DrawDebugVector(e, origin, debug.PerpDirection, footDistance, System.Drawing.Color.Yellow);
+    }
 
     if (debug.HasCurveReference)
     {
       var tangentDirection = Unit(debug.CurveReferenceTangent);
       if (!tangentDirection.IsTiny())
       {
-        var tangentHalf = debug.DrawScale * 0.9;
+        var tangentHalf = Math.Max(debug.DrawScale * 0.9, footDistance * 0.75);
         e.Display.DrawLine(
           debug.CurveReferencePoint - (tangentDirection * tangentHalf),
           debug.CurveReferencePoint + (tangentDirection * tangentHalf),
           System.Drawing.Color.Magenta,
           2);
+
+        if (debug.HasFootPoint && footDistance > RhinoMath.ZeroTolerance)
+        {
+          var towardGrip = Unit(origin - debug.FootPoint);
+          if (!towardGrip.IsTiny())
+          {
+            var markerSize = Math.Max(footDistance * 0.12, debug.DrawScale * 0.1);
+            var p0 = debug.FootPoint;
+            var p1 = p0 + (tangentDirection * markerSize);
+            var p2 = p1 + (towardGrip * markerSize);
+            var p3 = p0 + (towardGrip * markerSize);
+
+            e.Display.DrawLine(p0, p1, System.Drawing.Color.White, 2);
+            e.Display.DrawLine(p1, p2, System.Drawing.Color.White, 2);
+            e.Display.DrawLine(p2, p3, System.Drawing.Color.White, 2);
+          }
+        }
       }
 
       if (!debug.HasFootPoint)
