@@ -728,19 +728,15 @@ public class vUzip : Command
     IReadOnlyList<CurveItem> items,
     Curve centerCurve,
     bool forStart,
-    double tolerance,
-    HashSet<Guid>? excludedObjectIds = null)
+    double tolerance)
   {
     CurveItem? best = null;
-    var bestSideDist = double.PositiveInfinity;
     var endPoint = forStart ? centerCurve.PointAtStart : centerCurve.PointAtEnd;
-    var tieDistance = double.PositiveInfinity;
+    var bestEndDist = double.PositiveInfinity;
+    var tieSideDist = double.PositiveInfinity;
 
     foreach (var item in items)
     {
-      if (excludedObjectIds != null && item.ObjectId.HasValue && excludedObjectIds.Contains(item.ObjectId.Value))
-        continue;
-
       var centerParams = UniqueParams(IntersectionParams(doc, centerCurve, item.Curve), tolerance);
       if (centerParams.Count == 0)
         continue;
@@ -761,12 +757,12 @@ public class vUzip : Command
 
       var itemEndDist = ClosestPointDistance(item.Curve, endPoint);
       if (best == null
-          || itemBest < bestSideDist - tolerance
-          || (Math.Abs(itemBest - bestSideDist) <= tolerance && itemEndDist < tieDistance - tolerance))
+          || itemEndDist < bestEndDist - tolerance
+          || (Math.Abs(itemEndDist - bestEndDist) <= tolerance && itemBest < tieSideDist - tolerance))
       {
         best = item;
-        bestSideDist = itemBest;
-        tieDistance = itemEndDist;
+        bestEndDist = itemEndDist;
+        tieSideDist = itemBest;
       }
     }
 
@@ -788,7 +784,6 @@ public class vUzip : Command
     var centerMid = CurveMidpoint(centerCurve);
     var tol = doc.ModelAbsoluteTolerance;
     var endSources = new List<(CurveItem Item, Point3d EndPoint)>();
-    var usedObjectIds = new HashSet<Guid>();
 
     var startEndPoint = centerCurve.PointAtStart;
     var endEndPoint = centerCurve.PointAtEnd;
@@ -797,14 +792,10 @@ public class vUzip : Command
     if (start != null)
     {
       endSources.Add((start, startEndPoint));
-      if (start.ObjectId.HasValue)
-        usedObjectIds.Add(start.ObjectId.Value);
     }
 
-    // Choose end cap independently. Prefer a different source curve when available.
-    var end = SelectEndCapCurve(doc, preselected, centerCurve, forStart: false, tol, usedObjectIds);
-    if (end == null)
-      end = SelectEndCapCurve(doc, preselected, centerCurve, forStart: false, tol);
+    // Choose end cap independently from start selection.
+    var end = SelectEndCapCurve(doc, preselected, centerCurve, forStart: false, tol);
 
     if (end != null)
       endSources.Add((end, endEndPoint));
