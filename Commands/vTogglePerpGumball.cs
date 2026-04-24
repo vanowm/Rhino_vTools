@@ -428,23 +428,24 @@ internal static class PerpGumballMonitor
         perp2d = cameraUp;
       perp2d = Unit(perp2d);
 
-      var px = perp2d * cameraRight;
-      var py = perp2d * cameraUp;
-      var perpDeg = RadToDeg(Math.Atan2(py, px));
+      // Force the curve branch to use the computed perpendicular as Y axis.
+      var y = perp2d;
+      var x = Unit(Vector3d.CrossProduct(y, z));
+      if (x.IsTiny())
+        x = cameraRight;
+      if (x.IsTiny())
+        x = Vector3d.XAxis;
 
-      var rotX = Fold180(perpDeg);
-      var rotY = Fold180(perpDeg - 90.0);
-
-      var rotDeg = Math.Abs(rotX) < Math.Abs(rotY)
-        ? rotX
-        : (Math.Abs(rotY) < Math.Abs(rotX) ? rotY : rotY);
-
-      var angle = DegToRad(rotDeg);
-
-      var x = Unit((Math.Cos(angle) * cameraRight) + (Math.Sin(angle) * cameraUp));
-      var y = Unit((-Math.Sin(angle) * cameraRight) + (Math.Cos(angle) * cameraUp));
+      y = Unit(Vector3d.CrossProduct(z, x));
       if (y.IsTiny())
-        y = cameraUp;
+        y = perp2d;
+
+      // Keep Y aligned with the requested perpendicular direction.
+      if ((y * perp2d) < 0)
+      {
+        x = -x;
+        y = -y;
+      }
 
       var result = new Plane(origin, x, y);
       debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, hasCurveReference, curveReferencePoint, curveReferenceTangent, usedGripToCurve, basisDirection, perp2d, cameraRight, cameraUp, result, tolerance);
@@ -982,25 +983,6 @@ internal static class PerpGumballMonitor
   private static Vector3d ProjectToPlane(Vector3d vector, Vector3d zAxis)
   {
     return vector - ((vector * zAxis) * zAxis);
-  }
-
-  private static double Fold180(double angle)
-  {
-    if (angle > 90.0)
-      return angle - 180.0;
-    if (angle <= -90.0)
-      return angle + 180.0;
-    return angle;
-  }
-
-  private static double DegToRad(double degrees)
-  {
-    return degrees * (Math.PI / 180.0);
-  }
-
-  private static double RadToDeg(double radians)
-  {
-    return radians * (180.0 / Math.PI);
   }
 
   private static string PlaneKey(Plane plane)
