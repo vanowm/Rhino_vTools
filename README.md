@@ -106,9 +106,8 @@ Hidden keywords while picking targets:
 
 1. Run `vTogglePerpGumball` to toggle monitor state (`ON`/`OFF`).
 1. While `ON`, select exactly one grip in a non-perspective view.
-1. The command auto-orients gumball only in the focused supported viewport so it stays perpendicular and view-stable without changing the viewport CPlane.
+1. The command auto-orients gumball so it stays perpendicular and view-stable without changing the viewport CPlane.
 1. `Perspective` viewports keep default gumball even when switched to `Parallel` projection.
-1. Unsupported contexts reset gumball to Rhino default.
 1. When turning `OFF`, gumball orientation is reset to Rhino default.
 
 ### vOrient2pt flow
