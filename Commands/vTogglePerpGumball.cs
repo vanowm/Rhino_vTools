@@ -58,6 +58,7 @@ internal static class PerpGumballMonitor
   private static string? _lastPlaneKey;
   private static string? _lastCameraKey;
   private static string? _lastGripPointKey;
+  private static bool _hasCustomFrameApplied;
 
   private static int? _lastIdleTick;
   private static int _idleSettle;
@@ -87,7 +88,7 @@ internal static class PerpGumballMonitor
     ClearCache();
     _enabled = true;
 
-    UpdateGumballForActiveGrip(doc, force: true, allowCommandFallback: true);
+    UpdateGumballForActiveGrip(doc, force: true, allowCommandFallback: false);
     doc.Views.Redraw();
   }
 
@@ -99,7 +100,7 @@ internal static class PerpGumballMonitor
     _enabled = false;
     DetachHandlers();
     DetachBadge(doc);
-    ResetGumballDefault(doc);
+    EnsureDefaultGumball(doc);
     ClearCache();
     doc.Views.Redraw();
   }
@@ -113,6 +114,7 @@ internal static class PerpGumballMonitor
     _lastGripPointKey = null;
     _lastIdleTick = null;
     _idleSettle = 0;
+    _hasCustomFrameApplied = false;
   }
 
   private static void AttachHandlers()
@@ -151,7 +153,7 @@ internal static class PerpGumballMonitor
 
     var doc = RhinoDoc.ActiveDoc;
     if (doc != null)
-      UpdateGumballForActiveGrip(doc, force: false, allowCommandFallback: true);
+      UpdateGumballForActiveGrip(doc, force: false, allowCommandFallback: false);
   }
 
   private static void OnDeselect(object? sender, RhinoObjectSelectionEventArgs e)
@@ -161,7 +163,7 @@ internal static class PerpGumballMonitor
 
     var doc = RhinoDoc.ActiveDoc;
     if (doc != null)
-      UpdateGumballForActiveGrip(doc, force: false, allowCommandFallback: true);
+      UpdateGumballForActiveGrip(doc, force: false, allowCommandFallback: false);
   }
 
   private static void OnIdle(object? sender, EventArgs e)
@@ -187,7 +189,10 @@ internal static class PerpGumballMonitor
       return;
 
     if (!TryGetActiveGripContext(doc, out var ctx))
+    {
+      EnsureDefaultGumball(doc);
       return;
+    }
 
     var cameraKey = CameraKey(ctx.Viewport);
     var cameraChanged = !string.Equals(cameraKey, _lastCameraKey, StringComparison.Ordinal);
@@ -208,7 +213,7 @@ internal static class PerpGumballMonitor
     if (!cameraChanged && !gripOrViewChanged && !gripPointChanged && _idleSettle <= 0)
       return;
 
-    UpdateGumballForActiveGrip(doc, force: cameraChanged || _idleSettle > 0, ctx, allowCommandFallback: true);
+    UpdateGumballForActiveGrip(doc, force: cameraChanged || _idleSettle > 0, ctx, allowCommandFallback: false);
   }
 
   private static bool IsCommandRunning(RhinoDoc doc)
@@ -258,7 +263,7 @@ internal static class PerpGumballMonitor
       return false;
 
     var viewport = view.ActiveViewport;
-    if (viewport == null || viewport.IsPerspectiveProjection)
+    if (viewport == null || !IsSupportedViewport(viewport))
       return false;
 
     var gripKey = string.Create(
@@ -297,7 +302,10 @@ internal static class PerpGumballMonitor
   private static void UpdateGumballForActiveGrip(RhinoDoc doc, bool force, bool allowCommandFallback)
   {
     if (!TryGetActiveGripContext(doc, out var ctx))
+    {
+      EnsureDefaultGumball(doc);
       return;
+    }
 
     UpdateGumballForActiveGrip(doc, force, ctx, allowCommandFallback);
   }
@@ -326,12 +334,16 @@ internal static class PerpGumballMonitor
       applied = RelocateGumballByCommand(plane);
 
     if (!applied)
+    {
+      EnsureDefaultGumball(doc);
       return;
+    }
 
     _lastGripKey = ctx.GripKey;
     _lastViewId = ctx.ViewId;
     _lastPlaneKey = planeKey;
     _lastGripPointKey = PointKey(ctx.Grip.CurrentLocation);
+    _hasCustomFrameApplied = true;
 
     ctx.View.Redraw();
   }
@@ -606,7 +618,7 @@ internal static class PerpGumballMonitor
       return false;
 
     var activeViewport = activeView.ActiveViewport;
-    if (activeViewport == null || activeViewport.IsPerspectiveProjection)
+    if (activeViewport == null || !IsSupportedViewport(activeViewport))
       return false;
 
     var drawViewport = e.Viewport;
@@ -614,6 +626,44 @@ internal static class PerpGumballMonitor
       return false;
 
     return TryGetActiveGripContext(doc, out _);
+  }
+
+  private static bool IsSupportedViewport(RhinoViewport viewport)
+  {
+    if (viewport.IsPerspectiveProjection)
+      return false;
+
+    // Keep default gumball in Perspective viewport even when switched to Parallel.
+    if (viewport.IsParallelProjection && IsPerspectiveNamedViewport(viewport))
+      return false;
+
+    return true;
+  }
+
+  private static bool IsPerspectiveNamedViewport(RhinoViewport viewport)
+  {
+    try
+    {
+      var name = viewport.Name ?? string.Empty;
+      return name.IndexOf("perspective", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+    catch
+    {
+      return false;
+    }
+  }
+
+  private static void EnsureDefaultGumball(RhinoDoc doc)
+  {
+    if (!_hasCustomFrameApplied)
+      return;
+
+    ResetGumballDefault(doc);
+    _hasCustomFrameApplied = false;
+    _lastGripKey = null;
+    _lastViewId = null;
+    _lastPlaneKey = null;
+    _lastGripPointKey = null;
   }
 
   private static void DrawBadge(DrawEventArgs e)
