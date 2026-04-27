@@ -442,7 +442,7 @@ internal static class PerpGumballMonitor
         perp2d = cameraUp;
       perp2d = Unit(perp2d);
 
-      var result = BuildCurvePerpendicularPlane(origin, z, perp2d, cameraRight, cameraUp, out var perpendicularOnXAxis);
+      var result = BuildCurvePerpendicularPlane(origin, perp2d, cameraRight, cameraUp, out var perpendicularOnXAxis);
       debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, hasCurveReference, curveReferencePoint, curveReferenceTangent, usedGripToCurve, basisDirection, perp2d, cameraRight, cameraUp, result, tolerance, perpendicularOnXAxis);
       return result;
     }
@@ -477,7 +477,6 @@ internal static class PerpGumballMonitor
 
   private static Plane BuildCurvePerpendicularPlane(
     Point3d origin,
-    Vector3d viewDirection,
     Vector3d perpendicularDirection,
     Vector3d cameraRight,
     Vector3d cameraUp,
@@ -485,59 +484,49 @@ internal static class PerpGumballMonitor
   {
     perpendicularOnXAxis = false;
 
-    var z = Unit(viewDirection);
+    var right = Unit(cameraRight);
+    var up = Unit(cameraUp);
     var perp = Unit(perpendicularDirection);
-    if (z.IsTiny() || perp.IsTiny())
+    if (right.IsTiny() || up.IsTiny() || perp.IsTiny())
       return new Plane(origin, cameraRight, cameraUp);
 
-    // Candidate A: X axis is the perpendicular direction.
-    var ax = perp;
-    var ay = Unit(Vector3d.CrossProduct(z, ax));
-    if (ay.IsTiny())
-      ay = Unit(ProjectToPlane(cameraUp, z));
-    if (ay.IsTiny())
-      ay = cameraUp;
-    if ((ax * cameraRight) < 0)
-    {
-      ax = -ax;
-      ay = -ay;
-    }
+    // Match Python preference logic exactly:
+    // choose the branch with smaller absolute rotation,
+    // and prefer the Y-locked branch on exact ties.
+    var px = perp * right;
+    var py = perp * up;
+    var perpDeg = RadToDeg(Math.Atan2(py, px));
 
-    // Candidate B: Y axis is the perpendicular direction.
-    var by = perp;
-    var bx = Unit(Vector3d.CrossProduct(by, z));
-    if (bx.IsTiny())
-      bx = Unit(ProjectToPlane(cameraRight, z));
-    if (bx.IsTiny())
-      bx = cameraRight;
-    if ((by * cameraRight) < 0)
-    {
-      bx = -bx;
-      by = -by;
-    }
+    var rotX = Fold180(perpDeg);
+    var rotY = Fold180(perpDeg - 90.0);
 
-    var eps = RhinoMath.SqrtEpsilon;
-    var aRight = (ax * cameraRight) >= -eps && (ay * cameraRight) >= -eps;
-    var bRight = (bx * cameraRight) >= -eps && (by * cameraRight) >= -eps;
-
-    if (aRight && !bRight)
+    double rotDeg;
+    if (Math.Abs(rotX) < Math.Abs(rotY))
     {
+      rotDeg = rotX;
       perpendicularOnXAxis = true;
-      return new Plane(origin, ax, ay);
     }
-
-    if (bRight && !aRight)
-      return new Plane(origin, bx, by);
-
-    var scoreA = (ax * cameraRight) + (ay * cameraRight);
-    var scoreB = (bx * cameraRight) + (by * cameraRight);
-    if (scoreA > scoreB + eps)
+    else if (Math.Abs(rotY) < Math.Abs(rotX))
     {
-      perpendicularOnXAxis = true;
-      return new Plane(origin, ax, ay);
+      rotDeg = rotY;
+      perpendicularOnXAxis = false;
+    }
+    else
+    {
+      rotDeg = rotY;
+      perpendicularOnXAxis = false;
     }
 
-    return new Plane(origin, bx, by);
+    var angle = DegToRad(rotDeg);
+
+    var x = Unit((Math.Cos(angle) * right) + (Math.Sin(angle) * up));
+    var y = Unit((-Math.Sin(angle) * right) + (Math.Cos(angle) * up));
+    if (x.IsTiny())
+      x = right;
+    if (y.IsTiny())
+      y = up;
+
+    return new Plane(origin, x, y);
   }
 
   private static OrientationDebugData BuildDebugData(
@@ -1057,6 +1046,25 @@ internal static class PerpGumballMonitor
   private static Vector3d ProjectToPlane(Vector3d vector, Vector3d zAxis)
   {
     return vector - ((vector * zAxis) * zAxis);
+  }
+
+  private static double Fold180(double angle)
+  {
+    if (angle > 90.0)
+      return angle - 180.0;
+    if (angle <= -90.0)
+      return angle + 180.0;
+    return angle;
+  }
+
+  private static double DegToRad(double degrees)
+  {
+    return degrees * (Math.PI / 180.0);
+  }
+
+  private static double RadToDeg(double radians)
+  {
+    return radians * (180.0 / Math.PI);
   }
 
   private static string PlaneKey(Plane plane)
