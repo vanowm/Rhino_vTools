@@ -2355,17 +2355,29 @@ public sealed class vTrim : Command
     double extensionDistance,
     bool extendAsLine,
     IReadOnlyCollection<Guid>? candidateIds,
+    bool strictValidation,
     bool allowLengthFallback)
   {
     var style = extendAsLine ? CurveExtensionStyle.Line : CurveExtensionStyle.Smooth;
     var drivers = ExtendDriverCurves(doc, targetObj.Id, candidateIds);
+
+    Curve? MaybeValidate(Curve? candidate)
+    {
+      if (candidate == null)
+        return null;
+
+      if (!strictValidation)
+        return candidate;
+
+      return ValidateExtendedCandidate(doc, candidate, anchor, movingEnd, drivers);
+    }
 
     if (drivers.Count > 0)
     {
       try
       {
         var byBoundary = targetCurve.Extend(movingEnd, style, drivers.ToArray());
-        var validatedBoundary = ValidateExtendedCandidate(doc, byBoundary, anchor, movingEnd, drivers);
+        var validatedBoundary = MaybeValidate(byBoundary);
         if (validatedBoundary != null)
           return validatedBoundary;
       }
@@ -2379,7 +2391,7 @@ public sealed class vTrim : Command
       try
       {
         var byLength = targetCurve.Extend(movingEnd, extensionDistance, style);
-        var validatedByLength = ValidateExtendedCandidate(doc, byLength, anchor, movingEnd, drivers);
+        var validatedByLength = MaybeValidate(byLength);
         if (validatedByLength != null)
           return validatedByLength;
       }
@@ -2392,7 +2404,7 @@ public sealed class vTrim : Command
       {
         var extra = Math.Max(extensionDistance, doc.ModelAbsoluteTolerance * 2.0);
         var byLength = targetCurve.Extend(movingEnd, extra, CurveExtensionStyle.Line);
-        var validatedFallback = ValidateExtendedCandidate(doc, byLength, anchor, movingEnd, drivers);
+        var validatedFallback = MaybeValidate(byLength);
         if (validatedFallback != null)
           return validatedFallback;
       }
@@ -2434,6 +2446,21 @@ public sealed class vTrim : Command
 
       if (boundaryExtended != null)
         return ExtractAddedExtensionPiece(doc, boundaryExtended, selectedAnchor, selectedEnd);
+
+      var alternateEnd = selectedEnd == CurveEnd.Start ? CurveEnd.End : CurveEnd.Start;
+      var alternateAnchor = alternateEnd == CurveEnd.Start ? targetCurve.PointAtStart : targetCurve.PointAtEnd;
+      var alternateExtended = TryBoundaryExtendToSelectedCutters(
+        doc,
+        targetObj,
+        targetCurve,
+        alternateEnd,
+        alternateAnchor,
+        extendAsLine,
+        candidateIds,
+        strictValidation: false);
+
+      if (alternateExtended != null)
+        return ExtractAddedExtensionPiece(doc, alternateExtended, alternateAnchor, alternateEnd);
     }
 
     if (!TryGetExtendAnchorAndDirection(targetCurve, pickPoint, out var movingEnd, out var anchor, out var direction))
@@ -2458,6 +2485,7 @@ public sealed class vTrim : Command
       extensionDistance,
       extendAsLine,
       candidateIds,
+      strictValidation: autoMode,
       allowLengthFallback: hasForwardHit);
     if (extended == null)
       return null;
@@ -2516,6 +2544,30 @@ public sealed class vTrim : Command
         actionRecord = BuildActionRecord(doc, beforeTarget, targetObj.Id, null);
         return true;
       }
+
+      var alternateEnd = selectedEnd == CurveEnd.Start ? CurveEnd.End : CurveEnd.Start;
+      var alternateAnchor = alternateEnd == CurveEnd.Start ? targetCurve.PointAtStart : targetCurve.PointAtEnd;
+      var alternateExtended = TryBoundaryExtendToSelectedCutters(
+        doc,
+        targetObj,
+        targetCurve,
+        alternateEnd,
+        alternateAnchor,
+        extendAsLine,
+        candidateIds,
+        strictValidation: false);
+
+      if (alternateExtended != null)
+      {
+        if (!doc.Objects.Replace(targetObj.Id, alternateExtended))
+        {
+          RhinoApp.WriteLine("vTrim: failed to replace target curve.");
+          return false;
+        }
+
+        actionRecord = BuildActionRecord(doc, beforeTarget, targetObj.Id, null);
+        return true;
+      }
     }
 
     if (!TryGetExtendAnchorAndDirection(targetCurve, pickPoint, out var movingEnd, out var anchor, out var direction))
@@ -2546,6 +2598,7 @@ public sealed class vTrim : Command
       extensionDistance,
       extendAsLine,
       candidateIds,
+      strictValidation: autoMode,
       allowLengthFallback: hasForwardHit);
     if (extended == null)
     {
