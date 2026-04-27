@@ -388,8 +388,8 @@ internal static class PerpGumballMonitor
       var curveReferencePoint = Point3d.Unset;
       var curveReferenceTangent = Vector3d.Zero;
 
-      // For off-curve grips, use the direction from grip point to its closest point on curve.
-      if (TryGripToCurvePerpendicularDirection(curve, origin, tolerance, out var gripToCurve, out footPoint, out var footTangent))
+      // For off-curve grips, use view-projected grip->curve direction (matches viewport perpendicular behavior).
+      if (TryGripToCurvePerpendicularDirection(curve, origin, viewport, tolerance, out var gripToCurve, out footPoint, out var footTangent))
       {
         hasFootPoint = true;
         hasCurveReference = true;
@@ -574,23 +574,44 @@ internal static class PerpGumballMonitor
         perpendicularOnXAxis: perpendicularOnXAxis);
   }
 
-  private static bool TryGripToCurvePerpendicularDirection(Curve curve, Point3d gripPoint, double tolerance, out Vector3d direction, out Point3d footPoint, out Vector3d footTangent)
+  private static bool TryGripToCurvePerpendicularDirection(Curve curve, Point3d gripPoint, RhinoViewport viewport, double tolerance, out Vector3d direction, out Point3d footPoint, out Vector3d footTangent)
   {
     direction = Vector3d.Zero;
     footPoint = Point3d.Unset;
     footTangent = Vector3d.Zero;
 
-    if (!curve.ClosestPoint(gripPoint, out var t))
-      return false;
+    Curve? projectedCurve = null;
+    try
+    {
+      projectedCurve = curve.DuplicateCurve();
+      if (projectedCurve == null)
+        return false;
 
-    footPoint = curve.PointAt(t);
-    var toCurve = footPoint - gripPoint;
-    if (toCurve.Length <= tolerance)
-      return false;
+      var cameraFrame = GetCameraFramePlane(viewport);
+      projectedCurve.Transform(Transform.PlanarProjection(cameraFrame));
 
-    direction = toCurve;
-    footTangent = curve.TangentAt(t);
-    return true;
+      var projectedGrip = cameraFrame.ClosestPoint(gripPoint);
+      if (!projectedCurve.ClosestPoint(projectedGrip, out var t))
+        return false;
+
+      var projectedFoot = projectedCurve.PointAt(t);
+      var toCurve = projectedFoot - projectedGrip;
+      if (toCurve.Length <= tolerance)
+        return false;
+
+      direction = toCurve;
+      footPoint = curve.PointAt(t);
+      footTangent = curve.TangentAt(t);
+      return true;
+    }
+    catch
+    {
+      return false;
+    }
+    finally
+    {
+      projectedCurve?.Dispose();
+    }
   }
 
   private static Vector3d CurveTangentAtGrip(Curve curve, GripObject grip, double tolerance)
@@ -842,6 +863,7 @@ internal static class PerpGumballMonitor
       return;
 
     var origin = debug.Origin;
+    var viewDirection = Unit(Vector3d.CrossProduct(debug.CameraRight, debug.CameraUp));
     var footDistance = debug.HasFootPoint ? origin.DistanceTo(debug.FootPoint) : 0.0;
 
     if (debug.HasFootPoint)
@@ -856,7 +878,9 @@ internal static class PerpGumballMonitor
 
     if (debug.HasCurveReference)
     {
-      var tangentDirection = Unit(debug.CurveReferenceTangent);
+      var tangentDirection = Unit(ProjectToPlane(debug.CurveReferenceTangent, viewDirection));
+      if (tangentDirection.IsTiny())
+        tangentDirection = Unit(debug.CurveReferenceTangent);
       if (!tangentDirection.IsTiny())
       {
         var tangentHalf = Math.Max(debug.DrawScale * 0.9, footDistance * 0.75);
@@ -868,7 +892,9 @@ internal static class PerpGumballMonitor
 
         if (debug.HasFootPoint && footDistance > RhinoMath.ZeroTolerance)
         {
-          var towardGrip = Unit(origin - debug.FootPoint);
+          var towardGrip = Unit(ProjectToPlane(origin - debug.FootPoint, viewDirection));
+          if (towardGrip.IsTiny())
+            towardGrip = Unit(origin - debug.FootPoint);
           if (!towardGrip.IsTiny())
           {
             var markerSize = Math.Max(footDistance * 0.12, debug.DrawScale * 0.1);
