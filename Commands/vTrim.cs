@@ -151,7 +151,11 @@ public sealed class vTrim : Command
       return Result.Cancel;
     }
 
-    var ok = RhinoApp.RunScript("_Trim", false);
+    // Run Trim with an explicit pause so Rhino stays interactive after cutter selection.
+    var ok = RhinoApp.RunScript("_Trim _Pause", false);
+    if (!ok)
+      ok = RhinoApp.RunScript("_Trim", false);
+
     return ok ? Result.Success : Result.Cancel;
   }
 
