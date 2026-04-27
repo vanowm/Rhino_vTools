@@ -721,6 +721,10 @@ internal static class PerpGumballMonitor
 
   private static bool IsSupportedViewport(RhinoViewport viewport)
   {
+    // Allow Plan orientation even in Perspective-named or Perspective-projection views.
+    if (IsPlanModeViewport(viewport))
+      return true;
+
     if (viewport.IsPerspectiveProjection)
       return false;
 
@@ -737,6 +741,53 @@ internal static class PerpGumballMonitor
     {
       var name = viewport.Name ?? string.Empty;
       return name.IndexOf("perspective", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+    catch
+    {
+      return false;
+    }
+  }
+
+  private static bool IsPlanModeViewport(RhinoViewport viewport)
+  {
+    try
+    {
+      var type = viewport.GetType();
+      var planProperty = type.GetProperty("IsPlanView", BindingFlags.Instance | BindingFlags.Public);
+      if (planProperty != null && planProperty.GetValue(viewport) is bool propertyValue)
+        return propertyValue;
+
+      var planMethod = type.GetMethod("IsPlanView", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+      if (planMethod != null && planMethod.Invoke(viewport, null) is bool methodValue)
+        return methodValue;
+    }
+    catch
+    {
+    }
+
+    return IsCameraPlanAlignedToCPlane(viewport);
+  }
+
+  private static bool IsCameraPlanAlignedToCPlane(RhinoViewport viewport)
+  {
+    try
+    {
+      var cplane = viewport.ConstructionPlane();
+      if (!cplane.IsValid)
+        return false;
+
+      var cplaneZ = Unit(cplane.ZAxis);
+      var cplaneY = Unit(cplane.YAxis);
+      var cameraDirection = Unit(viewport.CameraDirection);
+      var cameraUp = Unit(viewport.CameraUp);
+
+      if (cplaneZ.IsTiny() || cplaneY.IsTiny() || cameraDirection.IsTiny() || cameraUp.IsTiny())
+        return false;
+
+      const double alignment = 0.9995;
+      var directionAligned = Math.Abs(cameraDirection * cplaneZ) >= alignment;
+      var upAligned = Math.Abs(cameraUp * cplaneY) >= alignment;
+      return directionAligned && upAligned;
     }
     catch
     {

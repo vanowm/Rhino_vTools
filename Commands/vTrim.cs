@@ -100,6 +100,8 @@ public sealed class vTrim : Command
           pick.TargetCurve,
           pick.PickPoint,
           cutterCurves,
+          allowBoundaryExtend: !cutters.AutoMode && cutters.CutterIds.Count > 0,
+          extendAsLine: _extendAsLine,
           _joinAfterTrim,
           out record);
       }
@@ -406,7 +408,6 @@ public sealed class vTrim : Command
     while (true)
     {
       var go = new GetObject();
-      go.SetCommandPrompt("Select curve to trim (hold Shift to extend); Enter when done");
       go.GeometryFilter = ObjectType.Curve;
       go.SubObjectSelect = false;
       go.EnablePreSelect(false, true);
@@ -434,16 +435,63 @@ public sealed class vTrim : Command
 
       var lastShiftState = ShiftPressed();
       preview.HoverExtendMode = lastShiftState;
+      var modeLocked = false;
+      var lockedExtendMode = lastShiftState;
+      string? lastPrompt = null;
+
+      void RefreshPrompt()
+      {
+        var modeLabel = modeLocked
+          ? (lockedExtendMode ? "Extend" : "Trim")
+          : (lastShiftState ? "Extend" : "Trim");
+
+        var prompt = modeLocked
+          ? $"Select curve to trim; mode locked: {modeLabel}; Enter when done"
+          : $"Select curve to trim (hold Shift to extend; current: {modeLabel}); Enter when done";
+
+        if (string.Equals(prompt, lastPrompt, StringComparison.Ordinal))
+          return;
+
+        go.SetCommandPrompt(prompt);
+        lastPrompt = prompt;
+      }
+
+      RefreshPrompt();
+
       System.Windows.Forms.Timer? shiftTimer = null;
 
       void OnIdleShiftRefresh(object? _sender, EventArgs _args)
       {
+        var clickCapture = hover.LastClick;
+        if (clickCapture.HasCapture && !modeLocked)
+        {
+          modeLocked = true;
+          lockedExtendMode = clickCapture.ExtendMode;
+          lastShiftState = lockedExtendMode;
+          preview.HoverExtendMode = lockedExtendMode;
+          RefreshPrompt();
+          doc.Views.Redraw();
+          return;
+        }
+
+        if (modeLocked)
+        {
+          if (preview.HoverExtendMode != lockedExtendMode)
+          {
+            preview.HoverExtendMode = lockedExtendMode;
+            doc.Views.Redraw();
+          }
+
+          return;
+        }
+
         var currentShift = ShiftPressed();
         if (currentShift == lastShiftState)
           return;
 
         lastShiftState = currentShift;
         preview.HoverExtendMode = currentShift;
+        RefreshPrompt();
         doc.Views.Redraw();
       }
 
@@ -585,7 +633,7 @@ public sealed class vTrim : Command
           pickPoint = targetCurve.PointAtStart;
       }
 
-      var pickedExtendMode = lastShiftState;
+      var pickedExtendMode = modeLocked ? lockedExtendMode : lastShiftState;
       var clickHover = hover.LastClick;
 
       if (clickHover.HasCapture)
@@ -693,7 +741,13 @@ public sealed class vTrim : Command
       else
       {
         var cutters = ResolveCuttersForTarget(_doc, HoverObject, HoverCurve, HoverPoint, _autoMode, _cutterIds);
-        var removedPiece = BuildTrimPreviewPiece(_doc, HoverCurve, HoverPoint, cutters);
+        var removedPiece = BuildTrimPreviewPiece(
+          _doc,
+          HoverCurve,
+          HoverPoint,
+          cutters,
+          allowBoundaryExtend: !_autoMode && _cutterIds.Count > 0,
+          extendAsLine: ExtendAsLine);
         if (removedPiece != null)
           e.Display.DrawCurve(removedPiece, Color.Red, 2);
       }
@@ -1464,15 +1518,91 @@ public sealed class vTrim : Command
     return null;
   }
 
-  private static Curve? BuildTrimPreviewPiece(RhinoDoc doc, Curve targetCurve, Point3d pickPoint, IReadOnlyList<Curve> cutterCurves)
+  private static double? TryGetCurveLength(Curve curve)
   {
-    var split = CollectPreviewSplitParameters(doc, targetCurve, cutterCurves, pickPoint);
+    try
+    {
+      return curve.GetLength();
+    }
+    catch
+    {
+      return null;
+    }
+  }
+
+  private static Curve? ExtendCurveToCuttersFromPick(
+    RhinoDoc doc,
+    Curve targetCurve,
+    Point3d pickPoint,
+    IReadOnlyList<Curve> cutterCurves,
+    bool extendAsLine)
+  {
+    if (cutterCurves == null || cutterCurves.Count == 0)
+      return null;
+
+    if (!TryGetExtendAnchorAndDirection(targetCurve, pickPoint, out var movingEnd, out _, out _))
+      return null;
+
+    var style = extendAsLine ? CurveExtensionStyle.Line : CurveExtensionStyle.Smooth;
+    var ends = movingEnd == CurveEnd.Start
+      ? new[] { CurveEnd.Start, CurveEnd.End }
+      : new[] { CurveEnd.End, CurveEnd.Start };
+
+    var sourceLength = TryGetCurveLength(targetCurve);
+    var minGain = Math.Max(doc.ModelAbsoluteTolerance, 1.0e-8);
+
+    foreach (var end in ends)
+    {
+      try
+      {
+        var candidate = targetCurve.Extend(end, style, cutterCurves.ToArray());
+        if (candidate == null)
+          continue;
+
+        if (sourceLength.HasValue)
+        {
+          var candidateLength = TryGetCurveLength(candidate);
+          if (candidateLength.HasValue && candidateLength.Value <= sourceLength.Value + minGain)
+            continue;
+        }
+
+        return candidate;
+      }
+      catch
+      {
+      }
+    }
+
+    return null;
+  }
+
+  private static Curve? BuildTrimPreviewPiece(
+    RhinoDoc doc,
+    Curve targetCurve,
+    Point3d pickPoint,
+    IReadOnlyList<Curve> cutterCurves,
+    bool allowBoundaryExtend,
+    bool extendAsLine)
+  {
+    var workingCurve = targetCurve;
+    var split = CollectPreviewSplitParameters(doc, workingCurve, cutterCurves, pickPoint);
+
+    if (split.Count == 0 && allowBoundaryExtend)
+    {
+      var extended = ExtendCurveToCuttersFromPick(doc, workingCurve, pickPoint, cutterCurves, extendAsLine);
+      if (extended != null)
+      {
+        workingCurve = extended;
+        split = CollectPreviewSplitParameters(doc, workingCurve, cutterCurves, pickPoint);
+      }
+    }
+
     if (split.Count == 0)
       return null;
 
-    var removed = TrimOpenCurveFromEndRemovedPiece(targetCurve, pickPoint, split);
+    var removed = TrimOpenCurveFromEndRemovedPiece(workingCurve, pickPoint, split);
     if (removed == null)
-      removed = TrimOpenCurveFromEndRemovedPiece(targetCurve, pickPoint, split, 250.0);
+      removed = TrimOpenCurveFromEndRemovedPiece(workingCurve, pickPoint, split, 250.0);
 
     if (removed != null)
       return removed;
@@ -1480,7 +1610,7 @@ public sealed class vTrim : Command
     Curve[]? pieces;
     try
     {
-      pieces = targetCurve.Split(split);
+      pieces = workingCurve.Split(split);
     }
     catch
     {
@@ -1500,6 +1630,8 @@ public sealed class vTrim : Command
     Curve targetCurve,
     Point3d pickPoint,
     IReadOnlyList<Curve> cutterCurves,
+    bool allowBoundaryExtend,
+    bool extendAsLine,
     bool joinAfterTrim,
     out ActionRecord? actionRecord)
   {
@@ -1511,17 +1643,30 @@ public sealed class vTrim : Command
       return false;
     }
 
-    var split = CollectSplitParameters(doc, targetCurve, cutterCurves, pickPoint);
-    split = SanitizeSplitParameters(targetCurve, split);
+    var workingCurve = targetCurve;
+    var split = CollectSplitParameters(doc, workingCurve, cutterCurves, pickPoint);
+    split = SanitizeSplitParameters(workingCurve, split);
+
+    if (split.Count == 0 && allowBoundaryExtend)
+    {
+      var extended = ExtendCurveToCuttersFromPick(doc, workingCurve, pickPoint, cutterCurves, extendAsLine);
+      if (extended != null)
+      {
+        workingCurve = extended;
+        split = CollectSplitParameters(doc, workingCurve, cutterCurves, pickPoint);
+        split = SanitizeSplitParameters(workingCurve, split);
+      }
+    }
+
     if (split.Count == 0)
     {
       RhinoApp.WriteLine("vTrim: no valid trim intersections for this pick.");
       return false;
     }
 
-    var direct = TrimOpenCurveFromEnd(targetCurve, pickPoint, split);
+    var direct = TrimOpenCurveFromEnd(workingCurve, pickPoint, split);
     if (direct == null)
-      direct = TrimOpenCurveFromEnd(targetCurve, pickPoint, split, 250.0);
+      direct = TrimOpenCurveFromEnd(workingCurve, pickPoint, split, 250.0);
     if (direct != null)
     {
       try
@@ -1549,7 +1694,7 @@ public sealed class vTrim : Command
     Curve[]? pieces;
     try
     {
-      pieces = targetCurve.Split(split);
+      pieces = workingCurve.Split(split);
     }
     catch
     {
@@ -1977,7 +2122,8 @@ public sealed class vTrim : Command
     Vector3d direction,
     double extensionDistance,
     bool extendAsLine,
-    IReadOnlyCollection<Guid>? candidateIds)
+    IReadOnlyCollection<Guid>? candidateIds,
+    bool allowLengthFallback)
   {
     var style = extendAsLine ? CurveExtensionStyle.Line : CurveExtensionStyle.Smooth;
     var drivers = ExtendDriverCurves(doc, targetObj.Id, candidateIds);
@@ -1996,28 +2142,31 @@ public sealed class vTrim : Command
       }
     }
 
-    try
+    if (allowLengthFallback)
     {
-      var byLength = targetCurve.Extend(movingEnd, extensionDistance, style);
-      var validatedByLength = ValidateExtendedCandidate(doc, byLength, anchor, movingEnd, drivers);
-      if (validatedByLength != null)
-        return validatedByLength;
-    }
-    catch
-    {
-    }
+      try
+      {
+        var byLength = targetCurve.Extend(movingEnd, extensionDistance, style);
+        var validatedByLength = ValidateExtendedCandidate(doc, byLength, anchor, movingEnd, drivers);
+        if (validatedByLength != null)
+          return validatedByLength;
+      }
+      catch
+      {
+      }
 
-    // Last fallback: line-extend to hit point if boundary extend failed.
-    try
-    {
-      var extra = Math.Max(extensionDistance, doc.ModelAbsoluteTolerance * 2.0);
-      var byLength = targetCurve.Extend(movingEnd, extra, CurveExtensionStyle.Line);
-      var validatedFallback = ValidateExtendedCandidate(doc, byLength, anchor, movingEnd, drivers);
-      if (validatedFallback != null)
-        return validatedFallback;
-    }
-    catch
-    {
+      // Last fallback: line-extend to hit point if boundary extend failed.
+      try
+      {
+        var extra = Math.Max(extensionDistance, doc.ModelAbsoluteTolerance * 2.0);
+        var byLength = targetCurve.Extend(movingEnd, extra, CurveExtensionStyle.Line);
+        var validatedFallback = ValidateExtendedCandidate(doc, byLength, anchor, movingEnd, drivers);
+        if (validatedFallback != null)
+          return validatedFallback;
+      }
+      catch
+      {
+      }
     }
 
     return null;
@@ -2039,10 +2188,26 @@ public sealed class vTrim : Command
     if (!autoMode)
       candidateIds = cutterIds.Where(id => id != Guid.Empty && id != targetObj.Id).ToHashSet();
 
-    if (!TryClosestForwardHit(doc, anchor, direction, targetObj.Id, candidateIds, out _, out var extensionDistance))
-      return null;
+    var hasForwardHit = TryClosestForwardHit(doc, anchor, direction, targetObj.Id, candidateIds, out _, out var extensionDistance);
+    if (!hasForwardHit)
+    {
+      if (candidateIds == null || candidateIds.Count == 0)
+        return null;
 
-    var extended = TryBuildExtendedCurve(doc, targetObj, targetCurve, movingEnd, anchor, direction, extensionDistance, extendAsLine, candidateIds);
+      extensionDistance = Math.Max(doc.ModelAbsoluteTolerance * 2.0, 1.0e-6);
+    }
+
+    var extended = TryBuildExtendedCurve(
+      doc,
+      targetObj,
+      targetCurve,
+      movingEnd,
+      anchor,
+      direction,
+      extensionDistance,
+      extendAsLine,
+      candidateIds,
+      allowLengthFallback: hasForwardHit);
     if (extended == null)
       return null;
 
@@ -2077,13 +2242,29 @@ public sealed class vTrim : Command
     if (!autoMode)
       candidateIds = cutterIds.Where(id => id != Guid.Empty && id != targetObj.Id).ToHashSet();
 
-    if (!TryClosestForwardHit(doc, anchor, direction, targetObj.Id, candidateIds, out _, out var extensionDistance))
+    var hasForwardHit = TryClosestForwardHit(doc, anchor, direction, targetObj.Id, candidateIds, out _, out var extensionDistance);
+    if (!hasForwardHit)
     {
-      RhinoApp.WriteLine("vTrim: no extend intersection in this direction.");
-      return false;
+      if (candidateIds == null || candidateIds.Count == 0)
+      {
+        RhinoApp.WriteLine("vTrim: no extend intersection in this direction.");
+        return false;
+      }
+
+      extensionDistance = Math.Max(doc.ModelAbsoluteTolerance * 2.0, 1.0e-6);
     }
 
-    var extended = TryBuildExtendedCurve(doc, targetObj, targetCurve, movingEnd, anchor, direction, extensionDistance, extendAsLine, candidateIds);
+    var extended = TryBuildExtendedCurve(
+      doc,
+      targetObj,
+      targetCurve,
+      movingEnd,
+      anchor,
+      direction,
+      extensionDistance,
+      extendAsLine,
+      candidateIds,
+      allowLengthFallback: hasForwardHit);
     if (extended == null)
     {
       RhinoApp.WriteLine("vTrim: failed to build extended curve.");
