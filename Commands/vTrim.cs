@@ -37,6 +37,12 @@ public sealed class vTrim : Command
     if (cutters.State == PickerState.Cancel)
       return Result.Cancel;
 
+    if (!cutters.AutoMode && cutters.CutterIds.Count > 0)
+    {
+      SavePersistedOptions();
+      return RunBuiltInTrimWithCutters(doc, cutters.CutterIds);
+    }
+
     while (true)
     {
       var pick = PickTarget(doc, cutters.AutoMode, cutters.CutterIds, _extendAsLine, _joinAfterTrim);
@@ -121,6 +127,32 @@ public sealed class vTrim : Command
         RhinoApp.WriteLine("vTrim: click did not produce a valid trim/extend result.");
       }
     }
+  }
+
+  private static Result RunBuiltInTrimWithCutters(RhinoDoc doc, IReadOnlyList<Guid> cutterIds)
+  {
+    doc.Objects.UnselectAll();
+
+    var selectedAny = false;
+    foreach (var id in cutterIds)
+    {
+      if (id == Guid.Empty)
+        continue;
+
+      if (doc.Objects.Select(id))
+        selectedAny = true;
+    }
+
+    doc.Views.Redraw();
+
+    if (!selectedAny)
+    {
+      RhinoApp.WriteLine("vTrim: no valid cutting curves selected for native Trim.");
+      return Result.Cancel;
+    }
+
+    var ok = RhinoApp.RunScript("_Trim", false);
+    return ok ? Result.Success : Result.Cancel;
   }
 
   private static void LoadPersistedOptions()
