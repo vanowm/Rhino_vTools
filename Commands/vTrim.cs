@@ -465,7 +465,7 @@ public sealed class vTrim : Command
     go.AcceptNothing(true);
     go.EnablePreSelect(true, true);
     go.EnableClearObjectsOnEntry(false);
-    go.EnableUnselectObjectsOnExit(false);
+    go.EnableUnselectObjectsOnExit(true);
     go.DeselectAllBeforePostSelect = false;
 
     var result = go.GetMultiple(1, 0);
@@ -514,7 +514,7 @@ public sealed class vTrim : Command
       go.GeometryFilter = ObjectType.Curve;
       go.SubObjectSelect = false;
       go.EnablePreSelect(false, true);
-      go.AcceptNothing(allowDone);
+      go.AcceptNothing(true);
       go.AcceptString(true);
       go.DeselectAllBeforePostSelect = false;
       go.EnableClearObjectsOnEntry(false);
@@ -700,6 +700,9 @@ public sealed class vTrim : Command
 
       if (result == GetResult.Nothing)
       {
+        if (!allowDone)
+          continue;
+
         pick.State = PickerState.Done;
         pick.ExtendAsLine = extendAsLine;
         pick.JoinAfterTrim = joinAfterTrim;
