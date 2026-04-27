@@ -63,7 +63,6 @@ internal static class PerpGumballMonitor
   private static int _idleSettle;
 
   private static StatusBadgeConduit? _badge;
-  private static OrientationDebugData _lastDebugData = OrientationDebugData.Empty;
 
   internal static bool Toggle(RhinoDoc doc)
   {
@@ -114,7 +113,6 @@ internal static class PerpGumballMonitor
     _lastGripPointKey = null;
     _lastIdleTick = null;
     _idleSettle = 0;
-    _lastDebugData = OrientationDebugData.Empty;
   }
 
   private static void AttachHandlers()
@@ -315,8 +313,7 @@ internal static class PerpGumballMonitor
     if (!_enabled)
       return;
 
-    var plane = ComputePlaneForGrip(ctx.Viewport, ctx.Grip, ctx.Owner.Geometry, doc.ModelAbsoluteTolerance, ctx.ViewId, out var debugData);
-    _lastDebugData = debugData;
+    var plane = ComputePlaneForGrip(ctx.Viewport, ctx.Grip, ctx.Owner.Geometry, doc.ModelAbsoluteTolerance);
 
     if (!plane.IsValid)
       return;
@@ -354,13 +351,10 @@ internal static class PerpGumballMonitor
     _lastCameraKey = null;
     _lastGripPointKey = null;
     _idleSettle = 0;
-    _lastDebugData = OrientationDebugData.Empty;
   }
 
-  private static Plane ComputePlaneForGrip(RhinoViewport viewport, GripObject grip, GeometryBase geometry, double tolerance, string viewId, out OrientationDebugData debugData)
+  private static Plane ComputePlaneForGrip(RhinoViewport viewport, GripObject grip, GeometryBase geometry, double tolerance)
   {
-    debugData = OrientationDebugData.Empty;
-
     var cameraFrame = GetCameraFramePlane(viewport);
     var cameraRight = Unit(cameraFrame.XAxis);
     var cameraUp = Unit(cameraFrame.YAxis);
@@ -380,23 +374,10 @@ internal static class PerpGumballMonitor
     {
       var z = viewDirection;
       Vector3d perp2d;
-      Vector3d basisDirection;
-      var hasFootPoint = false;
-      var footPoint = Point3d.Unset;
-      var usedGripToCurve = false;
-      var hasCurveReference = false;
-      var curveReferencePoint = Point3d.Unset;
-      var curveReferenceTangent = Vector3d.Zero;
 
       // For off-curve grips, use view-projected grip->curve direction (matches viewport perpendicular behavior).
-      if (TryGripToCurvePerpendicularDirection(curve, origin, viewport, tolerance, out var gripToCurve, out footPoint, out var footTangent))
+      if (TryGripToCurvePerpendicularDirection(curve, origin, viewport, tolerance, out var gripToCurve, out var footTangent))
       {
-        hasFootPoint = true;
-        hasCurveReference = true;
-        curveReferencePoint = footPoint;
-        curveReferenceTangent = footTangent;
-        basisDirection = gripToCurve;
-
         perp2d = ProjectToPlane(gripToCurve, z);
         if (perp2d.IsTiny())
         {
@@ -406,34 +387,19 @@ internal static class PerpGumballMonitor
             tangent2d = cameraRight;
           tangent2d = Unit(tangent2d);
 
-          basisDirection = tangent2d;
           perp2d = Vector3d.CrossProduct(tangent2d, z);
-          usedGripToCurve = false;
-        }
-        else
-        {
-          usedGripToCurve = true;
         }
       }
       else
       {
         var tangent = CurveTangentAtGrip(curve, grip, tolerance);
         if (tangent.IsTiny())
-        {
-          var fallback = new Plane(origin, cameraRight, cameraUp);
-          debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, hasCurveReference, curveReferencePoint, curveReferenceTangent, usedGripToCurve, Vector3d.Zero, Vector3d.Zero, cameraRight, cameraUp, fallback, tolerance);
-          return fallback;
-        }
+          return new Plane(origin, cameraRight, cameraUp);
 
         var tangent2d = ProjectToPlane(tangent, z);
         if (tangent2d.IsTiny())
           tangent2d = cameraRight;
         tangent2d = Unit(tangent2d);
-
-        hasCurveReference = true;
-        curveReferencePoint = origin;
-        curveReferenceTangent = tangent;
-        basisDirection = tangent2d;
 
         perp2d = Vector3d.CrossProduct(tangent2d, z);
       }
@@ -442,14 +408,11 @@ internal static class PerpGumballMonitor
         perp2d = cameraUp;
       perp2d = Unit(perp2d);
 
-      var result = BuildCurvePerpendicularPlane(origin, perp2d, cameraRight, cameraUp, out var perpendicularOnXAxis);
-      debugData = BuildDebugData(viewId, origin, hasFootPoint, footPoint, hasCurveReference, curveReferencePoint, curveReferenceTangent, usedGripToCurve, basisDirection, perp2d, cameraRight, cameraUp, result, tolerance, perpendicularOnXAxis);
-      return result;
+      return BuildCurvePerpendicularPlane(origin, perp2d, cameraRight, cameraUp);
     }
 
     var hasNormal = TrySurfaceNormalAtPoint(geometry, origin, out var normal);
     var yAxis = hasNormal && !normal.IsTiny() ? Unit(normal) : cameraUp;
-    var basisNormal = yAxis;
 
     var zAxis = viewDirection;
     var xAxis = Unit(Vector3d.CrossProduct(yAxis, zAxis));
@@ -470,20 +433,15 @@ internal static class PerpGumballMonitor
     }
 
     yAxis = -yAxis;
-    var nonCurveResult = new Plane(origin, xAxis, yAxis);
-    debugData = BuildDebugData(viewId, origin, false, Point3d.Unset, false, Point3d.Unset, Vector3d.Zero, false, basisNormal, yAxis, cameraRight, cameraUp, nonCurveResult, tolerance);
-    return nonCurveResult;
+    return new Plane(origin, xAxis, yAxis);
   }
 
   private static Plane BuildCurvePerpendicularPlane(
     Point3d origin,
     Vector3d perpendicularDirection,
     Vector3d cameraRight,
-    Vector3d cameraUp,
-    out bool perpendicularOnXAxis)
+    Vector3d cameraUp)
   {
-    perpendicularOnXAxis = false;
-
     var right = Unit(cameraRight);
     var up = Unit(cameraUp);
     var perp = Unit(perpendicularDirection);
@@ -504,17 +462,10 @@ internal static class PerpGumballMonitor
     if (Math.Abs(rotX) < Math.Abs(rotY))
     {
       rotDeg = rotX;
-      perpendicularOnXAxis = true;
-    }
-    else if (Math.Abs(rotY) < Math.Abs(rotX))
-    {
-      rotDeg = rotY;
-      perpendicularOnXAxis = false;
     }
     else
     {
       rotDeg = rotY;
-      perpendicularOnXAxis = false;
     }
 
     var angle = DegToRad(rotDeg);
@@ -529,55 +480,9 @@ internal static class PerpGumballMonitor
     return new Plane(origin, x, y);
   }
 
-  private static OrientationDebugData BuildDebugData(
-    string viewId,
-    Point3d origin,
-    bool hasFootPoint,
-    Point3d footPoint,
-    bool hasCurveReference,
-    Point3d curveReferencePoint,
-    Vector3d curveReferenceTangent,
-    bool usedGripToCurve,
-    Vector3d basisDirection,
-    Vector3d perpDirection,
-    Vector3d cameraRight,
-    Vector3d cameraUp,
-    Plane resultPlane,
-    double tolerance,
-    bool perpendicularOnXAxis = false)
-  {
-    var drawScale = Math.Max(tolerance * 100.0, 1.0);
-
-    if (hasFootPoint)
-    {
-      var footDistance = origin.DistanceTo(footPoint);
-      if (footDistance > RhinoMath.ZeroTolerance)
-        drawScale = Math.Max(drawScale, footDistance);
-    }
-
-    return new OrientationDebugData(
-      isValid: true,
-      viewId: viewId,
-      origin: origin,
-      hasFootPoint: hasFootPoint,
-      footPoint: footPoint,
-      hasCurveReference: hasCurveReference,
-      curveReferencePoint: curveReferencePoint,
-      curveReferenceTangent: Unit(curveReferenceTangent),
-      usedGripToCurve: usedGripToCurve,
-      basisDirection: Unit(basisDirection),
-      perpDirection: Unit(perpDirection),
-      cameraRight: Unit(cameraRight),
-      cameraUp: Unit(cameraUp),
-      resultPlane: resultPlane,
-        drawScale: drawScale,
-        perpendicularOnXAxis: perpendicularOnXAxis);
-  }
-
-  private static bool TryGripToCurvePerpendicularDirection(Curve curve, Point3d gripPoint, RhinoViewport viewport, double tolerance, out Vector3d direction, out Point3d footPoint, out Vector3d footTangent)
+  private static bool TryGripToCurvePerpendicularDirection(Curve curve, Point3d gripPoint, RhinoViewport viewport, double tolerance, out Vector3d direction, out Vector3d footTangent)
   {
     direction = Vector3d.Zero;
-    footPoint = Point3d.Unset;
     footTangent = Vector3d.Zero;
 
     Curve? projectedCurve = null;
@@ -600,7 +505,6 @@ internal static class PerpGumballMonitor
         return false;
 
       direction = toCurve;
-      footPoint = curve.PointAt(t);
       footTangent = curve.TangentAt(t);
       return true;
     }
@@ -848,106 +752,6 @@ internal static class PerpGumballMonitor
     e.Display.Draw2dText(BadgeLabel, System.Drawing.Color.White, BadgePos, false, BadgeFontSize);
   }
 
-  private static void DrawDebugLines(DrawEventArgs e)
-  {
-    var debug = _lastDebugData;
-    if (!debug.IsValid)
-      return;
-
-    var drawViewport = e.Viewport;
-    if (drawViewport == null)
-      return;
-
-    var drawViewId = drawViewport.Id.ToString("N", CultureInfo.InvariantCulture);
-    if (!string.Equals(drawViewId, debug.ViewId, StringComparison.Ordinal))
-      return;
-
-    var origin = debug.Origin;
-    var viewDirection = Unit(Vector3d.CrossProduct(debug.CameraRight, debug.CameraUp));
-    var footDistance = debug.HasFootPoint ? origin.DistanceTo(debug.FootPoint) : 0.0;
-
-    if (debug.HasFootPoint)
-    {
-      // Raw grip-to-curve vector actually used as off-curve basis candidate.
-      e.Display.DrawLine(origin, debug.FootPoint, System.Drawing.Color.DodgerBlue, 3);
-
-      // Projected direction used for screen-space orientation solve (same length for easy comparison).
-      if (footDistance > RhinoMath.ZeroTolerance)
-        DrawDebugVector(e, origin, debug.PerpDirection, footDistance, System.Drawing.Color.Yellow);
-    }
-
-    if (debug.HasCurveReference)
-    {
-      var tangentDirection = Unit(ProjectToPlane(debug.CurveReferenceTangent, viewDirection));
-      if (tangentDirection.IsTiny())
-        tangentDirection = Unit(debug.CurveReferenceTangent);
-      if (!tangentDirection.IsTiny())
-      {
-        var tangentHalf = Math.Max(debug.DrawScale * 0.9, footDistance * 0.75);
-        e.Display.DrawLine(
-          debug.CurveReferencePoint - (tangentDirection * tangentHalf),
-          debug.CurveReferencePoint + (tangentDirection * tangentHalf),
-          System.Drawing.Color.Magenta,
-          2);
-
-        if (debug.HasFootPoint && footDistance > RhinoMath.ZeroTolerance)
-        {
-          var towardGrip = Unit(ProjectToPlane(origin - debug.FootPoint, viewDirection));
-          if (towardGrip.IsTiny())
-            towardGrip = Unit(origin - debug.FootPoint);
-          if (!towardGrip.IsTiny())
-          {
-            var markerSize = Math.Max(footDistance * 0.12, debug.DrawScale * 0.1);
-            var p0 = debug.FootPoint;
-            var p1 = p0 + (tangentDirection * markerSize);
-            var p2 = p1 + (towardGrip * markerSize);
-            var p3 = p0 + (towardGrip * markerSize);
-
-            e.Display.DrawLine(p0, p1, System.Drawing.Color.White, 2);
-            e.Display.DrawLine(p1, p2, System.Drawing.Color.White, 2);
-            e.Display.DrawLine(p2, p3, System.Drawing.Color.White, 2);
-          }
-        }
-      }
-
-      if (!debug.HasFootPoint)
-        DrawDebugVector(e, debug.CurveReferencePoint, debug.BasisDirection, debug.DrawScale, System.Drawing.Color.Gold);
-    }
-
-    var basisColor = debug.UsedGripToCurve ? System.Drawing.Color.Orange : System.Drawing.Color.Cyan;
-    DrawDebugVector(e, origin, debug.BasisDirection, debug.DrawScale, basisColor);
-    DrawDebugVector(e, origin, debug.PerpDirection, debug.DrawScale, System.Drawing.Color.YellowGreen);
-    DrawDebugVector(e, origin, debug.CameraRight, debug.DrawScale * 0.8, System.Drawing.Color.IndianRed);
-    DrawDebugVector(e, origin, debug.CameraUp, debug.DrawScale * 0.8, System.Drawing.Color.LightGreen);
-
-    if (debug.ResultPlane.IsValid)
-    {
-      DrawDebugVector(e, origin, debug.ResultPlane.XAxis, debug.DrawScale, System.Drawing.Color.Red);
-      DrawDebugVector(e, origin, debug.ResultPlane.YAxis, debug.DrawScale, System.Drawing.Color.Lime);
-      DrawDebugVector(e, origin, debug.ResultPlane.ZAxis, debug.DrawScale, System.Drawing.Color.DeepSkyBlue);
-
-      if (debug.HasCurveReference)
-      {
-        var selectedPerpAxis = debug.PerpendicularOnXAxis
-          ? debug.ResultPlane.XAxis
-          : debug.ResultPlane.YAxis;
-        DrawDebugVector(e, origin, selectedPerpAxis, debug.DrawScale * 1.12, System.Drawing.Color.White);
-      }
-    }
-  }
-
-  private static void DrawDebugVector(DrawEventArgs e, Point3d origin, Vector3d direction, double scale, System.Drawing.Color color)
-  {
-    if (scale <= RhinoMath.ZeroTolerance)
-      return;
-
-    var dir = Unit(direction);
-    if (dir.IsTiny())
-      return;
-
-    e.Display.DrawLine(origin, origin + (dir * scale), color, 2);
-  }
-
   private sealed class StatusBadgeConduit : DisplayConduit
   {
     protected override void DrawForeground(DrawEventArgs e)
@@ -958,86 +762,11 @@ internal static class PerpGumballMonitor
       try
       {
         DrawBadge(e);
-        DrawDebugLines(e);
       }
       catch
       {
       }
     }
-  }
-
-  private readonly struct OrientationDebugData
-  {
-    public static OrientationDebugData Empty => new(
-      isValid: false,
-      viewId: string.Empty,
-      origin: Point3d.Unset,
-      hasFootPoint: false,
-      footPoint: Point3d.Unset,
-      hasCurveReference: false,
-      curveReferencePoint: Point3d.Unset,
-      curveReferenceTangent: Vector3d.Zero,
-      usedGripToCurve: false,
-      basisDirection: Vector3d.Zero,
-      perpDirection: Vector3d.Zero,
-      cameraRight: Vector3d.Zero,
-      cameraUp: Vector3d.Zero,
-      resultPlane: Plane.Unset,
-      drawScale: 1.0,
-      perpendicularOnXAxis: false);
-
-    public OrientationDebugData(
-      bool isValid,
-      string viewId,
-      Point3d origin,
-      bool hasFootPoint,
-      Point3d footPoint,
-      bool hasCurveReference,
-      Point3d curveReferencePoint,
-      Vector3d curveReferenceTangent,
-      bool usedGripToCurve,
-      Vector3d basisDirection,
-      Vector3d perpDirection,
-      Vector3d cameraRight,
-      Vector3d cameraUp,
-      Plane resultPlane,
-      double drawScale,
-      bool perpendicularOnXAxis)
-    {
-      IsValid = isValid;
-      ViewId = viewId;
-      Origin = origin;
-      HasFootPoint = hasFootPoint;
-      FootPoint = footPoint;
-      HasCurveReference = hasCurveReference;
-      CurveReferencePoint = curveReferencePoint;
-      CurveReferenceTangent = curveReferenceTangent;
-      UsedGripToCurve = usedGripToCurve;
-      BasisDirection = basisDirection;
-      PerpDirection = perpDirection;
-      CameraRight = cameraRight;
-      CameraUp = cameraUp;
-      ResultPlane = resultPlane;
-      DrawScale = drawScale;
-      PerpendicularOnXAxis = perpendicularOnXAxis;
-    }
-
-    public bool IsValid { get; }
-    public string ViewId { get; }
-    public Point3d Origin { get; }
-    public bool HasFootPoint { get; }
-    public Point3d FootPoint { get; }
-    public bool HasCurveReference { get; }
-    public Point3d CurveReferencePoint { get; }
-    public Vector3d CurveReferenceTangent { get; }
-    public bool UsedGripToCurve { get; }
-    public Vector3d BasisDirection { get; }
-    public Vector3d PerpDirection { get; }
-    public Vector3d CameraRight { get; }
-    public Vector3d CameraUp { get; }
-    public Plane ResultPlane { get; }
-    public double DrawScale { get; }
-    public bool PerpendicularOnXAxis { get; }
   }
 
   private readonly struct GripContext
