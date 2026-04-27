@@ -1807,7 +1807,7 @@ public sealed class vTrim : Command
     return ranked.OrderBy(r => r.Distance).Select(r => r.Curve).ToList();
   }
 
-  private static bool TryGetExtendAnchorAndDirection(Curve curve, Point3d pickPoint, out CurveEnd movingEnd, out Point3d anchor, out Vector3d direction)
+  private static bool TryGetExtendAnchor(Curve curve, Point3d pickPoint, out CurveEnd movingEnd, out Point3d anchor)
   {
     var start = curve.PointAtStart;
     var end = curve.PointAtEnd;
@@ -1816,19 +1816,75 @@ public sealed class vTrim : Command
     {
       movingEnd = CurveEnd.Start;
       anchor = start;
-      direction = -curve.TangentAtStart;
     }
     else
     {
       movingEnd = CurveEnd.End;
       anchor = end;
-      direction = curve.TangentAtEnd;
     }
+
+    return true;
+  }
+
+  private static bool TryGetExtendAnchorAndDirection(Curve curve, Point3d pickPoint, out CurveEnd movingEnd, out Point3d anchor, out Vector3d direction)
+  {
+    direction = Vector3d.Zero;
+
+    if (!TryGetExtendAnchor(curve, pickPoint, out movingEnd, out anchor))
+      return false;
+
+    direction = movingEnd == CurveEnd.Start
+      ? -curve.TangentAtStart
+      : curve.TangentAtEnd;
 
     if (!direction.Unitize())
       return false;
 
     return true;
+  }
+
+  private static Curve? TryBoundaryExtendToSelectedCutters(
+    RhinoDoc doc,
+    RhinoObject targetObj,
+    Curve targetCurve,
+    CurveEnd movingEnd,
+    Point3d anchor,
+    bool extendAsLine,
+    IReadOnlyCollection<Guid> candidateIds,
+    bool strictValidation)
+  {
+    var drivers = ExtendDriverCurves(doc, targetObj.Id, candidateIds);
+    if (drivers.Count == 0)
+      return null;
+
+    var styles = extendAsLine
+      ? new[] { CurveExtensionStyle.Line, CurveExtensionStyle.Smooth }
+      : new[] { CurveExtensionStyle.Smooth, CurveExtensionStyle.Line };
+
+    foreach (var style in styles)
+    {
+      Curve? byBoundary;
+      try
+      {
+        byBoundary = targetCurve.Extend(movingEnd, style, drivers.ToArray());
+      }
+      catch
+      {
+        byBoundary = null;
+      }
+
+      if (byBoundary == null)
+        continue;
+
+      if (!strictValidation)
+        return byBoundary;
+
+      var validatedBoundary = ValidateExtendedCandidate(doc, byBoundary, anchor, movingEnd, drivers);
+      if (validatedBoundary != null)
+        return validatedBoundary;
+    }
+
+    return null;
   }
 
   private static bool IsForwardHit(Point3d anchor, Vector3d direction, Point3d candidate, double minForward, double pathTolerance, out double forwardDistance)
@@ -1845,6 +1901,172 @@ public sealed class vTrim : Command
 
     forwardDistance = forward;
     return true;
+  }
+
+  private static double Cross2d(double ax, double ay, double bx, double by)
+  {
+    return (ax * by) - (ay * bx);
+  }
+
+  private static bool TryIntersectRayWithSegment2d(
+    double ox,
+    double oy,
+    double rx,
+    double ry,
+    double ax,
+    double ay,
+    double bx,
+    double by,
+    out double rayT,
+    out double segmentU)
+  {
+    rayT = 0.0;
+    segmentU = 0.0;
+
+    var sx = bx - ax;
+    var sy = by - ay;
+    var denom = Cross2d(rx, ry, sx, sy);
+    if (Math.Abs(denom) <= 1.0e-12)
+      return false;
+
+    var qx = ax - ox;
+    var qy = ay - oy;
+
+    var t = Cross2d(qx, qy, sx, sy) / denom;
+    var u = Cross2d(qx, qy, rx, ry) / denom;
+
+    if (t < 0.0 || u < -1.0e-9 || u > 1.0 + 1.0e-9)
+      return false;
+
+    rayT = t;
+    segmentU = Math.Max(0.0, Math.Min(1.0, u));
+    return true;
+  }
+
+  private static List<double> CurveSampleParameters(Curve curve, int divisions)
+  {
+    var parameters = new List<double>();
+    var count = Math.Max(32, divisions);
+
+    if (!TryGetDomain(curve, out var d0, out var d1) || Math.Abs(d1 - d0) <= 1.0e-12)
+      return parameters;
+
+    try
+    {
+      var div = curve.DivideByCount(count, true);
+      if (div != null)
+        parameters.AddRange(div.Select(v => (double)v));
+    }
+    catch
+    {
+    }
+
+    if (parameters.Count == 0)
+    {
+      for (var i = 0; i <= count; i++)
+      {
+        var t = d0 + ((d1 - d0) * (i / (double)count));
+        parameters.Add(t);
+      }
+    }
+
+    return parameters;
+  }
+
+  private static bool TryClosestForwardHitInViewport(
+    Rhino.Display.RhinoViewport viewport,
+    Curve curve,
+    Point3d anchor,
+    Vector3d direction,
+    double rayLength,
+    double minForward,
+    out Point3d hitPoint,
+    out double extensionDistance)
+  {
+    hitPoint = Point3d.Unset;
+    extensionDistance = double.PositiveInfinity;
+
+    RhinoPoint2d rayStart;
+    RhinoPoint2d rayEnd;
+    try
+    {
+      rayStart = viewport.WorldToClient(anchor);
+      rayEnd = viewport.WorldToClient(anchor + (direction * rayLength));
+    }
+    catch
+    {
+      return false;
+    }
+
+    var rx = (double)(rayEnd.X - rayStart.X);
+    var ry = (double)(rayEnd.Y - rayStart.Y);
+    if ((rx * rx) + (ry * ry) <= 1.0e-12)
+      return false;
+
+    var parameters = CurveSampleParameters(curve, 192);
+    if (parameters.Count < 2)
+      return false;
+
+    Point3d prevWorld;
+    RhinoPoint2d prevClient;
+    try
+    {
+      prevWorld = curve.PointAt(parameters[0]);
+      prevClient = viewport.WorldToClient(prevWorld);
+    }
+    catch
+    {
+      return false;
+    }
+
+    for (var i = 1; i < parameters.Count; i++)
+    {
+      Point3d currWorld;
+      RhinoPoint2d currClient;
+      try
+      {
+        currWorld = curve.PointAt(parameters[i]);
+        currClient = viewport.WorldToClient(currWorld);
+      }
+      catch
+      {
+        prevWorld = Point3d.Unset;
+        continue;
+      }
+
+      if (!prevWorld.IsValid)
+      {
+        prevWorld = currWorld;
+        prevClient = currClient;
+        continue;
+      }
+
+      if (TryIntersectRayWithSegment2d(
+            rayStart.X,
+            rayStart.Y,
+            rx,
+            ry,
+            prevClient.X,
+            prevClient.Y,
+            currClient.X,
+            currClient.Y,
+            out _,
+            out var segU))
+      {
+        var candidate = prevWorld + ((currWorld - prevWorld) * segU);
+        var forward = Vector3d.Multiply(candidate - anchor, direction);
+        if (forward > minForward && forward < extensionDistance)
+        {
+          extensionDistance = forward;
+          hitPoint = candidate;
+        }
+      }
+
+      prevWorld = currWorld;
+      prevClient = currClient;
+    }
+
+    return hitPoint.IsValid && double.IsFinite(extensionDistance);
   }
 
   private static bool TryNearestForwardHitFromOverlap(
@@ -1916,6 +2138,7 @@ public sealed class vTrim : Command
 
     var viewPlane = ActiveViewPlane(doc);
     var projectedLine = ProjectCurveToPlane(lineCurve, viewPlane);
+    var viewport = doc.Views.ActiveView?.ActiveViewport;
 
     foreach (var (obj, curve) in EnumerateDocCurves(doc))
     {
@@ -1991,6 +2214,15 @@ public sealed class vTrim : Command
               }
             }
           }
+        }
+      }
+
+      if (viewport != null && TryClosestForwardHitInViewport(viewport, curve, anchor, direction, rayLength, minForward, out var viewPoint, out var viewDistance))
+      {
+        if (viewDistance < candidateBest)
+        {
+          candidateBest = viewDistance;
+          candidatePoint = viewPoint;
         }
       }
 
@@ -2181,12 +2413,31 @@ public sealed class vTrim : Command
     bool autoMode,
     IReadOnlyList<Guid> cutterIds)
   {
-    if (!TryGetExtendAnchorAndDirection(targetCurve, pickPoint, out var movingEnd, out var anchor, out var direction))
-      return null;
-
     IReadOnlyCollection<Guid>? candidateIds = null;
     if (!autoMode)
       candidateIds = cutterIds.Where(id => id != Guid.Empty && id != targetObj.Id).ToHashSet();
+
+    if (candidateIds != null && candidateIds.Count > 0)
+    {
+      if (!TryGetExtendAnchor(targetCurve, pickPoint, out var selectedEnd, out var selectedAnchor))
+        return null;
+
+      var boundaryExtended = TryBoundaryExtendToSelectedCutters(
+        doc,
+        targetObj,
+        targetCurve,
+        selectedEnd,
+        selectedAnchor,
+        extendAsLine,
+        candidateIds,
+        strictValidation: false);
+
+      if (boundaryExtended != null)
+        return ExtractAddedExtensionPiece(doc, boundaryExtended, selectedAnchor, selectedEnd);
+    }
+
+    if (!TryGetExtendAnchorAndDirection(targetCurve, pickPoint, out var movingEnd, out var anchor, out var direction))
+      return null;
 
     var hasForwardHit = TryClosestForwardHit(doc, anchor, direction, targetObj.Id, candidateIds, out _, out var extensionDistance);
     if (!hasForwardHit)
@@ -2232,15 +2483,46 @@ public sealed class vTrim : Command
       return false;
     }
 
+    IReadOnlyCollection<Guid>? candidateIds = null;
+    if (!autoMode)
+      candidateIds = cutterIds.Where(id => id != Guid.Empty && id != targetObj.Id).ToHashSet();
+
+    if (candidateIds != null && candidateIds.Count > 0)
+    {
+      if (!TryGetExtendAnchor(targetCurve, pickPoint, out var selectedEnd, out var selectedAnchor))
+      {
+        RhinoApp.WriteLine("vTrim: failed to resolve extend direction.");
+        return false;
+      }
+
+      var boundaryExtended = TryBoundaryExtendToSelectedCutters(
+        doc,
+        targetObj,
+        targetCurve,
+        selectedEnd,
+        selectedAnchor,
+        extendAsLine,
+        candidateIds,
+        strictValidation: false);
+
+      if (boundaryExtended != null)
+      {
+        if (!doc.Objects.Replace(targetObj.Id, boundaryExtended))
+        {
+          RhinoApp.WriteLine("vTrim: failed to replace target curve.");
+          return false;
+        }
+
+        actionRecord = BuildActionRecord(doc, beforeTarget, targetObj.Id, null);
+        return true;
+      }
+    }
+
     if (!TryGetExtendAnchorAndDirection(targetCurve, pickPoint, out var movingEnd, out var anchor, out var direction))
     {
       RhinoApp.WriteLine("vTrim: failed to resolve extend direction.");
       return false;
     }
-
-    IReadOnlyCollection<Guid>? candidateIds = null;
-    if (!autoMode)
-      candidateIds = cutterIds.Where(id => id != Guid.Empty && id != targetObj.Id).ToHashSet();
 
     var hasForwardHit = TryClosestForwardHit(doc, anchor, direction, targetObj.Id, candidateIds, out _, out var extensionDistance);
     if (!hasForwardHit)
