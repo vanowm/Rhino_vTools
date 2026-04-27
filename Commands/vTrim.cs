@@ -32,6 +32,7 @@ public sealed class vTrim : Command
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
+    CancelPendingNativeTrimLaunch();
     LoadPersistedOptions();
 
     var history = new SessionHistory();
@@ -46,9 +47,11 @@ public sealed class vTrim : Command
       return QueueBuiltInTrimWithCutters(doc, cutters.CutterIds);
     }
 
+    var allowDoneInTargetPrompt = false;
+
     while (true)
     {
-      var pick = PickTarget(doc, cutters.AutoMode, cutters.CutterIds, _extendAsLine, _joinAfterTrim);
+      var pick = PickTarget(doc, cutters.AutoMode, cutters.CutterIds, _extendAsLine, _joinAfterTrim, allowDoneInTargetPrompt);
       if (pick.State == PickerState.Cancel)
       {
         SavePersistedOptions();
@@ -63,6 +66,8 @@ public sealed class vTrim : Command
 
       if (pick.State == PickerState.Undo)
       {
+        allowDoneInTargetPrompt = true;
+
         if (!TryUndo(doc, history))
           RhinoApp.WriteLine("vTrim: nothing to undo.");
 
@@ -72,12 +77,16 @@ public sealed class vTrim : Command
 
       if (pick.State == PickerState.Redo)
       {
+        allowDoneInTargetPrompt = true;
+
         if (!TryRedo(doc, history))
           RhinoApp.WriteLine("vTrim: nothing to redo.");
 
         doc.Views.Redraw();
         continue;
       }
+
+      allowDoneInTargetPrompt = true;
 
       _extendAsLine = pick.ExtendAsLine;
       _joinAfterTrim = pick.JoinAfterTrim;
@@ -155,6 +164,18 @@ public sealed class vTrim : Command
     RhinoApp.Idle += _nativeTrimLaunchIdleHandler;
 
     return Result.Success;
+  }
+
+  private static void CancelPendingNativeTrimLaunch()
+  {
+    if (_nativeTrimLaunchIdleHandler != null)
+    {
+      RhinoApp.Idle -= _nativeTrimLaunchIdleHandler;
+      _nativeTrimLaunchIdleHandler = null;
+    }
+
+    _pendingNativeTrimCutters = null;
+    _pendingNativeTrimDocSerial = 0u;
   }
 
   private static void OnLaunchNativeTrimOnIdle(object? sender, EventArgs e)
@@ -477,7 +498,8 @@ public sealed class vTrim : Command
     bool autoMode,
     IReadOnlyList<Guid> cutterIds,
     bool extendAsLine,
-    bool joinAfterTrim)
+    bool joinAfterTrim,
+    bool allowDone)
   {
     var pick = new TargetPick
     {
@@ -492,7 +514,7 @@ public sealed class vTrim : Command
       go.GeometryFilter = ObjectType.Curve;
       go.SubObjectSelect = false;
       go.EnablePreSelect(false, true);
-      go.AcceptNothing(true);
+      go.AcceptNothing(allowDone);
       go.AcceptString(true);
       go.DeselectAllBeforePostSelect = false;
       go.EnableClearObjectsOnEntry(false);
