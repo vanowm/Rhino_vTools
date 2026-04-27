@@ -2241,6 +2241,7 @@ public sealed class vTrim : Command
 
     var viewPlane = ActiveViewPlane(doc);
     var projectedLine = ProjectCurveToPlane(lineCurve, viewPlane);
+    var useViewportFallback = candidateIds != null && candidateIds.Count > 0;
     var viewport = doc.Views.ActiveView?.ActiveViewport;
 
     foreach (var (obj, curve) in EnumerateDocCurves(doc))
@@ -2320,7 +2321,7 @@ public sealed class vTrim : Command
         }
       }
 
-      if (viewport != null && TryClosestForwardHitInViewport(viewport, curve, anchor, direction, rayLength, minForward, out var viewPoint, out var viewDistance))
+      if (useViewportFallback && viewport != null && TryClosestForwardHitInViewport(viewport, curve, anchor, direction, rayLength, minForward, out var viewPoint, out var viewDistance))
       {
         if (viewDistance < candidateBest)
         {
