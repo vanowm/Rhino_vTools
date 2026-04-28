@@ -21,7 +21,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vTextFlip](#vtextflip-flow) *(26.04.27.212532)* — flips or rotates annotation text around its object plane
   - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.04.24.171217)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
   - [vTrim](#vtrim-flow) *(26.04.24.163301)* — trims and extends curves with auto-cutter detection, join, and undo/redo
-  - [vUzip](#vuzip-flow) *(26.04.24.093442)* — unzips a center curve into labeled reference, plot, and cut output groups
+  - [vUzip](#vuzip-flow) *(26.04.24.093442)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
 
