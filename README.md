@@ -6,22 +6,22 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 
 - Rhino plug-in entry point: vToolsPlugIn
 - Native commands:
-  - [vCurveToSpline](#vcurvetospline-flow) *(26.04.24.093442)*
-  - [vFitBox](#vfitbox-flow) *(26.04.24.093442)*
-  - [vLine](#vline-flow) *(26.04.27.212532)*
-  - [vLineLength](#vlinelength-flow) *(26.04.27.212532)*
-  - [vMiddleCurve](#vmiddlecurve-flow) *(26.04.27)*
-  - [vOffset](#voffset-flow) *(26.04.27)*
-  - [vOrient2pt](#vorient2pt-flow) *(26.04.24.093442)*
-  - [vOrient3pt](#vorient3pt-flow) *(26.04.24.093442)*
-  - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.04.27.210936)*
-  - [vScallop](#vscallop-flow) *(26.04.27.212532)*
-  - [vSplitAtCorners](#vsplitatcorners-flow) *(26.04.27.212532)*
-  - [vTextAligned](#vtextaligned-flow) *(26.04.27.212532)*
-  - [vTextFlip](#vtextflip-flow) *(26.04.27.212532)*
-  - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.04.24.171217)*
-  - [vTrim](#vtrim-flow) *(26.04.24.163301)*
-  - [vUzip](#vuzip-flow) *(26.04.24.093442)*
+  - [vCurveToSpline](#vcurvetospline-flow) *(26.04.24.093442)* — converts selected curves to interpolated splines with join modes
+  - [vFitBox](#vfitbox-flow) *(26.04.24.093442)* — finds the minimum bounding box for selected objects by optimizing rotation angle
+  - [vLine](#vline-flow) *(26.04.27.212532)* — draws lines with chain modes, angle lock, length constraint, and perp/tangent endpoint solving
+  - [vLineLength](#vlinelength-flow) *(26.04.27.212532)* — resizes an open curve to a target total, additive, or subtractive length
+  - [vMiddleCurve](#vmiddlecurve-flow) *(26.04.27)* — creates an interpolated curve equidistant between two selected curves
+  - [vOffset](#voffset-flow) *(26.04.27)* — runs built-in Offset in a continuous loop, clearing selection after each run
+  - [vOrient2pt](#vorient2pt-flow) *(26.04.24.093442)* — orients objects from a source two-point frame to a target two-point frame
+  - [vOrient3pt](#vorient3pt-flow) *(26.04.24.093442)* — orients objects from a source three-point frame to a target three-point frame
+  - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.04.27.210936)* — places points projected onto the closest surface normal evaluation point
+  - [vScallop](#vscallop-flow) *(26.04.27.212532)* — creates an arc scallop between two points or along a selected line
+  - [vSplitAtCorners](#vsplitatcorners-flow) *(26.04.27.212532)* — splits curves at detected corners with interactive per-corner toggle preview
+  - [vTextAligned](#vtextaligned-flow) *(26.04.27.212532)* — places or repositions annotation text aligned and offset along a selected curve
+  - [vTextFlip](#vtextflip-flow) *(26.04.27.212532)* — flips or rotates annotation text around its object plane
+  - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.04.24.171217)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
+  - [vTrim](#vtrim-flow) *(26.04.24.163301)* — trims and extends curves with auto-cutter detection, join, and undo/redo
+  - [vUzip](#vuzip-flow) *(26.04.24.093442)* — unzips a center curve into labeled reference, plot, and cut output groups
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
 
