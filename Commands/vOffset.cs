@@ -48,9 +48,16 @@ public sealed class vOffset : Command
       return;
 
     // echo:false keeps vOffset as Rhino's last command so Enter-repeat re-runs vOffset.
-    RhinoApp.RunScript("_Offset", false);
+    var ok = RhinoApp.RunScript("_Offset", false);
 
     doc.Objects.UnselectAll();
     doc.Views.Redraw();
+
+    // Re-queue for the next iteration as long as the user didn't cancel.
+    if (ok)
+    {
+      _pendingOffsetIdleHandler = OnLaunchOffsetOnIdle;
+      RhinoApp.Idle += _pendingOffsetIdleHandler;
+    }
   }
 }
