@@ -10,6 +10,8 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vFitBox](#vfitbox-flow) *(26.04.24.093442)*
   - [vLine](#vline-flow) *(26.04.27.212532)*
   - [vLineLength](#vlinelength-flow) *(26.04.27.212532)*
+  - [vMiddleCurve](#vmiddlecurve-flow) *(26.04.27)*
+  - [vOffset](#voffset-flow) *(26.04.27)*
   - [vOrient2pt](#vorient2pt-flow) *(26.04.24.093442)*
   - [vOrient3pt](#vorient3pt-flow) *(26.04.24.093442)*
   - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.04.27.210936)*
@@ -62,7 +64,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow).
+Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -148,6 +150,20 @@ Hidden keywords while editing:
 
 - `total`, `add`, `subtract`: set mode directly.
 - `add/subtract`: toggle between add and subtract.
+
+### vMiddleCurve flow
+
+1. Run `vMiddleCurve`.
+1. Select exactly 2 curves (preselect supported — press Enter to confirm).
+1. The command aligns curve directions and seams automatically, then creates an interpolated curve equidistant between the two inputs.
+1. Sample density is chosen adaptively and refined until the middle curve error is within tolerance.
+
+### vOffset flow
+
+1. Run `vOffset`.
+1. The built-in `_Offset` command runs interactively.
+1. After each offset, selection is cleared automatically.
+1. Press Enter to repeat `vOffset` for another offset cycle.
 
 ### vOrient2pt flow
 
