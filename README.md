@@ -92,15 +92,62 @@ Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow
 ### vLine flow
 
 1. Run `vLine`.
-1. Pick start and end points.
-1. Use options during point picking: `Mode`, `ChainMode`, `BothSides`, `Length`, and `Priority`.
+1. Pick the start point.
+1. Start-point options:
+
+    - `Mode`: chain behavior for subsequent segments.
+      - `Single`: create one segment and finish.
+      - `Multiple`: after each segment, pick a fresh start point.
+      - `Chained`: each next segment starts at the previous end point.
+      - `Polyline`: build/update one polyline as you add vertices.
+    - `BothSides`: creates a symmetric line centered on the picked start point.
+    - `Normal`, `Angled`, `Vertical`, `FourPoint`, `Bisector`, `Perpendicular`, `Tangent`, `BiTangent`, `Extension`: delegates to Rhino native line variants.
+
+1. Pick the end point.
+1. End-point options:
+
+    - `Perp`: solve endpoint perpendicular to the hovered curve under cursor.
+    - `Tangent`: solve endpoint tangent to the hovered curve under cursor.
+    - `PerpNear`: solve perpendicular against nearest curve.
+    - `TanNear`: solve tangent against nearest curve.
+    - `Auto`: choose perpendicular/tangent solution using `Priority`.
+    - `Priority`: auto-mode choice policy.
+      - `Closest`: whichever solution is closer to cursor.
+      - `PerpFirst`: prefer perpendicular when available.
+      - `TanFirst`: prefer tangent when available.
+      - `KeepCurrent`: keep previous auto choice when possible.
+    - `PersistConstraint`: keeps current constraint mode (`Perp`/`Tangent`/etc.) for following segments.
+    - `Length`: forces segment length from start point.
+    - `AngleLock`: locks direction by angle.
+    - `Angle`: angle value used by `AngleLock`.
+    - `AngleRef`: `Absolute` uses CPlane X-axis; `Relative` uses previous segment direction.
+    - `Mode` and `BothSides`: also available while placing the end point.
+
+Hidden keywords while picking:
+
+- `u` or `undo`: undo last in-session segment action.
+- `r` or `redo`: redo last undone in-session segment action.
 
 ### vLineLength flow
 
 1. Run `vLineLength`.
 1. Click an open curve near the end you want to drive.
-1. Use `Length`, `ExtendMode`, and `Mode` options while editing.
-1. Use `Undo` option to revert the last in-session edit.
+1. Use options while editing:
+
+    - `Length`: target value used by current mode.
+    - `ExtendMode`: extension style when target requires growth.
+      - `Smooth`: smooth extension.
+      - `Line`: straight-line extension.
+    - `Mode`: how `Length` is interpreted.
+      - `Total`: resulting full curve length.
+      - `Add`: add value to current length.
+      - `Subtract`: subtract value from current length.
+    - `Undo`: revert the last in-session edit.
+
+Hidden keywords while editing:
+
+- `total`, `add`, `subtract`: set mode directly.
+- `add/subtract`: toggle between add and subtract.
 
 ### vOrient2pt flow
 
@@ -140,32 +187,63 @@ Hidden keywords while picking points:
 1. Run `vScallop`.
 1. Select a line, or press Enter to pick two points.
 1. Pick side point to define bulge direction.
-1. Use options: `Size`, `Free`, and `DeleteOriginal`.
+1. Use options:
+
+    - `Size`: scallop bulge distance.
+    - `Free`: when `Yes`, bulge is measured from midpoint to picked side point; when `No`, uses fixed `Size`.
+    - `DeleteOriginal`: when selecting an existing line input, remove that original line after creating the scallop arc.
 
 ### vSplitAtCorners flow
 
 1. Run `vSplitAtCorners`.
 1. Select curves to split.
+1. Review highlighted corners and click to toggle behavior before applying.
 1. Press Enter to run splitting.
-1. Use options: `MinAngle` and `DeleteInput`.
+1. Use options:
+
+    - `Angle`: minimum detected corner angle in degrees.
+    - `MinLength`: minimum resulting segment length to keep.
+    - `ClearManual`: remove all manually forced split points.
+    - `ClearSuppressed`: restore all suppressed auto-corners.
+    - `ClearAll`: clear both manual and suppressed overrides.
+
+Click behavior in preview phase:
+
+- Clicking an auto-highlighted corner toggles suppression for that corner.
+- Clicking a manual point toggles that manual split point on/off.
+
+String shortcuts in preview phase:
+
+- `manual`: prints guidance for adding manual split points.
+- `suppress`: prints guidance for suppressing auto corners.
+- `clear`/`clearall`: clears both manual and suppressed sets.
 
 ### vTextAligned flow
 
 1. Run `vTextAligned`.
-1. Select a target curve.
-1. Pick points near the curve to place text aligned to local tangent.
-1. Use options while placing: `Text`, `Height`, `Offset`, `Rotate`, `Undo`, and `Redo`.
+1. Click a curve to lock orientation base, or click existing text to edit/reposition it.
+1. Pick placement point near locked curve.
+1. Use options while placing:
+
+    - `Text`: sets content for newly created text and active text edits.
+    - `Height`: text height.
+    - `Offset`: signed side offset from curve toward text bounds.
+    - `Rotate`: rotates text orientation by 90 degrees each use.
 
 Hidden keywords while placing:
 
-- `u` or `undo`
-- `r` or `redo`
+- `u` or `undo`: undo last in-session add/move action.
+- `r` or `redo`: redo last undone add/move action.
 
 ### vTextFlip flow
 
 1. Run `vTextFlip`.
 1. Select annotation text objects.
-1. Use command options to flip/rotate text orientation in place.
+1. Use command options:
+
+    - `Flip`: flips selected text orientation using object-local plane behavior.
+    - `Rotate`: rotates selected text by 90 degrees.
+    - `Clear`: clears current command selection list.
 
 ### vTogglePerpGumball flow
 
