@@ -6,20 +6,20 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 
 - Rhino plug-in entry point: vToolsPlugIn
 - Native commands:
-  - [vCurveToSpline](#vcurvetospline-flow)
-  - [vFitBox](#vfitbox-flow)
-  - [vLine](#vline-flow)
-  - [vLineLength](#vlinelength-flow)
-  - [vOrient2pt](#vorient2pt-flow)
-  - [vOrient3pt](#vorient3pt-flow)
-  - [vPointNormalToSurface](#vpointnormaltosurface-flow)
-  - [vScallop](#vscallop-flow)
-  - [vSplitAtCorners](#vsplitatcorners-flow)
-  - [vTextAligned](#vtextaligned-flow)
-  - [vTextFlip](#vtextflip-flow)
-  - [vTogglePerpGumball](#vtoggleperpgumball-flow)
-  - [vTrim](#vtrim-flow)
-  - [vUzip](#vuzip-flow)
+  - [vCurveToSpline](#vcurvetospline-flow) *(26.04.24)*
+  - [vFitBox](#vfitbox-flow) *(26.04.24)*
+  - [vLine](#vline-flow) *(26.04.27)*
+  - [vLineLength](#vlinelength-flow) *(26.04.27)*
+  - [vOrient2pt](#vorient2pt-flow) *(26.04.24)*
+  - [vOrient3pt](#vorient3pt-flow) *(26.04.24)*
+  - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.04.27)*
+  - [vScallop](#vscallop-flow) *(26.04.27)*
+  - [vSplitAtCorners](#vsplitatcorners-flow) *(26.04.27)*
+  - [vTextAligned](#vtextaligned-flow) *(26.04.27)*
+  - [vTextFlip](#vtextflip-flow) *(26.04.27)*
+  - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.04.24)*
+  - [vTrim](#vtrim-flow) *(26.04.24)*
+  - [vUzip](#vuzip-flow) *(26.04.24)*
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
 
