@@ -61,9 +61,8 @@ public sealed class vSplitAtCorners : Command
     var minLenOpt = new OptionDouble(_minLength, 0.0, 1e12);
 
     var manualCorners = new HashSet<SplitPointKey>();
-    var suppressedCorners = new HashSet<SplitPointKey>();
 
-    var conduit = new CornerPreviewConduit(doc, selectedIds, angleOpt.CurrentValue, minLenOpt.CurrentValue, manualCorners, suppressedCorners);
+    var conduit = new CornerPreviewConduit(doc, selectedIds, angleOpt.CurrentValue, minLenOpt.CurrentValue, manualCorners);
     conduit.Enabled = true;
 
     try
@@ -73,15 +72,12 @@ public sealed class vSplitAtCorners : Command
         conduit.UpdateThresholds(angleOpt.CurrentValue, minLenOpt.CurrentValue);
 
         var gp = new GetPoint();
-        gp.SetCommandPrompt("Click highlighted corner to toggle split. Enter to apply");
+        gp.SetCommandPrompt("Click curve to add/remove split point. Enter to apply");
         gp.AcceptNothing(true);
-        gp.AcceptString(true);
 
         var idxAngle = gp.AddOptionDouble("Angle", ref angleOpt);
         var idxMinLen = gp.AddOptionDouble("MinLength", ref minLenOpt);
         var idxClearManual = gp.AddOption("ClearManual");
-        var idxClearSuppressed = gp.AddOption("ClearSuppressed");
-        var idxClearAll = gp.AddOption("ClearAll");
 
         EventHandler<GetPointDrawEventArgs> drawHandler = (_, e) => conduit.OnDynamicDraw(e);
         gp.DynamicDraw += drawHandler;
@@ -96,44 +92,8 @@ public sealed class vSplitAtCorners : Command
         if (result == GetResult.Option)
         {
           var opt = gp.Option();
-          if (opt != null)
-          {
-            if (opt.Index == idxClearManual)
-              manualCorners.Clear();
-            else if (opt.Index == idxClearSuppressed)
-              suppressedCorners.Clear();
-            else if (opt.Index == idxClearAll)
-            {
-              manualCorners.Clear();
-              suppressedCorners.Clear();
-            }
-          }
-
-          continue;
-        }
-
-        if (result == GetResult.String)
-        {
-          var token = (gp.StringResult() ?? string.Empty).Trim().ToLowerInvariant();
-          if (token is "clear" or "clearall")
-          {
+          if (opt != null && opt.Index == idxClearManual)
             manualCorners.Clear();
-            suppressedCorners.Clear();
-            continue;
-          }
-
-          if (token is "manual")
-          {
-            RhinoApp.WriteLine("vSplitAtCorners: click near a corner to add manual split.");
-            continue;
-          }
-
-          if (token is "suppress")
-          {
-            RhinoApp.WriteLine("vSplitAtCorners: click near a highlighted corner to suppress split.");
-            continue;
-          }
-
           continue;
         }
 
@@ -144,30 +104,7 @@ public sealed class vSplitAtCorners : Command
           continue;
 
         var pick = gp.Point();
-
-        if (!conduit.TryFindNearestCandidate(pick, out var candidate, out var key, out var isAutoCandidate))
-          continue;
-
-        if (isAutoCandidate)
-        {
-          if (suppressedCorners.Contains(key))
-            suppressedCorners.Remove(key);
-          else
-            suppressedCorners.Add(key);
-
-          manualCorners.Remove(key);
-        }
-        else
-        {
-          if (manualCorners.Contains(key))
-            manualCorners.Remove(key);
-          else
-            manualCorners.Add(key);
-
-          suppressedCorners.Remove(key);
-        }
-
-        conduit.UpdateThresholds(angleOpt.CurrentValue, minLenOpt.CurrentValue);
+        conduit.TryToggleManualNear(pick);
         doc.Views.Redraw();
       }
 
@@ -190,17 +127,13 @@ public sealed class vSplitAtCorners : Command
 
         var basePoints = DetectCornerCandidates(curve, _angleDeg, _minLength);
 
-        var autoPoints = basePoints
-          .Where(p => !suppressedCorners.Contains(new SplitPointKey(id, p.Parameter)))
-          .ToList();
-
         var manualPointsForCurve = manualCorners
           .Where(m => m.CurveId == id)
           .Select(m => new CornerCandidate(m.Parameter, Point3d.Unset, 0.0, true))
           .ToList();
 
         var allParams = new List<double>();
-        foreach (var c in autoPoints)
+        foreach (var c in basePoints)
           allParams.Add(c.Parameter);
         foreach (var c in manualPointsForCurve)
           allParams.Add(c.Parameter);
@@ -439,7 +372,6 @@ public sealed class vSplitAtCorners : Command
     private readonly List<Guid> _curveIds;
 
     private readonly HashSet<SplitPointKey> _manualCorners;
-    private readonly HashSet<SplitPointKey> _suppressedCorners;
 
     private readonly Dictionary<Guid, List<CornerCandidate>> _autoByCurve = new();
 
@@ -451,15 +383,13 @@ public sealed class vSplitAtCorners : Command
       List<Guid> curveIds,
       double angleDeg,
       double minLength,
-      HashSet<SplitPointKey> manualCorners,
-      HashSet<SplitPointKey> suppressedCorners)
+      HashSet<SplitPointKey> manualCorners)
     {
       _doc = doc;
       _curveIds = curveIds;
       _angleDeg = angleDeg;
       _minLength = minLength;
       _manualCorners = manualCorners;
-      _suppressedCorners = suppressedCorners;
       RebuildAutoCandidates();
     }
 
@@ -472,13 +402,12 @@ public sealed class vSplitAtCorners : Command
         RebuildAutoCandidates();
     }
 
-    public bool TryFindNearestCandidate(Point3d pick, out CornerCandidate candidate, out SplitPointKey key, out bool isAutoCandidate)
+    /// <summary>
+    /// If click is near an existing manual split point, removes it.
+    /// Otherwise, snaps to the nearest curve and adds a manual split there.
+    /// </summary>
+    public void TryToggleManualNear(Point3d pick)
     {
-      candidate = default;
-      key = default;
-      isAutoCandidate = false;
-
-      // Use screen-pixel distance so tolerance is scale- and zoom-independent.
       const double PixelTol = 20.0;
       var viewport = _doc.Views.ActiveView?.ActiveViewport;
       double searchTol;
@@ -487,26 +416,10 @@ public sealed class vSplitAtCorners : Command
       else
         searchTol = Math.Max(_doc.ModelAbsoluteTolerance * 8.0, 1.0);
 
+      // Check for existing manual point within tolerance → remove it.
       var bestD = double.MaxValue;
-      bool found = false;
-
-      foreach (var kv in _autoByCurve)
-      {
-        var curveId = kv.Key;
-        foreach (var c in kv.Value)
-        {
-          var k = new SplitPointKey(curveId, c.Parameter);
-          var d = pick.DistanceTo(c.Point);
-          if (d <= searchTol && d < bestD)
-          {
-            bestD = d;
-            candidate = c;
-            key = k;
-            isAutoCandidate = true;
-            found = true;
-          }
-        }
-      }
+      SplitPointKey bestKey = default;
+      bool foundManual = false;
 
       foreach (var m in _manualCorners)
       {
@@ -514,20 +427,51 @@ public sealed class vSplitAtCorners : Command
         if (obj?.CurveGeometry == null)
           continue;
 
-        var curve = obj.CurveGeometry;
-        var p = curve.PointAt(m.Parameter);
+        var p = obj.CurveGeometry.PointAt(m.Parameter);
         var d = pick.DistanceTo(p);
         if (d <= searchTol && d < bestD)
         {
           bestD = d;
-          candidate = new CornerCandidate(m.Parameter, p, 180.0, true);
-          key = m;
-          isAutoCandidate = false;
-          found = true;
+          bestKey = m;
+          foundManual = true;
         }
       }
 
-      return found;
+      if (foundManual)
+      {
+        _manualCorners.Remove(bestKey);
+        return;
+      }
+
+      // Snap click to nearest selected curve and add manual split there.
+      var bestCurveId = Guid.Empty;
+      var bestT = 0.0;
+      var bestSnapD = double.MaxValue;
+
+      foreach (var id in _curveIds)
+      {
+        var obj = _doc.Objects.FindId(id) as CurveObject;
+        if (obj?.CurveGeometry == null)
+          continue;
+
+        var curve = obj.CurveGeometry;
+        if (!curve.ClosestPoint(pick, out var t))
+          continue;
+
+        var d = pick.DistanceTo(curve.PointAt(t));
+        if (d <= searchTol && d < bestSnapD)
+        {
+          bestSnapD = d;
+          bestCurveId = id;
+          bestT = t;
+        }
+      }
+
+      if (bestCurveId == Guid.Empty)
+        return;
+
+      var newKey = new SplitPointKey(bestCurveId, bestT);
+      _manualCorners.Add(newKey);
     }
 
     public void OnDynamicDraw(GetPointDrawEventArgs e)
@@ -543,11 +487,6 @@ public sealed class vSplitAtCorners : Command
 
     private void DrawPreview(DisplayPipeline display)
     {
-
-      var autoColor = Color.OrangeRed;
-      var manualColor = Color.Cyan;
-      var suppressedColor = Color.Gray;
-
       foreach (var curveId in _curveIds)
       {
         var obj = _doc.Objects.FindId(curveId) as CurveObject;
@@ -559,15 +498,8 @@ public sealed class vSplitAtCorners : Command
 
       foreach (var kv in _autoByCurve)
       {
-        var curveId = kv.Key;
-
         foreach (var candidate in kv.Value)
-        {
-          var key = new SplitPointKey(curveId, candidate.Parameter);
-          var color = _suppressedCorners.Contains(key) ? suppressedColor : autoColor;
-          var size = _suppressedCorners.Contains(key) ? 2 : 3;
-          display.DrawPoint(candidate.Point, PointStyle.RoundSimple, size, color);
-        }
+          display.DrawPoint(candidate.Point, PointStyle.RoundSimple, 3, Color.OrangeRed);
       }
 
       foreach (var m in _manualCorners)
@@ -577,7 +509,7 @@ public sealed class vSplitAtCorners : Command
           continue;
 
         var p = obj.CurveGeometry.PointAt(m.Parameter);
-        display.DrawPoint(p, PointStyle.X, 3, manualColor);
+        display.DrawPoint(p, PointStyle.X, 3, Color.Cyan);
       }
     }
 
