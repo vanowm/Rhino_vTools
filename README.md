@@ -1,6 +1,6 @@
 # vTools
 
-vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, and gumball workflows.
+vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, and text workflows.
 
 ## What this project includes
 
@@ -8,9 +8,15 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 - Native commands:
   - [vCurveToSpline](#vcurvetospline-flow)
   - [vFitBox](#vfitbox-flow)
+  - [vLine](#vline-flow)
+  - [vLineLength](#vlinelength-flow)
   - [vOrient2pt](#vorient2pt-flow)
   - [vOrient3pt](#vorient3pt-flow)
-  - [vPointNormalToSurface / PointSurf](#vpointnormaltosurface--pointsurf-flow)
+  - [vPointNormalToSurface](#vpointnormaltosurface-flow)
+  - [vScallop](#vscallop-flow)
+  - [vSplitAtCorners](#vsplitatcorners-flow)
+  - [vTextAligned](#vtextaligned-flow)
+  - [vTextFlip](#vtextflip-flow)
   - [vTogglePerpGumball](#vtoggleperpgumball-flow)
   - [vTrim](#vtrim-flow)
   - [vUzip](#vuzip-flow)
@@ -56,7 +62,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPointNormalToSurface / PointSurf](#vpointnormaltosurface--pointsurf-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow).
+Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -83,6 +89,18 @@ Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow
 
 1. Confirm selection to generate the fit result.
 
+### vLine flow
+
+1. Run `vLine`.
+1. The command executes the LinePlus workflow from `LinePlus.py`.
+1. Use LinePlus options (single, chained, polyline, tangent/perpendicular priorities) during point picking.
+
+### vLineLength flow
+
+1. Run `vLineLength`.
+1. Hover and click open curves to apply line length edits.
+1. Use `Length`, `ExtendMode`, and `Mode` options while preview updates in real time.
+
 ### vOrient2pt flow
 
 1. Select objects to orient.
@@ -103,9 +121,9 @@ Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow
 1. Pick target third point.
 1. Toggle `Copy` option as needed during point picking.
 
-### vPointNormalToSurface / PointSurf flow
+### vPointNormalToSurface flow
 
-1. Run `vPointNormalToSurface` or `PointSurf`.
+1. Run `vPointNormalToSurface`.
 1. Select a target surface or polysurface face.
 1. Pick points in space.
 1. A point is placed on the closest evaluated surface location (normal evaluation point), with live preview from picked point to on-surface point.
@@ -115,6 +133,30 @@ Hidden keywords while picking points:
 
 - `u` or `undo`: remove last created point in the current command session.
 - `r` or `redo`: recreate last undone point in the current command session.
+
+### vScallop flow
+
+1. Run `vScallop`.
+1. The command executes the Scallop workflow from `Scallop.py`.
+1. Follow command line options/prompts to generate scallop geometry.
+
+### vSplitAtCorners flow
+
+1. Run `vSplitAtCorners`.
+1. The command executes the SplitAtCorners workflow from `SplitAtCorners.py`.
+1. Follow command line options/prompts to split curves at detected corner transitions.
+
+### vTextAligned flow
+
+1. Run `vTextAligned`.
+1. The command executes the TextAligned workflow from `TextAligned.py`.
+1. Use text, height, offset, and rotation options while placing/alignment updates preview.
+
+### vTextFlip flow
+
+1. Run `vTextFlip`.
+1. Select annotation text objects.
+1. Use command options to flip/rotate text orientation in place.
 
 ### vTogglePerpGumball flow
 
