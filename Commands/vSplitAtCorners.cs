@@ -463,7 +463,15 @@ public sealed class vSplitAtCorners : Command
       key = default;
       isAutoCandidate = false;
 
-      var searchTol = Math.Max(_doc.ModelAbsoluteTolerance * 8.0, 1.0);
+      // Use screen-pixel distance so tolerance is scale- and zoom-independent.
+      const double PixelTol = 20.0;
+      var viewport = _doc.Views.ActiveView?.ActiveViewport;
+      double searchTol;
+      if (viewport != null && viewport.GetWorldToScreenScale(pick, out var ppu) && ppu > 0.0)
+        searchTol = PixelTol / ppu;
+      else
+        searchTol = Math.Max(_doc.ModelAbsoluteTolerance * 8.0, 1.0);
+
       var bestD = double.MaxValue;
       bool found = false;
 
@@ -473,9 +481,6 @@ public sealed class vSplitAtCorners : Command
         foreach (var c in kv.Value)
         {
           var k = new SplitPointKey(curveId, c.Parameter);
-          if (_suppressedCorners.Contains(k))
-            continue;
-
           var d = pick.DistanceTo(c.Point);
           if (d <= searchTol && d < bestD)
           {
