@@ -25,11 +25,8 @@ public sealed class vTrim : Command
   private static bool _extendAsLine = true;
   private static bool _joinAfterTrim = true;
   private static EventHandler? _nativeTrimLaunchIdleHandler;
-  private static EventHandler<CommandEventArgs>? _nativeTrimEndHandler;
   private static Guid[]? _pendingNativeTrimCutters;
   private static uint _pendingNativeTrimDocSerial;
-  private static Guid[]? _nativeTrimCleanupCutters;
-  private static uint _nativeTrimCleanupDocSerial;
 
   public override string EnglishName => "vTrim";
 
@@ -177,16 +174,8 @@ public sealed class vTrim : Command
       _nativeTrimLaunchIdleHandler = null;
     }
 
-    if (_nativeTrimEndHandler != null)
-    {
-      Command.EndCommand -= _nativeTrimEndHandler;
-      _nativeTrimEndHandler = null;
-    }
-
     _pendingNativeTrimCutters = null;
     _pendingNativeTrimDocSerial = 0u;
-    _nativeTrimCleanupCutters = null;
-    _nativeTrimCleanupDocSerial = 0u;
   }
 
   private static void OnLaunchNativeTrimOnIdle(object? sender, EventArgs e)
@@ -237,49 +226,9 @@ public sealed class vTrim : Command
       return;
     }
 
-    _nativeTrimCleanupCutters = selectedCutters.Distinct().ToArray();
-    _nativeTrimCleanupDocSerial = doc.RuntimeSerialNumber;
+    _ = RhinoApp.RunScript("_Trim", false);
 
-    if (_nativeTrimEndHandler != null)
-      Command.EndCommand -= _nativeTrimEndHandler;
-
-    _nativeTrimEndHandler = OnNativeTrimEndCommand;
-    Command.EndCommand += _nativeTrimEndHandler;
-
-    var started = RhinoApp.RunScript("_Trim", false);
-    if (!started)
-      ClearNativeTrimCleanupHandler();
-  }
-
-  private static void ClearNativeTrimCleanupHandler()
-  {
-    if (_nativeTrimEndHandler != null)
-    {
-      Command.EndCommand -= _nativeTrimEndHandler;
-      _nativeTrimEndHandler = null;
-    }
-
-    _nativeTrimCleanupCutters = null;
-    _nativeTrimCleanupDocSerial = 0u;
-  }
-
-  private static void OnNativeTrimEndCommand(object? sender, CommandEventArgs e)
-  {
-    if (!string.Equals(e.CommandEnglishName, "Trim", StringComparison.OrdinalIgnoreCase))
-      return;
-
-    var cutterIds = _nativeTrimCleanupCutters;
-    var docSerial = _nativeTrimCleanupDocSerial;
-    ClearNativeTrimCleanupHandler();
-
-    if (cutterIds == null || cutterIds.Length == 0)
-      return;
-
-    var doc = e.Document ?? RhinoDoc.ActiveDoc;
-    if (doc == null || doc.RuntimeSerialNumber != docSerial)
-      return;
-
-    foreach (var id in cutterIds)
+    foreach (var id in selectedCutters)
     {
       if (id != Guid.Empty)
         doc.Objects.Select(id, false);
@@ -526,7 +475,7 @@ public sealed class vTrim : Command
     go.SubObjectSelect = false;
     go.GroupSelect = true;
     go.AcceptNothing(true);
-    go.EnablePreSelect(true, true);
+    go.EnablePreSelect(false, true);
     go.EnableClearObjectsOnEntry(false);
     go.EnableUnselectObjectsOnExit(true);
     go.DeselectAllBeforePostSelect = false;
