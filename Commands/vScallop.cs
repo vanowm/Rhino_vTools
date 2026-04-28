@@ -168,6 +168,8 @@ public sealed class vScallop : Command
       if (!TryGetLineLikeEndpoints(curve, doc.ModelAbsoluteTolerance, out pointA, out pointB))
       {
         RhinoApp.WriteLine("vScallop: selected curve is not a line.");
+        doc.Objects.UnselectAll();
+        doc.Views.Redraw();
         continue;
       }
 
