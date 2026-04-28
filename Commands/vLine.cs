@@ -16,37 +16,34 @@ namespace vTools.Commands;
 public sealed class vLine : Command
 {
   private const string OptionsSectionName = "vLine";
-  private const string ModeKey = "mode";
   private const string ChainModeKey = "chainMode";
-  private const string BothSidesKey = "bothSides";
-  private const string LengthKey = "length";
   private const string PriorityKey = "priority";
+  private const string PersistConstraintKey = "persistConstraint";
+  private const string LengthKey = "length";
+  private const string AngleLockKey = "angleLock";
+  private const string AngleKey = "angle";
+  private const string AngleRelativeKey = "angleRelative";
 
-  private static readonly string[] ModeValues = { "Normal", "Perp", "Tangent", "Auto", "PerpNear", "TanNear" };
   private static readonly string[] ChainModeValues = { "Single", "Multiple", "Chained", "Polyline" };
-  private static readonly string[] PriorityValues = { "Closest", "PerpFirst", "TanFirst" };
+  private static readonly string[] PriorityValues = { "Closest", "PerpFirst", "TanFirst", "KeepCurrent" };
 
-  private const int ModeNormal = 0;
-  private const int ModePerp = 1;
-  private const int ModeTangent = 2;
-  private const int ModeAuto = 3;
-  private const int ModePerpNear = 4;
-  private const int ModeTanNear = 5;
-
-  private const int ChainSingle = 0;
-  private const int ChainMultiple = 1;
-  private const int ChainChained = 2;
-  private const int ChainPolyline = 3;
+  private const int ModeSingle = 0;
+  private const int ModeMultiple = 1;
+  private const int ModeChained = 2;
+  private const int ModePolyline = 3;
 
   private const int PriorityClosest = 0;
   private const int PriorityPerpFirst = 1;
   private const int PriorityTanFirst = 2;
+  private const int PriorityKeepCurrent = 3;
 
-  private static int _mode = ModeNormal;
-  private static int _chainMode = ChainSingle;
-  private static bool _bothSides;
-  private static double _length;
+  private static int _chainMode = ModeSingle;
   private static int _priority = PriorityClosest;
+  private static bool _persistConstraint;
+  private static double _length;
+  private static bool _angleLock;
+  private static double _angle;
+  private static bool _angleRelative;
 
   /// <summary>
   /// Rhino command name.
@@ -54,82 +51,232 @@ public sealed class vLine : Command
   public override string EnglishName => "vLine";
 
   /// <summary>
-  /// Draws line segments with optional perpendicular/tangent endpoint solving.
+  /// Executes interactive line drawing with chain modes and curve-based constraints.
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadPersistedOptions();
 
-    Point3d? currentStart = null;
-    var polylinePoints = new List<Point3d>();
+    var startResult = ResolveFirstPoint(doc, initialBothSides: false, initialChainMode: _chainMode, canUndo: false, canRedo: false);
+    if (startResult.DelegatedToNative)
+      return Result.Success;
+    if (!startResult.HasPoint)
+      return Result.Cancel;
 
-    while (true)
+    var currentStart = startResult.Point;
+    var firstSegment = true;
+    var chainModeState = startResult.ChainMode;
+    var initialBothSides = startResult.BothSides;
+
+    string? constraintModeState = null;
+    var persistConstraintState = _persistConstraint;
+    var priorityState = _priority;
+    var lengthState = _length;
+    var angleLockState = _angleLock;
+    var angleState = _angle;
+    var angleRelativeState = _angleRelative;
+
+    Vector3d? lastSegmentVector = null;
+
+    List<Point3d>? polylinePoints = null;
+    Guid tempPolylineId = Guid.Empty;
+
+    var history = new List<ActionRecord>();
+    var redo = new List<ActionRecord>();
+
+    var continueChain = true;
+    while (continueChain)
     {
-      if (!currentStart.HasValue)
-      {
-        if (!TryGetStartPoint(doc, out var startPoint))
-          break;
+      var segmentBothDefault = firstSegment ? initialBothSides : false;
+      var modeSeed = (persistConstraintState || firstSegment) ? constraintModeState : null;
 
-        currentStart = startPoint;
-        if (_chainMode == ChainPolyline)
-        {
-          polylinePoints.Clear();
-          polylinePoints.Add(startPoint);
-        }
+      var secondResult = ResolveSecondPoint(
+        doc,
+        currentStart,
+        segmentBothDefault,
+        lengthState,
+        modeSeed,
+        chainModeState,
+        persistConstraintState,
+        priorityState,
+        angleLockState,
+        angleState,
+        angleRelativeState,
+        lastSegmentVector,
+        canUndo: history.Count > 0,
+        canUndoStart: firstSegment,
+        canRedo: redo.Count > 0);
+
+      if (secondResult.State != null)
+      {
+        var state = secondResult.State.Value;
+        constraintModeState = state.Mode;
+        persistConstraintState = state.PersistConstraint;
+        priorityState = state.Priority;
+        lengthState = state.Length;
+        angleLockState = state.AngleLock;
+        angleState = state.Angle;
+        angleRelativeState = state.AngleRelative;
+
+        _persistConstraint = persistConstraintState;
+        _priority = priorityState;
+        _length = lengthState;
+        _angleLock = angleLockState;
+        _angle = angleState;
+        _angleRelative = angleRelativeState;
       }
 
-      var curveCache = CollectCurveCache(doc);
-      if (!TryGetEndPoint(doc, currentStart.Value, curveCache, out var resolvedEndPoint, out var accepted))
+      if (secondResult.UndoStartRequested)
       {
-        if (!accepted)
-          break;
-
-        continue;
-      }
-
-      if (_chainMode == ChainPolyline)
-      {
-        if (resolvedEndPoint.DistanceTo(currentStart.Value) <= doc.ModelAbsoluteTolerance)
+        var newStartResult = ResolveFirstPoint(doc, initialBothSides, chainModeState, canUndo: history.Count > 0, canRedo: redo.Count > 0);
+        if (newStartResult.UndoRequested)
         {
-          RhinoApp.WriteLine("vLine: second point too close to start.");
+          UndoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
           continue;
         }
 
-        polylinePoints.Add(resolvedEndPoint);
+        if (newStartResult.RedoRequested)
+        {
+          RedoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
+          UpdateLastSegmentVector(history, polylinePoints, ref lastSegmentVector);
+          continue;
+        }
+
+        if (newStartResult.DelegatedToNative)
+          return Result.Success;
+
+        if (!newStartResult.HasPoint)
+          return Result.Cancel;
+
+        currentStart = newStartResult.Point;
+        firstSegment = true;
+        history.Clear();
+        redo.Clear();
+        polylinePoints = null;
+        lastSegmentVector = null;
+        DeleteObjectIfValid(doc, tempPolylineId);
+        tempPolylineId = Guid.Empty;
+        doc.Views.Redraw();
+        continue;
+      }
+
+      if (secondResult.RedoRequested)
+      {
+        RedoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
+        UpdateLastSegmentVector(history, polylinePoints, ref lastSegmentVector);
+        continue;
+      }
+
+      if (secondResult.UndoRequested)
+      {
+        UndoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
+        continue;
+      }
+
+      if (!secondResult.HasPoint)
+      {
+        if (tempPolylineId != Guid.Empty)
+          doc.Views.Redraw();
+        SavePersistedOptions();
+        return Result.Success;
+      }
+
+      var endPoint = secondResult.Point;
+      var bothSides = secondResult.BothSides;
+      var selectedChainMode = secondResult.ChainMode;
+
+      if (selectedChainMode == ModePolyline)
+      {
+        polylinePoints ??= new List<Point3d> { currentStart };
+        var prevPoints = new List<Point3d>(polylinePoints);
+        polylinePoints.Add(endPoint);
+
+        DeleteObjectIfValid(doc, tempPolylineId);
+        tempPolylineId = doc.Objects.AddPolyline(new Polyline(polylinePoints));
+
+        history.Add(ActionRecord.CreatePolylineAdd(currentStart, prevPoints, endPoint, tempPolylineId, endPoint));
+        redo.Clear();
+
+        if (polylinePoints.Count >= 2)
+          lastSegmentVector = polylinePoints[^1] - polylinePoints[^2];
       }
       else
       {
-        if (!TryCreateLine(doc, currentStart.Value, resolvedEndPoint))
+        if (tempPolylineId != Guid.Empty)
+          tempPolylineId = Guid.Empty;
+
+        if (polylinePoints is { Count: > 1 })
+          polylinePoints = null;
+
+        Guid lineId;
+        if (bothSides)
         {
-          RhinoApp.WriteLine("vLine: failed to create line.");
-          continue;
+          var vec = endPoint - currentStart;
+          if (vec.IsTiny())
+            return Result.Cancel;
+
+          var startA = currentStart - vec;
+          var startB = currentStart + vec;
+          lineId = doc.Objects.AddLine(startA, startB);
         }
+        else
+        {
+          lineId = doc.Objects.AddLine(currentStart, endPoint);
+        }
+
+        history.Add(ActionRecord.CreateLine(lineId, currentStart, currentStart, endPoint, bothSides, endPoint));
+        redo.Clear();
+        lastSegmentVector = endPoint - currentStart;
       }
 
-      SavePersistedOptions();
+      firstSegment = false;
 
-      if (_chainMode == ChainSingle)
-        break;
-
-      if (_chainMode == ChainMultiple)
+      if (selectedChainMode == ModeMultiple)
       {
-        currentStart = null;
+        while (true)
+        {
+          var newStartResult = ResolveFirstPoint(doc, initialBothSides, selectedChainMode, canUndo: history.Count > 0, canRedo: redo.Count > 0);
+
+          if (newStartResult.UndoRequested)
+          {
+            UndoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
+            continue;
+          }
+
+          if (newStartResult.RedoRequested)
+          {
+            RedoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
+            continue;
+          }
+
+          if (newStartResult.DelegatedToNative)
+            return Result.Success;
+
+          if (!newStartResult.HasPoint)
+            return Result.Success;
+
+          currentStart = newStartResult.Point;
+          firstSegment = true;
+          lastSegmentVector = null;
+          continueChain = true;
+          break;
+        }
+
+        SavePersistedOptions();
         continue;
       }
 
-      currentStart = resolvedEndPoint;
+      currentStart = endPoint;
+      chainModeState = selectedChainMode;
+      if (!persistConstraintState)
+        constraintModeState = null;
+
+      continueChain = chainModeState != ModeSingle;
+      SavePersistedOptions();
     }
 
-    if (_chainMode == ChainPolyline && polylinePoints.Count > 1)
-    {
-      var polyline = new Polyline(polylinePoints);
-      if (polyline.IsValid)
-      {
-        var id = doc.Objects.AddPolyline(polyline);
-        if (id == Guid.Empty)
-          RhinoApp.WriteLine("vLine: failed to create polyline.");
-      }
-    }
+    if (polylinePoints is { Count: > 1 } && (tempPolylineId == Guid.Empty || doc.Objects.FindId(tempPolylineId) == null))
+      _ = doc.Objects.AddPolyline(new Polyline(polylinePoints));
 
     doc.Views.Redraw();
     return Result.Success;
@@ -141,31 +288,39 @@ public sealed class vLine : Command
       OptionsSectionName,
       section =>
       {
-        var mode = _mode;
         var chainMode = _chainMode;
-        var bothSides = _bothSides;
-        var length = _length;
         var priority = _priority;
+        var persistConstraint = _persistConstraint;
+        var length = _length;
+        var angleLock = _angleLock;
+        var angle = _angle;
+        var angleRelative = _angleRelative;
 
-        if (vToolsOptionStore.TryGetDouble(section, ModeKey, out var persistedMode))
-          mode = ClampIndex((int)Math.Round(persistedMode, MidpointRounding.AwayFromZero), ModeValues.Length);
-        if (vToolsOptionStore.TryGetDouble(section, ChainModeKey, out var persistedChainMode))
-          chainMode = ClampIndex((int)Math.Round(persistedChainMode, MidpointRounding.AwayFromZero), ChainModeValues.Length);
-        if (vToolsOptionStore.TryGetBool(section, BothSidesKey, out var persistedBothSides))
-          bothSides = persistedBothSides;
-        if (vToolsOptionStore.TryGetDouble(section, LengthKey, out var persistedLength))
-          length = Math.Max(0.0, persistedLength);
+        if (vToolsOptionStore.TryGetDouble(section, ChainModeKey, out var persistedChain))
+          chainMode = ClampIndex((int)Math.Round(persistedChain, MidpointRounding.AwayFromZero), ChainModeValues.Length);
         if (vToolsOptionStore.TryGetDouble(section, PriorityKey, out var persistedPriority))
           priority = ClampIndex((int)Math.Round(persistedPriority, MidpointRounding.AwayFromZero), PriorityValues.Length);
+        if (vToolsOptionStore.TryGetBool(section, PersistConstraintKey, out var persistedPersist))
+          persistConstraint = persistedPersist;
+        if (vToolsOptionStore.TryGetDouble(section, LengthKey, out var persistedLength))
+          length = persistedLength;
+        if (vToolsOptionStore.TryGetBool(section, AngleLockKey, out var persistedAngleLock))
+          angleLock = persistedAngleLock;
+        if (vToolsOptionStore.TryGetDouble(section, AngleKey, out var persistedAngle))
+          angle = persistedAngle;
+        if (vToolsOptionStore.TryGetBool(section, AngleRelativeKey, out var persistedAngleRelative))
+          angleRelative = persistedAngleRelative;
 
-        return (mode, chainMode, bothSides, length, priority);
+        return (chainMode, priority, persistConstraint, length, angleLock, angle, angleRelative);
       });
 
-    _mode = values.mode;
-    _chainMode = values.chainMode;
-    _bothSides = values.bothSides;
-    _length = Math.Max(0.0, values.length);
-    _priority = values.priority;
+    _chainMode = ClampIndex(values.chainMode, ChainModeValues.Length);
+    _priority = ClampIndex(values.priority, PriorityValues.Length);
+    _persistConstraint = values.persistConstraint;
+    _length = values.length;
+    _angleLock = values.angleLock;
+    _angle = values.angle;
+    _angleRelative = values.angleRelative;
   }
 
   private static void SavePersistedOptions()
@@ -174,454 +329,546 @@ public sealed class vLine : Command
       OptionsSectionName,
       section =>
       {
-        section[ModeKey] = _mode;
         section[ChainModeKey] = _chainMode;
-        section[BothSidesKey] = _bothSides;
-        section[LengthKey] = _length;
         section[PriorityKey] = _priority;
+        section[PersistConstraintKey] = _persistConstraint;
+        section[LengthKey] = _length;
+        section[AngleLockKey] = _angleLock;
+        section[AngleKey] = _angle;
+        section[AngleRelativeKey] = _angleRelative;
       });
   }
 
-  private static bool TryGetStartPoint(RhinoDoc doc, out Point3d startPoint)
+  private static FirstPointResult ResolveFirstPoint(RhinoDoc doc, bool initialBothSides, int initialChainMode, bool canUndo, bool canRedo)
   {
-    startPoint = Point3d.Unset;
+    var getPoint = new GetPoint();
+    getPoint.SetCommandPrompt("Start of line");
+    getPoint.AcceptString(true);
+
+    var bothSides = new OptionToggle(initialBothSides, "No", "Yes");
+    var chainModeIndex = ClampIndex(initialChainMode, ChainModeValues.Length);
+    var chainModeOptionIndex = getPoint.AddOptionList("Mode", ChainModeValues, chainModeIndex);
+    getPoint.AddOptionToggle("BothSides", ref bothSides);
+
+    var idxNormal = getPoint.AddOption("Normal");
+    var idxAngled = getPoint.AddOption("Angled");
+    var idxVertical = getPoint.AddOption("Vertical");
+    var idxFourPoint = getPoint.AddOption("FourPoint");
+    var idxBisector = getPoint.AddOption("Bisector");
+    var idxPerp = getPoint.AddOption("Perpendicular");
+    var idxTangent = getPoint.AddOption("Tangent");
+    var idxBiTangent = getPoint.AddOption("BiTangent");
+    var idxExtension = getPoint.AddOption("Extension");
+
+    var delegatedModes = new Dictionary<int, string>
+    {
+      [idxNormal] = "Normal",
+      [idxAngled] = "Angled",
+      [idxVertical] = "Vertical",
+      [idxFourPoint] = "FourPoint",
+      [idxBisector] = "Bisector",
+      [idxPerp] = "Perpendicular",
+      [idxTangent] = "Tangent",
+      [idxBiTangent] = "BiTangent",
+      [idxExtension] = "Extension"
+    };
 
     while (true)
     {
-      var gp = new GetPoint();
-      gp.SetCommandPrompt("Start of line");
-      gp.AcceptNothing(true);
-
-      var options = AddCommonOptions(gp);
-
-      var result = gp.Get();
-      if (gp.CommandResult() != Result.Success)
-        return false;
-
-      if (result == GetResult.Option)
-      {
-        ApplyCommonOptionState(options, gp.Option());
-
-        SavePersistedOptions();
-        continue;
-      }
-
-      if (result == GetResult.Number)
-      {
-        _length = Math.Max(0.0, gp.Number());
-        SavePersistedOptions();
-        continue;
-      }
-
-      if (result == GetResult.Nothing || result == GetResult.Cancel)
-        return false;
+      var result = getPoint.Get();
 
       if (result == GetResult.Point)
       {
-        startPoint = gp.Point();
-        return true;
+        _chainMode = chainModeIndex;
+        return FirstPointResult.WithPoint(getPoint.Point(), bothSides.CurrentValue, chainModeIndex);
       }
-    }
-  }
 
-  private static bool TryGetEndPoint(
-    RhinoDoc doc,
-    Point3d startPoint,
-    IReadOnlyList<CurveCacheItem> curveCache,
-    out Point3d resolvedEndPoint,
-    out bool accepted)
-  {
-    resolvedEndPoint = Point3d.Unset;
-    accepted = false;
-
-    while (true)
-    {
-      var gp = new GetPoint();
-      gp.SetCommandPrompt("End of line");
-      gp.SetBasePoint(startPoint, true);
-      gp.DrawLineFromPoint(startPoint, true);
-      gp.AcceptNothing(true);
-      gp.AcceptNumber(true, false);
-
-      var options = AddCommonOptions(gp);
-
-      EventHandler<GetPointDrawEventArgs> draw = (sender, e) =>
+      if (result == GetResult.String)
       {
-        if (!TryResolveEndpoint(doc, startPoint, e.CurrentPoint, curveCache, out var previewEnd, out var previewMode))
-          previewEnd = e.CurrentPoint;
+        var cmd = (getPoint.StringResult() ?? string.Empty).Trim().ToLowerInvariant().TrimStart('_', '!');
 
-        if (!TryBuildOutputSegment(startPoint, previewEnd, out var lineFrom, out var lineTo))
-          return;
+        if (cmd is "undo" or "u")
+        {
+          if (canUndo)
+            return FirstPointResult.UndoRequestedResult(bothSides.CurrentValue, chainModeIndex);
+          continue;
+        }
 
-        e.Display.DrawLine(lineFrom, lineTo, Color.Cyan, 2);
-      };
+        if (cmd is "redo" or "r")
+        {
+          if (canRedo)
+            return FirstPointResult.RedoRequestedResult(bothSides.CurrentValue, chainModeIndex);
+          continue;
+        }
 
-      gp.DynamicDraw += draw;
-      var result = gp.Get();
-      gp.DynamicDraw -= draw;
-
-      if (gp.CommandResult() != Result.Success)
-        return false;
+        continue;
+      }
 
       if (result == GetResult.Option)
       {
-        ApplyCommonOptionState(options, gp.Option());
+        var option = getPoint.Option();
+        if (option == null)
+          continue;
 
-        SavePersistedOptions();
+        if (delegatedModes.TryGetValue(option.Index, out var modeKeyword))
+        {
+          RunNativeLineMode(modeKeyword);
+          return FirstPointResult.Delegated(bothSides.CurrentValue, chainModeIndex);
+        }
+
+        if (option.Index == chainModeOptionIndex)
+          chainModeIndex = ClampIndex(option.CurrentListOptionIndex, ChainModeValues.Length);
+
         continue;
       }
 
-      if (result == GetResult.Number)
-      {
-        _length = Math.Max(0.0, gp.Number());
-        SavePersistedOptions();
-        continue;
-      }
-
-      if (result == GetResult.Nothing || result == GetResult.Cancel)
-        return false;
-
-      if (result != GetResult.Point)
-        continue;
-
-      accepted = true;
-      var pickPoint = gp.Point();
-      if (!TryResolveEndpoint(doc, startPoint, pickPoint, curveCache, out resolvedEndPoint, out var solvedMode))
-        resolvedEndPoint = pickPoint;
-
-      return true;
+      return FirstPointResult.None(bothSides.CurrentValue, chainModeIndex);
     }
   }
 
-  private static CommonOptionState AddCommonOptions(GetPoint gp)
-  {
-    var options = new CommonOptionState
-    {
-      BothSidesOption = new OptionToggle(_bothSides, "No", "Yes"),
-      LengthOption = new OptionDouble(_length, 0.0, 1.0e300)
-    };
-
-    options.ModeOptionIndex = gp.AddOptionList("Mode", ModeValues, _mode);
-    gp.AddOptionToggle("BothSides", ref options.BothSidesOption);
-    gp.AddOptionDouble("Length", ref options.LengthOption);
-    options.ChainModeOptionIndex = gp.AddOptionList("ChainMode", ChainModeValues, _chainMode);
-    options.PriorityOptionIndex = gp.AddOptionList("Priority", PriorityValues, _priority);
-
-    return options;
-  }
-
-  private static void ApplyCommonOptionState(CommonOptionState options, CommandLineOption? option)
-  {
-    _bothSides = options.BothSidesOption.CurrentValue;
-    _length = Math.Max(0.0, options.LengthOption.CurrentValue);
-
-    if (option != null)
-    {
-      if (option.Index == options.ModeOptionIndex)
-        _mode = ClampIndex(option.CurrentListOptionIndex, ModeValues.Length);
-      else if (option.Index == options.ChainModeOptionIndex)
-        _chainMode = ClampIndex(option.CurrentListOptionIndex, ChainModeValues.Length);
-      else if (option.Index == options.PriorityOptionIndex)
-        _priority = ClampIndex(option.CurrentListOptionIndex, PriorityValues.Length);
-    }
-
-    // Polyline works on chained endpoints; both-sides segmenting conflicts with polyline continuity.
-    if (_chainMode == ChainPolyline && _bothSides)
-      _bothSides = false;
-
-    if (_length < 0.0)
-      _length = 0.0;
-  }
-
-  private static bool TryCreateLine(RhinoDoc doc, Point3d startPoint, Point3d endPoint)
-  {
-    if (!TryBuildOutputSegment(startPoint, endPoint, out var lineFrom, out var lineTo))
-      return false;
-
-    var id = doc.Objects.AddLine(lineFrom, lineTo);
-    if (id == Guid.Empty)
-      return false;
-
-    doc.Views.Redraw();
-    return true;
-  }
-
-  private static bool TryBuildOutputSegment(Point3d startPoint, Point3d endPoint, out Point3d lineFrom, out Point3d lineTo)
-  {
-    lineFrom = startPoint;
-    lineTo = endPoint;
-
-    var direction = endPoint - startPoint;
-    if (!direction.Unitize())
-      return false;
-
-    if (_length > RhinoMath.ZeroTolerance)
-    {
-      lineTo = startPoint + direction * _length;
-    }
-
-    if (_bothSides)
-    {
-      var halfLength = _length > RhinoMath.ZeroTolerance ? _length : startPoint.DistanceTo(endPoint);
-      lineFrom = startPoint - direction * halfLength;
-      lineTo = startPoint + direction * halfLength;
-    }
-
-    return lineFrom.DistanceTo(lineTo) > RhinoMath.ZeroTolerance;
-  }
-
-  private static bool TryResolveEndpoint(
+  private static SecondPointResult ResolveSecondPoint(
     RhinoDoc doc,
     Point3d startPoint,
-    Point3d hintPoint,
-    IReadOnlyList<CurveCacheItem> curveCache,
-    out Point3d endpoint,
-    out string solvedMode)
+    bool initialBothSides,
+    double initialLength,
+    string? initialMode,
+    int initialChainMode,
+    bool initialPersistConstraint,
+    int initialPriority,
+    bool initialAngleLock,
+    double initialAngle,
+    bool initialAngleRelative,
+    Vector3d? referenceVector,
+    bool canUndo,
+    bool canUndoStart,
+    bool canRedo)
   {
-    endpoint = hintPoint;
-    solvedMode = ModeValues[_mode];
+    var getPoint = new GetPoint();
+    getPoint.SetBasePoint(startPoint, true);
+    getPoint.AcceptNumber(true, true);
+    getPoint.AcceptString(true);
 
-    if (_mode == ModeNormal)
-      return true;
+    var bothSides = new OptionToggle(initialBothSides, "No", "Yes");
+    var chainModeIndex = ClampIndex(initialChainMode, ChainModeValues.Length);
+    var priorityIndex = ClampIndex(initialPriority, PriorityValues.Length);
 
-    var plane = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
+    var lengthOption = new OptionDouble(initialLength);
+    var angleOption = new OptionDouble(initialAngle);
+    var persistConstraint = new OptionToggle(initialPersistConstraint, "No", "Yes");
+    var angleLock = new OptionToggle(initialAngleLock, "No", "Yes");
+    var angleRelative = new OptionToggle(initialAngleRelative, "Absolute", "Relative");
 
-    var hasPerp = TryResolveConstrainedPoint(startPoint, hintPoint, curveCache, plane, wantPerp: true, preferNear: _mode == ModePerpNear, out var perpPoint, out var perpScore, out var perpHintDistanceSq);
-    var hasTan = TryResolveConstrainedPoint(startPoint, hintPoint, curveCache, plane, wantPerp: false, preferNear: _mode == ModeTanNear, out var tanPoint, out var tanScore, out var tanHintDistanceSq);
+    var idxChainMode = getPoint.AddOptionList("Mode", ChainModeValues, chainModeIndex);
+    getPoint.AddOptionToggle("BothSides", ref bothSides);
+    var idxPerp = getPoint.AddOption("Perp");
+    var idxTan = getPoint.AddOption("Tangent");
+    var idxPerpNear = getPoint.AddOption("PerpNear");
+    var idxTanNear = getPoint.AddOption("TanNear");
+    var idxAuto = getPoint.AddOption("Auto");
+    var idxPriority = getPoint.AddOptionList("Priority", PriorityValues, priorityIndex);
+    getPoint.AddOptionToggle("PersistConstraint", ref persistConstraint);
+    var idxLength = getPoint.AddOptionDouble("Length", ref lengthOption);
+    getPoint.AddOptionToggle("AngleLock", ref angleLock);
+    var idxAngle = getPoint.AddOptionDouble("Angle", ref angleOption);
+    getPoint.AddOptionToggle("AngleRef", ref angleRelative);
 
-    switch (_mode)
+    var mode = initialMode;
+
+    var cacheState = new CurveCacheState(CollectCurveCache(doc), DateTime.UtcNow.AddMilliseconds(500));
+    string? lastAutoChoice = null;
+    var cplane = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
+
+    void ApplyModePrompt()
     {
-      case ModePerp:
-      case ModePerpNear:
-        if (hasPerp)
-        {
-          endpoint = perpPoint;
-          solvedMode = "Perp";
-          return true;
-        }
-        return false;
-
-      case ModeTangent:
-      case ModeTanNear:
-        if (hasTan)
-        {
-          endpoint = tanPoint;
-          solvedMode = "Tangent";
-          return true;
-        }
-        return false;
-
-      case ModeAuto:
-        if (hasPerp && hasTan)
-        {
-          if (_priority == PriorityPerpFirst)
-          {
-            endpoint = perpPoint;
-            solvedMode = "Auto-Perp";
-            return true;
-          }
-
-          if (_priority == PriorityTanFirst)
-          {
-            endpoint = tanPoint;
-            solvedMode = "Auto-Tangent";
-            return true;
-          }
-
-          // Closest strategy: prefer lower geometric error, then nearest to cursor hint.
-          var perpWins = perpScore < tanScore ||
-                         (Math.Abs(perpScore - tanScore) <= 1.0e-6 && perpHintDistanceSq <= tanHintDistanceSq);
-          endpoint = perpWins ? perpPoint : tanPoint;
-          solvedMode = perpWins ? "Auto-Perp" : "Auto-Tangent";
-          return true;
-        }
-
-        if (hasPerp)
-        {
-          endpoint = perpPoint;
-          solvedMode = "Auto-Perp";
-          return true;
-        }
-
-        if (hasTan)
-        {
-          endpoint = tanPoint;
-          solvedMode = "Auto-Tangent";
-          return true;
-        }
-
-        return false;
-
-      default:
-        return true;
+      if (mode == "perp")
+        getPoint.SetCommandPrompt("End point of line (Perp mode: hover near curve, click to accept)");
+      else if (mode == "tangent")
+        getPoint.SetCommandPrompt("End point of line (Tangent mode: hover near curve, click to accept)");
+      else if (mode == "perp_any")
+        getPoint.SetCommandPrompt("End point of line (PerpNear mode: solves against nearest curve)");
+      else if (mode == "tangent_any")
+        getPoint.SetCommandPrompt("End point of line (TanNear mode: solves against nearest curve)");
+      else if (mode == "auto")
+        getPoint.SetCommandPrompt("End point of line (Auto mode: priority chooses Perp/Tangent)");
+      else
+        getPoint.SetCommandPrompt("End point of line");
     }
-  }
 
-  private static bool TryResolveConstrainedPoint(
-    Point3d startPoint,
-    Point3d hintPoint,
-    IReadOnlyList<CurveCacheItem> curveCache,
-    Plane cplane,
-    bool wantPerp,
-    bool preferNear,
-    out Point3d endpoint,
-    out double score,
-    out double hintDistanceSq)
-  {
-    endpoint = Point3d.Unset;
-    score = double.MaxValue;
-    hintDistanceSq = double.MaxValue;
-
-    if (curveCache.Count == 0)
-      return false;
-
-    var shortlist = BuildCurveShortlist(curveCache, hintPoint, 12);
-
-    foreach (var item in shortlist)
+    void MaybeRefreshCurveCache(bool force)
     {
-      if (!TrySolvePointOnCurve(item.Curve, startPoint, hintPoint, cplane, wantPerp, out var candidate, out var candidateScore))
-        continue;
+      var now = DateTime.UtcNow;
+      if (!force && now < cacheState.NextRefreshUtc)
+        return;
 
-      var candidateHintDistSq = candidate.DistanceToSquared(hintPoint);
+      cacheState.CurveCache = CollectCurveCache(doc);
+      cacheState.NextRefreshUtc = now.AddMilliseconds(500);
+    }
 
-      var better = false;
-      if (preferNear)
+    Point3d ApplyAnglePointFromCurrent(Point3d currentPoint)
+    {
+      if (!angleLock.CurrentValue)
+        return currentPoint;
+
+      var baseVec = cplane.XAxis;
+      if (angleRelative.CurrentValue && referenceVector.HasValue)
       {
-        better = candidateHintDistSq < hintDistanceSq ||
-                 (Math.Abs(candidateHintDistSq - hintDistanceSq) <= 1.0e-8 && candidateScore < score);
+        var rv = referenceVector.Value;
+        if (!rv.IsTiny())
+          baseVec = rv;
+      }
+
+      var base2 = ToCPlane2d(baseVec, cplane);
+      if (!TryUnitize2d(base2, out var base2u))
+        base2u = new Vector2d(1.0, 0.0);
+
+      var radians = RhinoMath.ToRadians(angleOption.CurrentValue);
+      var cosA = Math.Cos(radians);
+      var sinA = Math.Sin(radians);
+      var dir2 = new Vector2d((base2u.X * cosA) - (base2u.Y * sinA), (base2u.X * sinA) + (base2u.Y * cosA));
+      if (!TryUnitize2d(dir2, out var dir2u))
+        return currentPoint;
+
+      var dir3 = (cplane.XAxis * dir2u.X) + (cplane.YAxis * dir2u.Y);
+      if (dir3.IsTiny())
+        return currentPoint;
+
+      var toCursor = currentPoint - startPoint;
+      var dist = toCursor.Length;
+      if (dist < doc.ModelAbsoluteTolerance)
+        dist = doc.ModelAbsoluteTolerance;
+
+      var sign = Vector3d.Multiply(toCursor, dir3) < 0.0 ? -1.0 : 1.0;
+      return startPoint + (dir3 * (dist * sign));
+    }
+
+    Point3d PreviewEndFromCurrent(Point3d currentPoint)
+    {
+      var endPoint = ApplyAnglePointFromCurrent(currentPoint);
+      if (Math.Abs(lengthOption.CurrentValue) > doc.ModelAbsoluteTolerance)
+      {
+        var direction = endPoint - startPoint;
+        if (direction.Unitize())
+          endPoint = startPoint + direction * lengthOption.CurrentValue;
+      }
+
+      return endPoint;
+    }
+
+    Point3d? EndpointForMode(string? modeName, Point3d cursorPoint, bool preview)
+    {
+      MaybeRefreshCurveCache(false);
+      var curveCache = cacheState.CurveCache;
+
+      if (curveCache.Count == 0 || string.IsNullOrWhiteSpace(modeName))
+        return null;
+
+      var captureTolerance = Math.Max(doc.ModelAbsoluteTolerance * 0.25, 1e-9);
+      Curve? curve;
+
+      if (modeName is "perp_any" or "tangent_any" or "auto")
+        curve = NearestCurveToPoint(cursorPoint, curveCache);
+      else
+        curve = CurveAtCursorPoint(cursorPoint, curveCache, captureTolerance);
+
+      if (curve == null)
+        return null;
+
+      if (modeName == "perp")
+      {
+        var pt = PerpPointFromStartWithHint(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
+        if (pt.HasValue)
+          return pt.Value;
+
+        return PerpFallbackToPointedSegment(startPoint, curve, cursorPoint, preview);
+      }
+
+      if (modeName == "tangent")
+        return TangentPointFromStart(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
+
+      if (modeName == "perp_any")
+      {
+        var pt = PerpPointFromStartWithHint(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
+        if (pt.HasValue)
+          return pt.Value;
+
+        return PerpFallbackToPointedSegment(startPoint, curve, cursorPoint, preview);
+      }
+
+      if (modeName == "tangent_any")
+        return TangentPointFromStart(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
+
+      if (modeName == "auto")
+      {
+        var perp = PerpPointFromStartWithHint(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
+        var tan = TangentPointFromStart(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
+
+        if (!perp.HasValue)
+          perp = PerpFallbackToPointedSegment(startPoint, curve, cursorPoint, preview);
+
+        if (!perp.HasValue && !tan.HasValue)
+          return null;
+
+        if (priorityIndex == PriorityPerpFirst)
+        {
+          if (perp.HasValue)
+          {
+            lastAutoChoice = "perp";
+            return perp.Value;
+          }
+
+          lastAutoChoice = "tangent";
+          return tan;
+        }
+
+        if (priorityIndex == PriorityTanFirst)
+        {
+          if (tan.HasValue)
+          {
+            lastAutoChoice = "tangent";
+            return tan.Value;
+          }
+
+          lastAutoChoice = "perp";
+          return perp;
+        }
+
+        if (priorityIndex == PriorityKeepCurrent)
+        {
+          if (lastAutoChoice == "perp" && perp.HasValue)
+            return perp.Value;
+          if (lastAutoChoice == "tangent" && tan.HasValue)
+            return tan.Value;
+        }
+
+        if (!perp.HasValue)
+        {
+          lastAutoChoice = "tangent";
+          return tan;
+        }
+
+        if (!tan.HasValue)
+        {
+          lastAutoChoice = "perp";
+          return perp;
+        }
+
+        if (perp.Value.DistanceToSquared(cursorPoint) <= tan.Value.DistanceToSquared(cursorPoint))
+        {
+          lastAutoChoice = "perp";
+          return perp.Value;
+        }
+
+        lastAutoChoice = "tangent";
+        return tan.Value;
+      }
+
+      return null;
+    }
+
+    Color CurrentPreviewColor()
+    {
+      var baseColor = Color.White;
+      try
+      {
+        baseColor = doc.Layers.CurrentLayer?.Color ?? Color.White;
+      }
+      catch
+      {
+      }
+
+      return Color.FromArgb(120, baseColor.R, baseColor.G, baseColor.B);
+    }
+
+    EventHandler<GetPointDrawEventArgs> drawPreview = (_, e) =>
+    {
+      var previewColor = CurrentPreviewColor();
+      Point3d? endPoint;
+
+      if (!string.IsNullOrWhiteSpace(mode))
+      {
+        var endpointForMode = EndpointForMode(mode, e.CurrentPoint, preview: true);
+        if (!endpointForMode.HasValue)
+          return;
+
+        endPoint = PreviewEndFromCurrent(endpointForMode.Value);
       }
       else
       {
-        better = candidateScore < score ||
-                 (Math.Abs(candidateScore - score) <= 1.0e-8 && candidateHintDistSq < hintDistanceSq);
+        endPoint = PreviewEndFromCurrent(e.CurrentPoint);
       }
 
-      if (!better)
-        continue;
+      var ep = endPoint.Value;
+      if (bothSides.CurrentValue)
+      {
+        var vec = ep - startPoint;
+        if (vec.IsTiny())
+          return;
 
-      endpoint = candidate;
-      score = candidateScore;
-      hintDistanceSq = candidateHintDistSq;
-    }
+        var a = startPoint - vec;
+        var b = startPoint + vec;
+        e.Display.DrawLine(a, b, previewColor, 1);
+        e.Display.DrawDottedLine(a, b, previewColor);
+      }
+      else
+      {
+        e.Display.DrawLine(startPoint, ep, previewColor, 1);
+        e.Display.DrawDottedLine(startPoint, ep, previewColor);
+      }
 
-    if (!endpoint.IsValid)
-      return false;
+      e.Display.DrawPoint(ep, Rhino.Display.PointStyle.RoundSimple, 2, previewColor);
+    };
 
-    // Tolerances mirror the Python thresholds loosely.
-    var threshold = wantPerp ? 0.025 : 0.020;
-    return score <= threshold || preferNear;
-  }
+    getPoint.DynamicDraw += drawPreview;
+    ApplyModePrompt();
 
-  private static bool TrySolvePointOnCurve(
-    Curve curve,
-    Point3d startPoint,
-    Point3d hintPoint,
-    Plane cplane,
-    bool wantPerp,
-    out Point3d endpoint,
-    out double bestScore)
-  {
-    endpoint = Point3d.Unset;
-    bestScore = double.MaxValue;
-
-    if (curve == null)
-      return false;
-
-    if (TryLineLikeSolve(curve, startPoint, hintPoint, wantPerp, out endpoint, out bestScore))
-      return true;
-
-    var domain = curve.Domain;
-    var span = domain.T1 - domain.T0;
-    if (span <= RhinoMath.ZeroTolerance)
-      return false;
-
-    const int samples = 220;
-    for (var i = 0; i <= samples; i++)
+    try
     {
-      var t = domain.T0 + span * (i / (double)samples);
-      var point = curve.PointAt(t);
-      var tangent = curve.TangentAt(t);
-      if (!tangent.Unitize())
-        continue;
+      while (true)
+      {
+        var result = getPoint.Get();
 
-      var vectorToStart = startPoint - point;
-      var score = ConstraintScore2d(cplane, vectorToStart, tangent, wantPerp);
-      if (score >= bestScore)
-        continue;
+        if (result == GetResult.Point)
+        {
+          Point3d endPoint;
+          if (!string.IsNullOrWhiteSpace(mode))
+          {
+            var endpointForMode = EndpointForMode(mode, getPoint.Point(), preview: false);
+            if (!endpointForMode.HasValue)
+            {
+              RhinoApp.WriteLine($"vLine: no valid {mode} solution found on nearby curves at this cursor location.");
+              continue;
+            }
 
-      bestScore = score;
-      endpoint = point;
+            endPoint = PreviewEndFromCurrent(endpointForMode.Value);
+          }
+          else
+          {
+            endPoint = PreviewEndFromCurrent(getPoint.Point());
+          }
+
+          var state = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
+          return SecondPointResult.WithPoint(endPoint, bothSides.CurrentValue, chainModeIndex, state);
+        }
+
+        if (result == GetResult.Option)
+        {
+          var option = getPoint.Option();
+          if (option == null)
+            continue;
+
+          if (option.Index == idxPerp)
+          {
+            mode = "perp";
+            ApplyModePrompt();
+            continue;
+          }
+
+          if (option.Index == idxTan)
+          {
+            mode = "tangent";
+            ApplyModePrompt();
+            continue;
+          }
+
+          if (option.Index == idxPerpNear)
+          {
+            mode = "perp_any";
+            ApplyModePrompt();
+            continue;
+          }
+
+          if (option.Index == idxTanNear)
+          {
+            mode = "tangent_any";
+            ApplyModePrompt();
+            continue;
+          }
+
+          if (option.Index == idxAuto)
+          {
+            mode = "auto";
+            ApplyModePrompt();
+            continue;
+          }
+
+          if (option.Index == idxPriority)
+          {
+            priorityIndex = ClampIndex(option.CurrentListOptionIndex, PriorityValues.Length);
+            continue;
+          }
+
+          if (option.Index == idxLength)
+            continue;
+
+          if (option.Index == idxAngle)
+            continue;
+
+          if (option.Index == idxChainMode)
+          {
+            chainModeIndex = ClampIndex(option.CurrentListOptionIndex, ChainModeValues.Length);
+            continue;
+          }
+
+          continue;
+        }
+
+        if (result == GetResult.Number)
+        {
+          var numberValue = getPoint.Number();
+          return ResolveSecondPoint(
+            doc,
+            startPoint,
+            bothSides.CurrentValue,
+            numberValue,
+            mode,
+            chainModeIndex,
+            persistConstraint.CurrentValue,
+            priorityIndex,
+            angleLock.CurrentValue,
+            angleOption.CurrentValue,
+            angleRelative.CurrentValue,
+            referenceVector,
+            canUndo,
+            canUndoStart,
+            canRedo);
+        }
+
+        if (result == GetResult.String)
+        {
+          var cmd = (getPoint.StringResult() ?? string.Empty).Trim().ToLowerInvariant().TrimStart('_', '!');
+          var state = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
+
+          if (cmd is "redo" or "r")
+          {
+            if (canRedo)
+              return SecondPointResult.RedoRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
+            continue;
+          }
+
+          if (cmd is "undo" or "u")
+          {
+            if (canUndo)
+              return SecondPointResult.UndoRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
+            if (canUndoStart)
+              return SecondPointResult.UndoStartRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
+            continue;
+          }
+
+          continue;
+        }
+
+        var fallbackState = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
+        return SecondPointResult.None(bothSides.CurrentValue, chainModeIndex, fallbackState);
+      }
     }
-
-    return endpoint.IsValid;
-  }
-
-  private static bool TryLineLikeSolve(
-    Curve curve,
-    Point3d startPoint,
-    Point3d hintPoint,
-    bool wantPerp,
-    out Point3d endpoint,
-    out double score)
-  {
-    endpoint = Point3d.Unset;
-    score = double.MaxValue;
-
-    Line line;
-    if (curve is LineCurve lineCurve)
+    finally
     {
-      line = lineCurve.Line;
+      getPoint.DynamicDraw -= drawPreview;
     }
-    else if (curve.IsLinear(RhinoMath.SqrtEpsilon))
-    {
-      line = new Line(curve.PointAtStart, curve.PointAtEnd);
-    }
-    else
-    {
-      return false;
-    }
-
-    if (!line.IsValid || line.Length <= RhinoMath.ZeroTolerance)
-      return false;
-
-    if (wantPerp)
-    {
-      endpoint = line.ClosestPoint(startPoint, false);
-      score = 0.0;
-      return endpoint.IsValid;
-    }
-
-    endpoint = line.ClosestPoint(hintPoint, false);
-    score = 0.0;
-    return endpoint.IsValid;
-  }
-
-  private static double ConstraintScore2d(Plane cplane, Vector3d vectorToStart, Vector3d tangent, bool wantPerp)
-  {
-    var v2 = ProjectToPlane(vectorToStart, cplane);
-    var t2 = ProjectToPlane(tangent, cplane);
-
-    if (!v2.Unitize() || !t2.Unitize())
-      return 1.0;
-
-    if (wantPerp)
-      return Math.Abs(v2.X * t2.X + v2.Y * t2.Y);
-
-    var cross = v2.X * t2.Y - v2.Y * t2.X;
-    return Math.Abs(cross);
-  }
-
-  private static Vector2d ProjectToPlane(Vector3d vector, Plane plane)
-  {
-    return new Vector2d(
-      Vector3d.Multiply(vector, plane.XAxis),
-      Vector3d.Multiply(vector, plane.YAxis));
   }
 
   private static List<CurveCacheItem> CollectCurveCache(RhinoDoc doc)
   {
-    var cache = new List<CurveCacheItem>();
-
     var settings = new ObjectEnumeratorSettings
     {
       IncludeLights = false,
@@ -632,15 +879,17 @@ public sealed class vLine : Command
       HiddenObjects = false
     };
 
-    foreach (var obj in doc.Objects.GetObjectList(settings))
+    var cache = new List<CurveCacheItem>();
+
+    foreach (var rhObj in doc.Objects.GetObjectList(settings))
     {
-      if (obj.ObjectType != ObjectType.Curve)
+      if (rhObj.ObjectType != ObjectType.Curve)
         continue;
 
-      if (obj.Geometry is not Curve source)
+      if (rhObj.Geometry is not Curve curve)
         continue;
 
-      var duplicate = source.DuplicateCurve();
+      var duplicate = curve.DuplicateCurve();
       if (duplicate == null)
         continue;
 
@@ -650,17 +899,74 @@ public sealed class vLine : Command
     return cache;
   }
 
-  private static List<CurveCacheItem> BuildCurveShortlist(IReadOnlyList<CurveCacheItem> cache, Point3d hintPoint, int maxCount)
+  private static Curve? NearestCurveToPoint(Point3d point, IReadOnlyList<CurveCacheItem> curveCache)
   {
-    var indexed = new List<(CurveCacheItem Item, double DistanceSq)>(cache.Count);
-    foreach (var item in cache)
-      indexed.Add((item, BoundingBoxDistanceSquared(item.BoundingBox, hintPoint)));
+    if (curveCache.Count == 0)
+      return null;
 
-    indexed.Sort((a, b) => a.DistanceSq.CompareTo(b.DistanceSq));
+    var shortlist = BuildCurveShortlist(point, curveCache, 8);
+
+    Curve? best = null;
+    var bestD2 = double.MaxValue;
+
+    foreach (var (curve, _) in shortlist)
+    {
+      if (!curve.ClosestPoint(point, out var t))
+        continue;
+
+      var cp = curve.PointAt(t);
+      var d2 = point.DistanceToSquared(cp);
+      if (d2 >= bestD2)
+        continue;
+
+      bestD2 = d2;
+      best = curve;
+    }
+
+    return best;
+  }
+
+  private static Curve? CurveAtCursorPoint(Point3d point, IReadOnlyList<CurveCacheItem> curveCache, double captureTolerance)
+  {
+    if (curveCache.Count == 0)
+      return null;
+
+    var shortlist = BuildCurveShortlist(point, curveCache, 12);
+
+    Curve? best = null;
+    var bestD2 = double.MaxValue;
+
+    foreach (var (curve, _) in shortlist)
+    {
+      if (!curve.ClosestPoint(point, out var t))
+        continue;
+
+      var cp = curve.PointAt(t);
+      var d2 = point.DistanceToSquared(cp);
+      if (d2 >= bestD2)
+        continue;
+
+      bestD2 = d2;
+      best = curve;
+    }
+
+    if (best == null)
+      return null;
+
+    return bestD2 <= captureTolerance * captureTolerance ? best : null;
+  }
+
+  private static List<CurveCacheItem> BuildCurveShortlist(Point3d point, IReadOnlyList<CurveCacheItem> curveCache, int count)
+  {
+    var sorted = new List<(CurveCacheItem Item, double DistanceSq)>();
+    foreach (var item in curveCache)
+      sorted.Add((item, BoundingBoxDistanceSquared(item.BoundingBox, point)));
+
+    sorted.Sort((a, b) => a.DistanceSq.CompareTo(b.DistanceSq));
 
     var shortlist = new List<CurveCacheItem>();
-    for (var i = 0; i < indexed.Count && i < maxCount; i++)
-      shortlist.Add(indexed[i].Item);
+    for (var i = 0; i < sorted.Count && i < count; i++)
+      shortlist.Add(sorted[i].Item);
 
     return shortlist;
   }
@@ -668,13 +974,542 @@ public sealed class vLine : Command
   private static double BoundingBoxDistanceSquared(BoundingBox bbox, Point3d point)
   {
     if (!bbox.IsValid)
-      return double.MaxValue;
+      return 1e300;
 
-    var dx = point.X < bbox.Min.X ? bbox.Min.X - point.X : point.X > bbox.Max.X ? point.X - bbox.Max.X : 0.0;
-    var dy = point.Y < bbox.Min.Y ? bbox.Min.Y - point.Y : point.Y > bbox.Max.Y ? point.Y - bbox.Max.Y : 0.0;
-    var dz = point.Z < bbox.Min.Z ? bbox.Min.Z - point.Z : point.Z > bbox.Max.Z ? point.Z - bbox.Max.Z : 0.0;
+    double dx;
+    if (point.X < bbox.Min.X)
+      dx = bbox.Min.X - point.X;
+    else if (point.X > bbox.Max.X)
+      dx = point.X - bbox.Max.X;
+    else
+      dx = 0.0;
 
-    return dx * dx + dy * dy + dz * dz;
+    double dy;
+    if (point.Y < bbox.Min.Y)
+      dy = bbox.Min.Y - point.Y;
+    else if (point.Y > bbox.Max.Y)
+      dy = point.Y - bbox.Max.Y;
+    else
+      dy = 0.0;
+
+    double dz;
+    if (point.Z < bbox.Min.Z)
+      dz = bbox.Min.Z - point.Z;
+    else if (point.Z > bbox.Max.Z)
+      dz = point.Z - bbox.Max.Z;
+    else
+      dz = 0.0;
+
+    return (dx * dx) + (dy * dy) + (dz * dz);
+  }
+
+  private static Vector2d ToCPlane2d(Vector3d vector, Plane plane)
+  {
+    return new Vector2d(Vector3d.Multiply(vector, plane.XAxis), Vector3d.Multiply(vector, plane.YAxis));
+  }
+
+  private static bool TryUnitize2d(Vector2d value, out Vector2d unit)
+  {
+    unit = value;
+    if (unit.IsTiny())
+      return false;
+
+    unit.Unitize();
+    return true;
+  }
+
+  private static bool CurveIsLinear(Curve curve, out Line line)
+  {
+    if (curve is LineCurve lineCurve)
+    {
+      line = lineCurve.Line;
+      return true;
+    }
+
+    if (curve.IsLinear(RhinoMath.SqrtEpsilon))
+    {
+      line = new Line(curve.PointAtStart, curve.PointAtEnd);
+      return line.IsValid;
+    }
+
+    line = Line.Unset;
+    return false;
+  }
+
+  private static double PerpScore2d(Curve curve, double t, Point3d startPoint, Plane cplane)
+  {
+    var point = curve.PointAt(t);
+    var tangent = curve.TangentAt(t);
+
+    var v2 = ToCPlane2d(startPoint - point, cplane);
+    var t2 = new Vector2d(Vector3d.Multiply(tangent, cplane.XAxis), Vector3d.Multiply(tangent, cplane.YAxis));
+
+    if (!TryUnitize2d(v2, out var v2u) || !TryUnitize2d(t2, out var t2u))
+      return 1.0;
+
+    var dot = (t2u.X * v2u.X) + (t2u.Y * v2u.Y);
+    return Math.Abs(dot);
+  }
+
+  private static (double Parameter, double Error) RefinePerpParameter(Curve curve, Point3d startPoint, Plane cplane, double t0, double t1, int iterations)
+  {
+    const double phi = 0.61803398875;
+    var a = Math.Min(t0, t1);
+    var b = Math.Max(t0, t1);
+
+    var c = b - ((b - a) * phi);
+    var d = a + ((b - a) * phi);
+    var fc = PerpScore2d(curve, c, startPoint, cplane);
+    var fd = PerpScore2d(curve, d, startPoint, cplane);
+
+    for (var i = 0; i < iterations; i++)
+    {
+      if (fc < fd)
+      {
+        b = d;
+        d = c;
+        fd = fc;
+        c = b - ((b - a) * phi);
+        fc = PerpScore2d(curve, c, startPoint, cplane);
+      }
+      else
+      {
+        a = c;
+        c = d;
+        fc = fd;
+        d = a + ((b - a) * phi);
+        fd = PerpScore2d(curve, d, startPoint, cplane);
+      }
+    }
+
+    var best = 0.5 * (a + b);
+    return (best, PerpScore2d(curve, best, startPoint, cplane));
+  }
+
+  private static Point3d? PerpPointFromStartWithHint(Point3d startPoint, Curve curve, Point3d hintPoint, int samples, int refineIterations)
+  {
+    if (CurveIsLinear(curve, out var line))
+    {
+      var t = line.ClosestParameter(startPoint);
+      return line.PointAt(t);
+    }
+
+    var cplane = RhinoDoc.ActiveDoc?.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
+
+    var domain = curve.Domain;
+    var a = domain.T0;
+    var b = domain.T1;
+    if (b <= a)
+      return null;
+
+    double hintT;
+    if (!curve.ClosestPoint(hintPoint, out hintT))
+      hintT = 0.5 * (a + b);
+
+    var dt = (b - a) / samples;
+    if (dt <= 0.0)
+      return null;
+
+    var candidates = new List<(double T, double Error)>();
+    var values = new List<double>();
+    var parameters = new List<double>();
+
+    for (var i = 0; i <= samples; i++)
+    {
+      var t = a + dt * i;
+      parameters.Add(t);
+      values.Add(PerpScore2d(curve, t, startPoint, cplane));
+    }
+
+    for (var i = 1; i < values.Count - 1; i++)
+    {
+      if (values[i] <= values[i - 1] && values[i] <= values[i + 1])
+        candidates.Add((parameters[i], values[i]));
+    }
+
+    if (candidates.Count == 0)
+    {
+      var bestIndex = 0;
+      var bestValue = values[0];
+      for (var i = 1; i < values.Count; i++)
+      {
+        if (values[i] < bestValue)
+        {
+          bestValue = values[i];
+          bestIndex = i;
+        }
+      }
+
+      candidates.Add((parameters[bestIndex], values[bestIndex]));
+    }
+
+    candidates.Sort((x, y) => x.Error.CompareTo(y.Error));
+
+    var refined = new List<(double T, double Error, Point3d Point)>();
+    for (var i = 0; i < candidates.Count && i < 16; i++)
+    {
+      var seedT = candidates[i].T;
+      var window = Math.Max(dt * 4.0, (b - a) * 0.01);
+      var t0 = Math.Max(a, seedT - window);
+      var t1 = Math.Min(b, seedT + window);
+      var refinedResult = RefinePerpParameter(curve, startPoint, cplane, t0, t1, refineIterations);
+      refined.Add((refinedResult.Parameter, refinedResult.Error, curve.PointAt(refinedResult.Parameter)));
+    }
+
+    if (refined.Count == 0)
+      return null;
+
+    refined.Sort((x, y) => x.T.CompareTo(y.T));
+    var unique = new List<(double T, double Error, Point3d Point)>();
+    var paramTol = Math.Max((b - a) * 1e-6, 1e-9);
+
+    foreach (var item in refined)
+    {
+      if (unique.Count == 0 || Math.Abs(item.T - unique[^1].T) > paramTol)
+      {
+        unique.Add(item);
+      }
+      else if (item.Error < unique[^1].Error)
+      {
+        unique[^1] = item;
+      }
+    }
+
+    var valid = unique.FindAll(v => v.Error <= 0.02);
+    if (valid.Count == 0)
+      return null;
+
+    valid.Sort((x, y) =>
+    {
+      var dx = x.Point.DistanceToSquared(hintPoint).CompareTo(y.Point.DistanceToSquared(hintPoint));
+      if (dx != 0)
+        return dx;
+
+      var de = x.Error.CompareTo(y.Error);
+      if (de != 0)
+        return de;
+
+      return Math.Abs(x.T - hintT).CompareTo(Math.Abs(y.T - hintT));
+    });
+
+    return valid[0].Point;
+  }
+
+  private static Point3d? PerpFallbackToPointedSegment(Point3d startPoint, Curve curve, Point3d hintPoint, bool preview)
+  {
+    var segments = curve.DuplicateSegments();
+    if (segments == null || segments.Length == 0)
+      return null;
+
+    Curve? bestSeg = null;
+    var bestD2 = double.MaxValue;
+
+    foreach (var seg in segments)
+    {
+      if (seg == null)
+        continue;
+
+      if (!seg.ClosestPoint(hintPoint, out var t))
+        continue;
+
+      var cp = seg.PointAt(t);
+      var d2 = cp.DistanceToSquared(hintPoint);
+      if (d2 >= bestD2)
+        continue;
+
+      bestD2 = d2;
+      bestSeg = seg;
+    }
+
+    if (bestSeg == null)
+      return null;
+
+    var pt = PerpPointFromStartWithHint(startPoint, bestSeg, hintPoint, preview ? 80 : 240, preview ? 8 : 18);
+    if (pt.HasValue)
+      return pt;
+
+    if (CurveIsLinear(bestSeg, out var line))
+      return line.PointAt(line.ClosestParameter(startPoint));
+
+    return null;
+  }
+
+  private static double TangentScore2d(Curve curve, double t, Point3d startPoint, Plane cplane)
+  {
+    var point = curve.PointAt(t);
+    var tangent = curve.TangentAt(t);
+
+    var v2 = ToCPlane2d(startPoint - point, cplane);
+    var t2 = new Vector2d(Vector3d.Multiply(tangent, cplane.XAxis), Vector3d.Multiply(tangent, cplane.YAxis));
+
+    if (!TryUnitize2d(v2, out var v2u) || !TryUnitize2d(t2, out var t2u))
+      return 1.0;
+
+    var cross = (t2u.X * v2u.Y) - (t2u.Y * v2u.X);
+    return Math.Abs(cross);
+  }
+
+  private static (double Parameter, double Error) RefineTangentParameter(Curve curve, Point3d startPoint, Plane cplane, double t0, double t1, int iterations)
+  {
+    const double phi = 0.61803398875;
+    var a = Math.Min(t0, t1);
+    var b = Math.Max(t0, t1);
+
+    var c = b - ((b - a) * phi);
+    var d = a + ((b - a) * phi);
+    var fc = TangentScore2d(curve, c, startPoint, cplane);
+    var fd = TangentScore2d(curve, d, startPoint, cplane);
+
+    for (var i = 0; i < iterations; i++)
+    {
+      if (fc < fd)
+      {
+        b = d;
+        d = c;
+        fd = fc;
+        c = b - ((b - a) * phi);
+        fc = TangentScore2d(curve, c, startPoint, cplane);
+      }
+      else
+      {
+        a = c;
+        c = d;
+        fc = fd;
+        d = a + ((b - a) * phi);
+        fd = TangentScore2d(curve, d, startPoint, cplane);
+      }
+    }
+
+    var best = 0.5 * (a + b);
+    return (best, TangentScore2d(curve, best, startPoint, cplane));
+  }
+
+  private static Point3d? TangentPointFromStart(Point3d startPoint, Curve curve, Point3d hintPoint, int samples, int refineIterations)
+  {
+    var cplane = RhinoDoc.ActiveDoc?.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
+
+    var domain = curve.Domain;
+    var a = domain.T0;
+    var b = domain.T1;
+    if (b <= a)
+      return null;
+
+    double hintT;
+    if (!curve.ClosestPoint(hintPoint, out hintT))
+      hintT = 0.5 * (a + b);
+
+    var dt = (b - a) / samples;
+    if (dt <= 0.0)
+      return null;
+
+    var candidates = new List<(double T, double Error)>();
+    var values = new List<double>();
+    var parameters = new List<double>();
+
+    for (var i = 0; i <= samples; i++)
+    {
+      var t = a + dt * i;
+      parameters.Add(t);
+      values.Add(TangentScore2d(curve, t, startPoint, cplane));
+    }
+
+    for (var i = 1; i < values.Count - 1; i++)
+    {
+      if (values[i] <= values[i - 1] && values[i] <= values[i + 1])
+        candidates.Add((parameters[i], values[i]));
+    }
+
+    if (candidates.Count == 0)
+    {
+      var bestIndex = 0;
+      var bestValue = values[0];
+      for (var i = 1; i < values.Count; i++)
+      {
+        if (values[i] < bestValue)
+        {
+          bestValue = values[i];
+          bestIndex = i;
+        }
+      }
+
+      candidates.Add((parameters[bestIndex], values[bestIndex]));
+    }
+
+    candidates.Sort((x, y) => x.Error.CompareTo(y.Error));
+
+    var refined = new List<(double T, double Error, Point3d Point)>();
+    for (var i = 0; i < candidates.Count && i < 16; i++)
+    {
+      var seedT = candidates[i].T;
+      var window = Math.Max(dt * 4.0, (b - a) * 0.01);
+      var t0 = Math.Max(a, seedT - window);
+      var t1 = Math.Min(b, seedT + window);
+      var refinedResult = RefineTangentParameter(curve, startPoint, cplane, t0, t1, refineIterations);
+      refined.Add((refinedResult.Parameter, refinedResult.Error, curve.PointAt(refinedResult.Parameter)));
+    }
+
+    if (refined.Count == 0)
+      return null;
+
+    refined.Sort((x, y) => x.T.CompareTo(y.T));
+    var unique = new List<(double T, double Error, Point3d Point)>();
+    var paramTol = Math.Max((b - a) * 1e-6, 1e-9);
+
+    foreach (var item in refined)
+    {
+      if (unique.Count == 0 || Math.Abs(item.T - unique[^1].T) > paramTol)
+      {
+        unique.Add(item);
+      }
+      else if (item.Error < unique[^1].Error)
+      {
+        unique[^1] = item;
+      }
+    }
+
+    var valid = unique.FindAll(v => v.Error <= 0.015);
+    if (valid.Count == 0)
+      return null;
+
+    valid.Sort((x, y) =>
+    {
+      var dx = x.Point.DistanceToSquared(hintPoint).CompareTo(y.Point.DistanceToSquared(hintPoint));
+      if (dx != 0)
+        return dx;
+
+      var de = x.Error.CompareTo(y.Error);
+      if (de != 0)
+        return de;
+
+      return Math.Abs(x.T - hintT).CompareTo(Math.Abs(y.T - hintT));
+    });
+
+    return valid[0].Point;
+  }
+
+  private static void RunNativeLineMode(string modeKeyword)
+  {
+    if (modeKeyword == "BiTangent")
+    {
+      RhinoApp.RunScript("! _Line _Tangent _Tangent", false);
+      return;
+    }
+
+    RhinoApp.RunScript($"! _Line _{modeKeyword}", false);
+  }
+
+  private static bool UndoLastAction(
+    RhinoDoc doc,
+    List<ActionRecord> history,
+    List<ActionRecord> redo,
+    ref Point3d currentStart,
+    ref List<Point3d>? polylinePoints,
+    ref Guid tempPolylineId)
+  {
+    if (history.Count == 0)
+      return false;
+
+    var action = history[^1];
+    history.RemoveAt(history.Count - 1);
+
+    if (action.Kind == ActionKind.Line)
+    {
+      DeleteObjectIfValid(doc, action.ObjectId);
+      currentStart = action.PrevStart;
+      redo.Add(ActionRecord.CreateLine(Guid.Empty, action.PrevStart, action.StartPoint, action.EndPoint, action.BothSides, action.NextStart));
+    }
+    else if (action.Kind == ActionKind.PolylineAdd)
+    {
+      DeleteObjectIfValid(doc, tempPolylineId);
+      DeleteObjectIfValid(doc, action.ObjectId);
+
+      var prevPoints = new List<Point3d>(action.PrevPoints ?? new List<Point3d>());
+      polylinePoints = prevPoints.Count > 0 ? prevPoints : null;
+      tempPolylineId = Guid.Empty;
+
+      if (polylinePoints is { Count: > 1 })
+        tempPolylineId = doc.Objects.AddPolyline(new Polyline(polylinePoints));
+      else
+        polylinePoints = null;
+
+      currentStart = action.PrevStart;
+      redo.Add(ActionRecord.CreatePolylineAdd(action.PrevStart, prevPoints, action.AddedPoint, Guid.Empty, action.NextStart));
+    }
+
+    doc.Views.Redraw();
+    return true;
+  }
+
+  private static bool RedoLastAction(
+    RhinoDoc doc,
+    List<ActionRecord> history,
+    List<ActionRecord> redo,
+    ref Point3d currentStart,
+    ref List<Point3d>? polylinePoints,
+    ref Guid tempPolylineId)
+  {
+    if (redo.Count == 0)
+      return false;
+
+    var action = redo[^1];
+    redo.RemoveAt(redo.Count - 1);
+
+    if (action.Kind == ActionKind.Line)
+    {
+      var lineId = action.BothSides
+        ? AddBothSidesLine(doc, action.StartPoint, action.EndPoint)
+        : doc.Objects.AddLine(action.StartPoint, action.EndPoint);
+
+      history.Add(ActionRecord.CreateLine(lineId, action.PrevStart, action.StartPoint, action.EndPoint, action.BothSides, action.NextStart));
+      currentStart = action.NextStart;
+    }
+    else if (action.Kind == ActionKind.PolylineAdd)
+    {
+      var prevPoints = new List<Point3d>(action.PrevPoints ?? new List<Point3d>());
+      polylinePoints = prevPoints;
+      polylinePoints.Add(action.AddedPoint);
+
+      DeleteObjectIfValid(doc, tempPolylineId);
+      tempPolylineId = doc.Objects.AddPolyline(new Polyline(polylinePoints));
+
+      history.Add(ActionRecord.CreatePolylineAdd(action.PrevStart, prevPoints, action.AddedPoint, tempPolylineId, action.NextStart));
+      currentStart = action.NextStart;
+    }
+
+    doc.Views.Redraw();
+    return true;
+  }
+
+  private static void UpdateLastSegmentVector(List<ActionRecord> history, List<Point3d>? polylinePoints, ref Vector3d? lastSegmentVector)
+  {
+    if (history.Count == 0)
+      return;
+
+    var last = history[^1];
+    if (last.Kind == ActionKind.Line)
+      lastSegmentVector = last.EndPoint - last.StartPoint;
+    else if (last.Kind == ActionKind.PolylineAdd && polylinePoints is { Count: >= 2 })
+      lastSegmentVector = polylinePoints[^1] - polylinePoints[^2];
+  }
+
+  private static Guid AddBothSidesLine(RhinoDoc doc, Point3d startPoint, Point3d endPoint)
+  {
+    var vec = endPoint - startPoint;
+    if (vec.IsTiny())
+      return Guid.Empty;
+
+    var a = startPoint - vec;
+    var b = startPoint + vec;
+    return doc.Objects.AddLine(a, b);
+  }
+
+  private static void DeleteObjectIfValid(RhinoDoc doc, Guid id)
+  {
+    if (id == Guid.Empty)
+      return;
+
+    if (doc.Objects.FindId(id) != null)
+      _ = doc.Objects.Delete(id, true);
   }
 
   private static int ClampIndex(int value, int count)
@@ -686,14 +1521,101 @@ public sealed class vLine : Command
     return value >= count ? count - 1 : value;
   }
 
-  private sealed class CommonOptionState
+  private enum ActionKind
   {
-    public OptionToggle BothSidesOption = null!;
-    public OptionDouble LengthOption = null!;
-    public int ModeOptionIndex;
-    public int ChainModeOptionIndex;
-    public int PriorityOptionIndex;
+    Line,
+    PolylineAdd
+  }
+
+  private sealed class CurveCacheState
+  {
+    public CurveCacheState(List<CurveCacheItem> curveCache, DateTime nextRefreshUtc)
+    {
+      CurveCache = curveCache;
+      NextRefreshUtc = nextRefreshUtc;
+    }
+
+    public List<CurveCacheItem> CurveCache { get; set; }
+    public DateTime NextRefreshUtc { get; set; }
   }
 
   private readonly record struct CurveCacheItem(Curve Curve, BoundingBox BoundingBox);
+
+  private readonly record struct ConstraintState(
+    string? Mode,
+    bool PersistConstraint,
+    int Priority,
+    double Length,
+    bool AngleLock,
+    double Angle,
+    bool AngleRelative);
+
+  private readonly record struct ActionRecord(
+    ActionKind Kind,
+    Guid ObjectId,
+    Point3d PrevStart,
+    Point3d StartPoint,
+    Point3d EndPoint,
+    bool BothSides,
+    Point3d NextStart,
+    List<Point3d>? PrevPoints,
+    Point3d AddedPoint)
+  {
+    public static ActionRecord CreateLine(Guid objectId, Point3d prevStart, Point3d startPoint, Point3d endPoint, bool bothSides, Point3d nextStart)
+      => new(ActionKind.Line, objectId, prevStart, startPoint, endPoint, bothSides, nextStart, null, Point3d.Unset);
+
+    public static ActionRecord CreatePolylineAdd(Point3d prevStart, List<Point3d> prevPoints, Point3d addedPoint, Guid newId, Point3d nextStart)
+      => new(ActionKind.PolylineAdd, newId, prevStart, Point3d.Unset, Point3d.Unset, false, nextStart, prevPoints, addedPoint);
+  }
+
+  private readonly record struct FirstPointResult(
+    bool HasPoint,
+    Point3d Point,
+    bool BothSides,
+    int ChainMode,
+    bool DelegatedToNative,
+    bool UndoRequested,
+    bool RedoRequested)
+  {
+    public static FirstPointResult WithPoint(Point3d point, bool bothSides, int chainMode)
+      => new(true, point, bothSides, chainMode, false, false, false);
+
+    public static FirstPointResult Delegated(bool bothSides, int chainMode)
+      => new(false, Point3d.Unset, bothSides, chainMode, true, false, false);
+
+    public static FirstPointResult None(bool bothSides, int chainMode)
+      => new(false, Point3d.Unset, bothSides, chainMode, false, false, false);
+
+    public static FirstPointResult UndoRequestedResult(bool bothSides, int chainMode)
+      => new(false, Point3d.Unset, bothSides, chainMode, false, true, false);
+
+    public static FirstPointResult RedoRequestedResult(bool bothSides, int chainMode)
+      => new(false, Point3d.Unset, bothSides, chainMode, false, false, true);
+  }
+
+  private readonly record struct SecondPointResult(
+    bool HasPoint,
+    Point3d Point,
+    bool BothSides,
+    int ChainMode,
+    bool UndoRequested,
+    bool UndoStartRequested,
+    bool RedoRequested,
+    ConstraintState? State)
+  {
+    public static SecondPointResult WithPoint(Point3d point, bool bothSides, int chainMode, ConstraintState state)
+      => new(true, point, bothSides, chainMode, false, false, false, state);
+
+    public static SecondPointResult None(bool bothSides, int chainMode, ConstraintState state)
+      => new(false, Point3d.Unset, bothSides, chainMode, false, false, false, state);
+
+    public static SecondPointResult UndoRequestedResult(bool bothSides, int chainMode, ConstraintState state)
+      => new(false, Point3d.Unset, bothSides, chainMode, true, false, false, state);
+
+    public static SecondPointResult UndoStartRequestedResult(bool bothSides, int chainMode, ConstraintState state)
+      => new(false, Point3d.Unset, bothSides, chainMode, false, true, false, state);
+
+    public static SecondPointResult RedoRequestedResult(bool bothSides, int chainMode, ConstraintState state)
+      => new(false, Point3d.Unset, bothSides, chainMode, false, false, true, state);
+  }
 }

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
 using Rhino;
 using Rhino.Commands;
 using Rhino.DocObjects;
@@ -20,8 +22,6 @@ public sealed class vTextAligned : Command
   private const string OffsetKey = "offset";
   private const string Rotate90Key = "rotate90";
 
-  private static readonly string[] RotateModes = { "0", "90", "180", "270" };
-
   private static string _text = "Text";
   private static double _height = 5.0;
   private static double _offset;
@@ -33,127 +33,295 @@ public sealed class vTextAligned : Command
   public override string EnglishName => "vTextAligned";
 
   /// <summary>
-  /// Places text entities aligned to selected curve tangents.
+  /// Executes interactive text alignment and live text move workflow.
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadPersistedOptions();
 
-    if (!TryPickCurve(doc, out var curveRef))
-      return Result.Cancel;
+    Guid? activeCurveId = null;
+    Guid? activeTextId = null;
+    var curveIsLocked = false;
+    TextEntity? activeMoveStartGeo = null;
 
-    if (curveRef?.Curve() is not Curve curve)
-      return Result.Failure;
+    var undoStack = new Stack<TextAction>();
+    var redoStack = new Stack<TextAction>();
 
-    var undoStack = new Stack<TextRecord>();
-    var redoStack = new Stack<TextEntity>();
+    var optHeight = new OptionDouble(_height, RhinoMath.ZeroTolerance, 1e9);
+    var optOffset = new OptionDouble(_offset);
 
     while (true)
     {
-      var gp = new GetPoint();
-      gp.SetCommandPrompt("Pick point near curve to place aligned text");
-      gp.AcceptNothing(true);
-      gp.AcceptString(true);
+      var curveCache = CollectCurveObjects(doc);
+      var textIds = CollectTextIds(doc);
 
-      var heightOption = new OptionDouble(_height, doc.ModelAbsoluteTolerance, 1.0e300);
-      var offsetOption = new OptionDouble(_offset, -1.0e300, 1.0e300);
+      var getter = new MainPointGetter(doc, _text, _height, _offset, _rotate90, curveCache, textIds, activeCurveId, activeTextId, curveIsLocked);
 
-      var textOptionIndex = gp.AddOption("Text");
-      gp.AddOptionDouble("Height", ref heightOption);
-      gp.AddOptionDouble("Offset", ref offsetOption);
-      var rotateOptionIndex = gp.AddOptionList("Rotate", RotateModes, _rotate90);
-      var undoOptionIndex = gp.AddOption("Undo");
-      var redoOptionIndex = gp.AddOption("Redo");
+      getter.SetCommandPrompt(curveIsLocked && activeCurveId.HasValue
+        ? "Curve locked. Click to set text position, or click text to switch active text. Enter to finish"
+        : "Click curve to lock orientation base, or click text to use it. Enter to finish");
 
-      var result = gp.Get();
-      if (gp.CommandResult() != Result.Success)
-        return Result.Cancel;
+      getter.AcceptNothing(true);
+      getter.AcceptString(true);
 
-      if (result == GetResult.Nothing || result == GetResult.Cancel)
-        break;
+      var idxText = getter.AddOption("Text", _text);
+      var idxHeight = getter.AddOptionDouble("Height", ref optHeight);
+      var idxOffset = getter.AddOptionDouble("Offset", ref optOffset);
+      var idxRotate = getter.AddOption("Rotate");
 
-      if (result == GetResult.String)
+      var result = getter.Get();
+      var commandResult = getter.CommandResult();
+
+      if (commandResult != Result.Success)
       {
-        var text = (gp.StringResult() ?? string.Empty).Trim().ToLowerInvariant();
-        if (text is "u" or "undo")
+        if (curveIsLocked && activeTextId.HasValue && activeMoveStartGeo != null)
         {
-          ApplyUndo(doc, undoStack, redoStack);
-          continue;
+          _ = RestoreTextGeometry(doc, activeTextId.Value, activeMoveStartGeo);
+          doc.Views.Redraw();
         }
 
-        if (text is "r" or "redo")
-        {
-          ApplyRedo(doc, undoStack, redoStack);
-          continue;
-        }
+        if (commandResult == Result.Cancel)
+          return Result.Cancel;
 
-        RhinoApp.WriteLine("vTextAligned: hidden keywords are 'u'/'undo' and 'r'/'redo'.");
-        continue;
+        SavePersistedOptions();
+        return Result.Success;
       }
 
       if (result == GetResult.Option)
       {
-        _height = Math.Max(heightOption.CurrentValue, doc.ModelAbsoluteTolerance);
-        _offset = offsetOption.CurrentValue;
-
-        var option = gp.Option();
-        if (option != null && option.Index == textOptionIndex)
+        var option = getter.Option();
+        if (option != null)
         {
-          var proposed = _text;
-          if (RhinoGet.GetString("Text", true, ref proposed) == Result.Success && !string.IsNullOrWhiteSpace(proposed))
-            _text = proposed;
-          SavePersistedOptions();
-          continue;
+          if (option.Index == idxText)
+          {
+            var proposed = _text;
+            if (RhinoGet.GetString("Text", true, ref proposed) == Result.Success && proposed != null)
+              _text = proposed;
+          }
+          else if (option.Index == idxRotate)
+          {
+            _rotate90 = (_rotate90 + 1) % 4;
+            RhinoApp.WriteLine($"Rotate={_rotate90 * 90}");
+          }
         }
 
-        if (option != null && option.Index == rotateOptionIndex)
-          _rotate90 = ClampRotate(option.CurrentListOptionIndex);
+        _height = Math.Max(optHeight.CurrentValue, RhinoMath.ZeroTolerance);
+        _offset = optOffset.CurrentValue;
 
-        if (gp.OptionIndex() == undoOptionIndex)
+        if (activeTextId.HasValue)
         {
-          ApplyUndo(doc, undoStack, redoStack);
-          continue;
-        }
-
-        if (gp.OptionIndex() == redoOptionIndex)
-        {
-          ApplyRedo(doc, undoStack, redoStack);
-          continue;
+          var obj = doc.Objects.FindId(activeTextId.Value);
+          if (obj?.Geometry is TextEntity te)
+          {
+            var updated = te.Duplicate() as TextEntity;
+            if (updated != null)
+            {
+              SetTextEntityValue(updated, _text);
+              updated.TextHeight = _height;
+              _ = doc.Objects.Replace(activeTextId.Value, updated);
+              doc.Views.Redraw();
+            }
+          }
         }
 
         SavePersistedOptions();
         continue;
       }
 
-      if (result != GetResult.Point)
-        continue;
-
-      _height = Math.Max(heightOption.CurrentValue, doc.ModelAbsoluteTolerance);
-      _offset = offsetOption.CurrentValue;
-      SavePersistedOptions();
-
-      var pickPoint = gp.Point();
-      if (!TryBuildTextEntity(doc, curve, pickPoint, out var entity))
+      if (result == GetResult.String)
       {
-        RhinoApp.WriteLine("vTextAligned: failed to build aligned text at this location.");
+        var token = (getter.StringResult() ?? string.Empty).Trim().ToLowerInvariant();
+        if (token is "u" or "undo" or "_undo" or "z")
+        {
+          if (undoStack.Count == 0)
+          {
+            RhinoApp.WriteLine("vTextAligned: nothing to undo.");
+          }
+          else
+          {
+            var action = undoStack.Pop();
+            if (ApplyUndoAction(doc, action, _height))
+            {
+              redoStack.Push(action);
+              doc.Views.Redraw();
+            }
+            else
+            {
+              RhinoApp.WriteLine("vTextAligned: undo failed.");
+            }
+          }
+
+          continue;
+        }
+
+        if (token is "r" or "redo" or "_redo" or "y")
+        {
+          if (redoStack.Count == 0)
+          {
+            RhinoApp.WriteLine("vTextAligned: nothing to redo.");
+          }
+          else
+          {
+            var action = redoStack.Pop();
+            if (ApplyRedoAction(doc, action, _height))
+            {
+              undoStack.Push(action);
+              doc.Views.Redraw();
+            }
+            else
+            {
+              RhinoApp.WriteLine("vTextAligned: redo failed.");
+            }
+          }
+
+          continue;
+        }
+
+        RhinoApp.WriteLine($"vTextAligned: unknown command token {token} (use u/undo, r/redo)");
         continue;
       }
 
-      var id = doc.Objects.AddText(entity);
-      if (id == Guid.Empty)
+      if (result == GetResult.Nothing)
+      {
+        if (curveIsLocked && activeTextId.HasValue && activeMoveStartGeo != null)
+        {
+          _ = RestoreTextGeometry(doc, activeTextId.Value, activeMoveStartGeo);
+          doc.Views.Redraw();
+        }
+
+        SavePersistedOptions();
+        return Result.Success;
+      }
+
+      if (result != GetResult.Point)
+        continue;
+
+      var clickPoint = getter.Point();
+      var textPickPoint = getter.LastCursorPoint ?? clickPoint;
+
+      var curveHitRaw = FindClosestCurveHit(curveCache, clickPoint);
+      var curveHit = IsCurveSnapped(curveHitRaw, getter.SnapTolerance) ? curveHitRaw : null;
+      var textHit = FindClosestTextHit(doc, textIds, textPickPoint, toleranceScale: 1.0, requireInside: true);
+
+      Guid? chosenTextId = null;
+      if (textHit != null && (
+            curveIsLocked ||
+            curveHit == null ||
+            PreferTextHit(curveHit, textHit, getter.SnapTolerance)))
+      {
+        var hitId = textHit.Value.ObjectId;
+        if (!(curveIsLocked && activeTextId.HasValue && hitId == activeTextId.Value))
+          chosenTextId = hitId;
+      }
+
+      if (chosenTextId.HasValue)
+      {
+        if (curveIsLocked && activeTextId.HasValue && activeMoveStartGeo != null && chosenTextId.Value != activeTextId.Value)
+          _ = RestoreTextGeometry(doc, activeTextId.Value, activeMoveStartGeo);
+
+        var obj = doc.Objects.FindId(chosenTextId.Value);
+        if (obj?.Geometry is TextEntity textObj)
+        {
+          activeTextId = chosenTextId.Value;
+          UpdateSettingsFromTextObject(textObj, ref _text, ref _height);
+          optHeight.CurrentValue = _height;
+          activeMoveStartGeo = DupTextGeometry(doc, chosenTextId.Value);
+          SavePersistedOptions();
+          RhinoApp.WriteLine("vTextAligned: active text selected.");
+          doc.Views.Redraw();
+        }
+
+        continue;
+      }
+
+      if (!curveIsLocked)
+      {
+        if (curveHit == null)
+        {
+          RhinoApp.WriteLine("vTextAligned: click a curve to lock orientation base.");
+          continue;
+        }
+
+        activeCurveId = curveHit.Value.ObjectId;
+        curveIsLocked = true;
+        if (activeTextId.HasValue)
+          activeMoveStartGeo = DupTextGeometry(doc, activeTextId.Value);
+
+        RhinoApp.WriteLine("vTextAligned: curve locked. Click again to set text.");
+        continue;
+      }
+
+      var curveToUse = curveCache.FirstOrDefault(c => c.ObjectId == activeCurveId).Curve;
+      if (curveToUse == null)
+      {
+        RhinoApp.WriteLine("vTextAligned: locked curve is no longer available. Select curve again.");
+        curveIsLocked = false;
+        activeCurveId = null;
+        continue;
+      }
+
+      if (!curveToUse.ClosestPoint(clickPoint, out var t))
+      {
+        RhinoApp.WriteLine("vTextAligned: could not evaluate position on locked curve.");
+        continue;
+      }
+
+      var upAxis = getter.View()?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
+      var previewTemplateTextId = getter.PreviewTemplateTextId;
+
+      if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, _height, _rotate90, upAxis, out var plane, out _, sideSignHint: 0, sideDeadband: 0.0, previewTemplateTextId))
+      {
+        RhinoApp.WriteLine("vTextAligned: could not compute text plane.");
+        continue;
+      }
+
+      if (activeTextId.HasValue)
+      {
+        if (ApplySettingsToTextObject(doc, activeTextId.Value, _text, _height, plane))
+        {
+          doc.Views.Redraw();
+
+          var afterGeo = DupTextGeometry(doc, activeTextId.Value);
+          if (activeMoveStartGeo != null && afterGeo != null)
+          {
+            undoStack.Push(TextAction.CreateMove(activeTextId.Value, activeMoveStartGeo, afterGeo));
+            redoStack.Clear();
+          }
+        }
+        else
+        {
+          RhinoApp.WriteLine("vTextAligned: active text is no longer valid.");
+        }
+
+        activeTextId = null;
+        activeMoveStartGeo = null;
+        curveIsLocked = false;
+        SavePersistedOptions();
+        continue;
+      }
+
+      var entity = BuildTextEntity(doc, _text, _height, plane);
+      var newId = doc.Objects.AddText(entity);
+      if (newId == Guid.Empty)
       {
         RhinoApp.WriteLine("vTextAligned: failed to add text.");
         continue;
       }
 
-      undoStack.Push(new TextRecord(id, entity.Duplicate() as TextEntity ?? entity));
-      redoStack.Clear();
+      _ = ForceTextObjectHeight(doc, newId, _height);
+
+      var addedGeo = DupTextGeometry(doc, newId);
+      if (addedGeo != null)
+      {
+        undoStack.Push(TextAction.CreateAdd(newId, addedGeo));
+        redoStack.Clear();
+      }
+
+      activeTextId = null;
+      curveIsLocked = false;
+      SavePersistedOptions();
       doc.Views.Redraw();
     }
-
-    SavePersistedOptions();
-    doc.Views.Redraw();
-    return Result.Success;
   }
 
   private static void LoadPersistedOptions()
@@ -174,7 +342,7 @@ public sealed class vTextAligned : Command
         if (vToolsOptionStore.TryGetDouble(section, OffsetKey, out var persistedOffset))
           offset = persistedOffset;
         if (vToolsOptionStore.TryGetDouble(section, Rotate90Key, out var persistedRotate))
-          rotate90 = ClampRotate((int)Math.Round(persistedRotate, MidpointRounding.AwayFromZero));
+          rotate90 = NormalizeRotate((int)Math.Round(persistedRotate, MidpointRounding.AwayFromZero));
 
         return (text, height, offset, rotate90);
       });
@@ -182,7 +350,7 @@ public sealed class vTextAligned : Command
     _text = values.text;
     _height = Math.Max(values.height, RhinoMath.ZeroTolerance);
     _offset = values.offset;
-    _rotate90 = ClampRotate(values.rotate90);
+    _rotate90 = NormalizeRotate(values.rotate90);
   }
 
   private static void SavePersistedOptions()
@@ -198,161 +366,565 @@ public sealed class vTextAligned : Command
       });
   }
 
-  private static bool TryPickCurve(RhinoDoc doc, out ObjRef? curveRef)
+  private static List<CurveObjectCacheItem> CollectCurveObjects(RhinoDoc doc)
   {
-    curveRef = null;
+    var curves = new List<CurveObjectCacheItem>();
 
-    while (true)
+    var settings = new ObjectEnumeratorSettings
     {
-      var go = new GetObject();
-      go.SetCommandPrompt("Select curve to align text");
-      go.GeometryFilter = ObjectType.Curve;
-      go.SubObjectSelect = false;
-      go.AcceptString(true);
-      go.AcceptNothing(false);
+      NormalObjects = true,
+      LockedObjects = false,
+      HiddenObjects = false,
+      DeletedObjects = false,
+      ObjectTypeFilter = ObjectType.Curve
+    };
 
-      var heightOption = new OptionDouble(_height, doc.ModelAbsoluteTolerance, 1.0e300);
-      var offsetOption = new OptionDouble(_offset, -1.0e300, 1.0e300);
+    foreach (var obj in doc.Objects.GetObjectList(settings))
+    {
+      if (obj?.Geometry is not Curve curve)
+        continue;
 
-      var textOptionIndex = go.AddOption("Text");
-      go.AddOptionDouble("Height", ref heightOption);
-      go.AddOptionDouble("Offset", ref offsetOption);
-      var rotateOptionIndex = go.AddOptionList("Rotate", RotateModes, _rotate90);
+      curves.Add(new CurveObjectCacheItem(obj.Id, curve));
+    }
 
-      var result = go.Get();
-      if (go.CommandResult() != Result.Success)
-        return false;
+    return curves;
+  }
 
-      if (result == GetResult.String)
+  private static List<Guid> CollectTextIds(RhinoDoc doc)
+  {
+    var ids = new List<Guid>();
+
+    var settings = new ObjectEnumeratorSettings
+    {
+      NormalObjects = true,
+      LockedObjects = false,
+      HiddenObjects = false,
+      DeletedObjects = false,
+      ObjectTypeFilter = ObjectType.Annotation
+    };
+
+    foreach (var obj in doc.Objects.GetObjectList(settings))
+    {
+      if (obj?.Geometry is TextEntity)
+        ids.Add(obj.Id);
+    }
+
+    return ids;
+  }
+
+  private static CurveHit? FindClosestCurveHit(List<CurveObjectCacheItem> curveCache, Point3d point)
+  {
+    CurveHit? best = null;
+
+    foreach (var item in curveCache)
+    {
+      if (!item.Curve.ClosestPoint(point, out var t))
+        continue;
+
+      var cpt = item.Curve.PointAt(t);
+      var distance = point.DistanceTo(cpt);
+
+      if (best == null || distance < best.Value.Distance)
+        best = new CurveHit(item.ObjectId, item.Curve, t, distance);
+    }
+
+    return best;
+  }
+
+  private static bool IsCurveSnapped(CurveHit? curveHit, double snapTolerance)
+  {
+    return curveHit.HasValue && curveHit.Value.Distance <= snapTolerance;
+  }
+
+  private static TextHit? FindClosestTextHit(RhinoDoc doc, IReadOnlyList<Guid> textIds, Point3d point, double toleranceScale, bool requireInside)
+  {
+    Guid? bestId = null;
+    double? bestDistance = null;
+
+    foreach (var id in textIds)
+    {
+      var obj = doc.Objects.FindId(id);
+      if (obj?.Geometry is not TextEntity text)
+        continue;
+
+      var metrics = TextEntityPickMetrics(text, point);
+      if (metrics == null)
+        continue;
+
+      var tol = TextEntityPickTolerance(doc, text, toleranceScale);
+
+      if (requireInside)
       {
-        var typed = go.StringResult();
-        if (!string.IsNullOrWhiteSpace(typed))
-        {
-          _text = typed;
-          SavePersistedOptions();
-        }
+        if (!metrics.Value.Inside)
+          continue;
+      }
+      else if (!metrics.Value.Inside && metrics.Value.PlanarOutside > tol)
+      {
         continue;
       }
 
-      if (result == GetResult.Option)
+      var dist = metrics.Value.PlanarOutside;
+      if (bestDistance == null || dist < bestDistance.Value)
       {
-        _height = Math.Max(heightOption.CurrentValue, doc.ModelAbsoluteTolerance);
-        _offset = offsetOption.CurrentValue;
+        bestDistance = dist;
+        bestId = id;
+      }
+    }
 
-        var option = go.Option();
-        if (option != null && option.Index == textOptionIndex)
+    if (!bestId.HasValue || !bestDistance.HasValue)
+      return null;
+
+    return new TextHit(bestId.Value, bestDistance.Value);
+  }
+
+  private static bool PreferTextHit(CurveHit? curveHit, TextHit? textHit, double curveSnapTolerance)
+  {
+    if (textHit == null)
+      return false;
+
+    if (curveHit == null)
+      return true;
+
+    var curveDist = curveHit.Value.Distance;
+    var textDist = textHit.Value.Distance;
+    var tol = Math.Max(RhinoMath.ZeroTolerance, RhinoDoc.ActiveDoc?.ModelAbsoluteTolerance ?? RhinoMath.ZeroTolerance);
+
+    if (textDist <= Math.Max(tol * 2.0, curveSnapTolerance * 0.10))
+      return true;
+
+    var margin = Math.Max(tol * 2.0, curveSnapTolerance * 0.15);
+    return textDist < (curveDist - margin);
+  }
+
+  private static PickMetrics? TextEntityPickMetrics(TextEntity textEntity, Point3d point)
+  {
+    var bounds = CenteredLocalTextBounds(textEntity);
+    if (bounds == null)
+      return null;
+
+    var (plane, minx, maxx, miny, maxy) = bounds.Value;
+
+    if (!plane.ClosestParameter(point, out var u, out var v))
+      return null;
+
+    var insideU = u >= minx && u <= maxx;
+    var insideV = v >= miny && v <= maxy;
+    var inside = insideU && insideV;
+
+    var du = insideU ? 0.0 : Math.Min(Math.Abs(u - minx), Math.Abs(u - maxx));
+    var dv = insideV ? 0.0 : Math.Min(Math.Abs(v - miny), Math.Abs(v - maxy));
+    var planarOutside = Math.Sqrt((du * du) + (dv * dv));
+
+    var planeDist = Math.Abs(plane.DistanceTo(point));
+    var total = Math.Sqrt((planarOutside * planarOutside) + (planeDist * planeDist));
+
+    return new PickMetrics(inside, total, planarOutside, planeDist);
+  }
+
+  private static double TextEntityPickTolerance(RhinoDoc doc, TextEntity textEntity, double toleranceScale)
+  {
+    var h = textEntity.TextHeight;
+    if (h <= RhinoMath.ZeroTolerance)
+      h = 1.0;
+
+    var baseTol = Math.Max(doc.ModelAbsoluteTolerance * 2.0, Math.Min(0.20 * h, 0.08));
+    return baseTol * Math.Max(toleranceScale, 0.1);
+  }
+
+  private static (Plane Plane, double MinX, double MaxX, double MinY, double MaxY)? CenteredLocalTextBounds(TextEntity textEntity)
+  {
+    try
+    {
+      var plane = textEntity.Plane;
+      double? w = null;
+      double? h = null;
+
+      try
+      {
+        var probe = textEntity.Duplicate() as TextEntity;
+        if (probe != null)
         {
-          var proposed = _text;
-          if (RhinoGet.GetString("Text", true, ref proposed) == Result.Success && !string.IsNullOrWhiteSpace(proposed))
-            _text = proposed;
+          probe.Plane = Plane.WorldXY;
+          var wb = probe.GetBoundingBox(Plane.WorldXY);
+          if (wb.IsValid)
+          {
+            var ww = wb.Max.X - wb.Min.X;
+            var hh = wb.Max.Y - wb.Min.Y;
+            if (ww > RhinoMath.ZeroTolerance && hh > RhinoMath.ZeroTolerance)
+            {
+              w = ww;
+              h = hh;
+            }
+          }
         }
-
-        if (option != null && option.Index == rotateOptionIndex)
-          _rotate90 = ClampRotate(option.CurrentListOptionIndex);
-
-        SavePersistedOptions();
-        continue;
+      }
+      catch
+      {
       }
 
-      if (result != GetResult.Object)
-        return false;
+      if (!w.HasValue || !h.HasValue)
+      {
+        var lb = textEntity.GetBoundingBox(plane);
+        if (!lb.IsValid)
+          return null;
 
-      curveRef = go.Object(0);
-      return curveRef != null;
+        w = lb.Max.X - lb.Min.X;
+        h = lb.Max.Y - lb.Min.Y;
+
+        if (w <= RhinoMath.ZeroTolerance || h <= RhinoMath.ZeroTolerance)
+          return null;
+      }
+
+      var minx = -0.5 * w.Value;
+      var maxx = 0.5 * w.Value;
+      var miny = -0.5 * h.Value;
+      var maxy = 0.5 * h.Value;
+      return (plane, minx, maxx, miny, maxy);
+    }
+    catch
+    {
+      return null;
     }
   }
 
-  private static bool TryBuildTextEntity(RhinoDoc doc, Curve curve, Point3d pickPoint, out TextEntity textEntity)
+  private static bool BuildPlaneFromCurve(
+    RhinoDoc doc,
+    Curve curve,
+    double parameter,
+    Point3d cursorPoint,
+    double offsetValue,
+    double heightValue,
+    int rotate90,
+    Vector3d upAxis,
+    out Plane plane,
+    out int sideSign,
+    int sideSignHint,
+    double sideDeadband,
+    Guid? templateTextId)
   {
-    textEntity = new TextEntity();
+    plane = Plane.Unset;
+    sideSign = 0;
 
-    if (!curve.ClosestPoint(pickPoint, out var t))
-      return false;
-
-    var curvePoint = curve.PointAt(t);
-    var tangent = curve.TangentAt(t);
+    var curvePoint = curve.PointAt(parameter);
+    var tangent = curve.TangentAt(parameter);
     if (!tangent.Unitize())
       return false;
 
-    var normal = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
+    var normal = upAxis;
     if (!normal.Unitize())
       normal = Vector3d.ZAxis;
 
-    var side = Vector3d.CrossProduct(normal, tangent);
-    if (!side.Unitize())
+    var sideBase = Vector3d.CrossProduct(normal, tangent);
+    if (!sideBase.Unitize())
       return false;
 
-    var toPick = pickPoint - curvePoint;
-    if (Vector3d.Multiply(side, toPick) < 0.0)
-      side.Reverse();
+    var cursorVec = cursorPoint - curvePoint;
+    var sideMetric = Vector3d.Multiply(cursorVec, sideBase);
+    var resolvedSideSign = sideMetric >= 0.0 ? 1.0 : -1.0;
 
-    var xAxis = new Vector3d(tangent);
-    var yAxis = Vector3d.CrossProduct(normal, xAxis);
-    if (!yAxis.Unitize())
+    if (sideSignHint is 1 or -1)
+    {
+      var db = Math.Max(sideDeadband, RhinoMath.ZeroTolerance);
+      if (sideSignHint > 0 && sideMetric > -db)
+        resolvedSideSign = 1.0;
+      else if (sideSignHint < 0 && sideMetric < db)
+        resolvedSideSign = -1.0;
+    }
+
+    var sideVec = new Vector3d(sideBase);
+    if (resolvedSideSign < 0.0)
+      sideVec.Reverse();
+
+    var yAxis = new Vector3d(sideVec);
+    var xAxis = Vector3d.CrossProduct(yAxis, normal);
+
+    if (!yAxis.Unitize() || !xAxis.Unitize())
       return false;
 
-    var quarterTurns = ClampRotate(_rotate90);
+    if (Vector3d.Multiply(xAxis, tangent) < 0.0)
+    {
+      xAxis.Reverse();
+      yAxis.Reverse();
+    }
+
+    var quarterTurns = NormalizeRotate(rotate90);
     if (quarterTurns != 0)
     {
-      var angle = quarterTurns * Math.PI * 0.5;
+      var angle = quarterTurns * (Math.PI * 0.5);
       xAxis.Rotate(angle, normal);
       yAxis.Rotate(angle, normal);
       xAxis.Unitize();
       yAxis.Unitize();
     }
 
-    var center = curvePoint + side * _offset;
-    var plane = new Plane(center, xAxis, yAxis);
-    if (!plane.IsValid)
+    var offsetNumber = offsetValue;
+    Point3d origin;
+
+    if (Math.Abs(offsetNumber) <= RhinoMath.ZeroTolerance)
+    {
+      origin = cursorPoint;
+    }
+    else
+    {
+      var targetGap = Math.Abs(offsetNumber);
+      origin = curvePoint + sideVec * targetGap;
+
+      var textValue = _text;
+      var textHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
+
+      try
+      {
+        for (var i = 0; i < 2; i++)
+        {
+          var probePlane = new Plane(origin, xAxis, yAxis);
+          var probe = BuildProbeTextEntity(doc, textValue, textHeight, probePlane, templateTextId);
+
+          var details = SideRayHitOnTextRect(curvePoint, sideVec, probe, returnDetails: true, clampNonnegative: false);
+          if (details == null)
+            break;
+
+          var measuredRaw = details.Value.Gap;
+          var delta = targetGap - measuredRaw;
+          if (Math.Abs(delta) <= doc.ModelAbsoluteTolerance)
+            break;
+
+          origin += sideVec * delta;
+        }
+      }
+      catch
+      {
+      }
+    }
+
+    plane = new Plane(origin, xAxis, yAxis);
+    sideSign = (int)resolvedSideSign;
+    return plane.IsValid;
+  }
+
+  private static TextEntity BuildTextEntity(RhinoDoc doc, string textValue, double heightValue, Plane plane)
+  {
+    var text = new TextEntity
+    {
+      Plane = plane,
+      TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance),
+      Justification = TextJustification.MiddleCenter
+    };
+
+    SetTextEntityValue(text, textValue);
+
+    try
+    {
+      text.DimensionStyleId = doc.DimStyles.Current.Id;
+    }
+    catch
+    {
+    }
+
+    try
+    {
+      text.DimensionScale = 1.0;
+    }
+    catch
+    {
+    }
+
+    return text;
+  }
+
+  private static TextEntity BuildProbeTextEntity(RhinoDoc doc, string textValue, double heightValue, Plane plane, Guid? templateTextId)
+  {
+    if (templateTextId.HasValue)
+    {
+      var obj = doc.Objects.FindId(templateTextId.Value);
+      if (obj?.Geometry is TextEntity source)
+      {
+        var probe = source.Duplicate() as TextEntity;
+        if (probe != null)
+        {
+          probe.Plane = plane;
+          SetTextEntityValue(probe, textValue);
+          probe.TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
+          return probe;
+        }
+      }
+    }
+
+    return BuildTextEntity(doc, textValue, heightValue, plane);
+  }
+
+  private static SideRayResult? SideRayHitOnTextRect(Point3d curvePoint, Vector3d sideVec, TextEntity textEntity, bool returnDetails, bool clampNonnegative)
+  {
+    var sv = sideVec;
+    if (!sv.Unitize())
+      return null;
+
+    var bounds = CenteredLocalTextBounds(textEntity);
+    if (bounds == null)
+      return null;
+
+    var (plane, minx, maxx, miny, maxy) = bounds.Value;
+
+    var ux = plane.XAxis;
+    var uy = plane.YAxis;
+    if (!ux.Unitize() || !uy.Unitize())
+      return null;
+
+    var center = plane.Origin;
+    var centerDist = Vector3d.Multiply(center - curvePoint, sv);
+
+    var halfW = 0.5 * (maxx - minx);
+    var halfH = 0.5 * (maxy - miny);
+    var du = Math.Abs(Vector3d.Multiply(sv, ux));
+    var dv = Math.Abs(Vector3d.Multiply(sv, uy));
+    var halfSpan = (du * halfW) + (dv * halfH);
+
+    var rawGap = centerDist - halfSpan;
+    var gap = rawGap;
+    if (clampNonnegative && gap < 0.0)
+      gap = 0.0;
+
+    var hit = curvePoint + (sv * gap);
+    return new SideRayResult(hit, gap, halfW, halfH, du, dv, halfSpan, centerDist, rawGap);
+  }
+
+  private static bool SetTextEntityValue(TextEntity textEntity, string value)
+  {
+    try
+    {
+      textEntity.PlainText = value;
+      return true;
+    }
+    catch
+    {
+      return false;
+    }
+  }
+
+  private static bool ApplySettingsToTextObject(RhinoDoc doc, Guid textId, string textValue, double heightValue, Plane plane)
+  {
+    var obj = doc.Objects.FindId(textId);
+    if (obj?.Geometry is not TextEntity source)
       return false;
 
-    textEntity.PlainText = _text;
-    textEntity.TextHeight = Math.Max(_height, doc.ModelAbsoluteTolerance);
-    textEntity.Plane = plane;
-    textEntity.Justification = TextJustification.MiddleCenter;
+    var updated = source.Duplicate() as TextEntity;
+    if (updated == null)
+      return false;
+
+    updated.Plane = plane;
+    SetTextEntityValue(updated, textValue);
+    updated.TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
+
+    if (!doc.Objects.Replace(textId, updated))
+      return false;
+
+    _ = ForceTextObjectHeight(doc, textId, heightValue);
     return true;
   }
 
-  private static void ApplyUndo(RhinoDoc doc, Stack<TextRecord> undoStack, Stack<TextEntity> redoStack)
+  private static bool RestoreTextGeometry(RhinoDoc doc, Guid textId, TextEntity snapshot)
   {
-    if (undoStack.Count == 0)
+    try
     {
-      RhinoApp.WriteLine("vTextAligned: nothing to undo.");
-      return;
+      var dup = snapshot.Duplicate() as TextEntity;
+      if (dup == null)
+        return false;
+      return doc.Objects.Replace(textId, dup);
     }
-
-    var record = undoStack.Pop();
-    if (!doc.Objects.Delete(record.ObjectId, true))
+    catch
     {
-      RhinoApp.WriteLine("vTextAligned: undo failed.");
-      return;
+      return false;
     }
-
-    redoStack.Push(record.EntitySnapshot.Duplicate() as TextEntity ?? record.EntitySnapshot);
-    doc.Views.Redraw();
   }
 
-  private static void ApplyRedo(RhinoDoc doc, Stack<TextRecord> undoStack, Stack<TextEntity> redoStack)
+  private static TextEntity? DupTextGeometry(RhinoDoc doc, Guid objectId)
   {
-    if (redoStack.Count == 0)
-    {
-      RhinoApp.WriteLine("vTextAligned: nothing to redo.");
-      return;
-    }
+    var obj = doc.Objects.FindId(objectId);
+    if (obj?.Geometry is not TextEntity text)
+      return null;
 
-    var entity = redoStack.Pop();
-    var newId = doc.Objects.AddText(entity);
-    if (newId == Guid.Empty)
+    try
     {
-      RhinoApp.WriteLine("vTextAligned: redo failed.");
-      return;
+      return text.Duplicate() as TextEntity;
     }
-
-    undoStack.Push(new TextRecord(newId, entity.Duplicate() as TextEntity ?? entity));
-    doc.Views.Redraw();
+    catch
+    {
+      return null;
+    }
   }
 
-  private static int ClampRotate(int rotate90)
+  private static bool ForceTextObjectHeight(RhinoDoc doc, Guid objectId, double height)
+  {
+    var obj = doc.Objects.FindId(objectId);
+    if (obj?.Geometry is not TextEntity te)
+      return false;
+
+    var dup = te.Duplicate() as TextEntity;
+    if (dup == null)
+      return false;
+
+    dup.TextHeight = Math.Max(height, RhinoMath.ZeroTolerance);
+    return doc.Objects.Replace(objectId, dup);
+  }
+
+  private static bool ApplyUndoAction(RhinoDoc doc, TextAction action, double currentHeight)
+  {
+    if (action.Kind == TextActionKind.Add)
+      return doc.Objects.Delete(action.ObjectId, true);
+
+    if (action.Kind == TextActionKind.Move && action.Before != null)
+    {
+      var ok = doc.Objects.Replace(action.ObjectId, action.Before.Duplicate() as TextEntity);
+      if (ok)
+        _ = ForceTextObjectHeight(doc, action.ObjectId, currentHeight);
+      return ok;
+    }
+
+    return false;
+  }
+
+  private static bool ApplyRedoAction(RhinoDoc doc, TextAction action, double currentHeight)
+  {
+    if (action.Kind == TextActionKind.Add && action.Geo != null)
+    {
+      var newId = doc.Objects.AddText(action.Geo.Duplicate() as TextEntity);
+      if (newId == Guid.Empty)
+        return false;
+
+      action.ObjectId = newId;
+      _ = ForceTextObjectHeight(doc, newId, currentHeight);
+      return true;
+    }
+
+    if (action.Kind == TextActionKind.Move && action.After != null)
+    {
+      var ok = doc.Objects.Replace(action.ObjectId, action.After.Duplicate() as TextEntity);
+      if (ok)
+        _ = ForceTextObjectHeight(doc, action.ObjectId, currentHeight);
+      return ok;
+    }
+
+    return false;
+  }
+
+  private static void UpdateSettingsFromTextObject(TextEntity textObj, ref string textValue, ref double heightValue)
+  {
+    textValue = TextEntityValue(textObj, textValue);
+
+    var h = textObj.TextHeight;
+    if (h > RhinoMath.ZeroTolerance)
+      heightValue = h;
+  }
+
+  private static string TextEntityValue(TextEntity textEntity, string fallback)
+  {
+    if (!string.IsNullOrWhiteSpace(textEntity.PlainText))
+      return textEntity.PlainText;
+    if (!string.IsNullOrWhiteSpace(textEntity.RichText))
+      return textEntity.RichText;
+    return fallback;
+  }
+
+  private static int NormalizeRotate(int rotate90)
   {
     var value = rotate90 % 4;
     if (value < 0)
@@ -360,5 +932,262 @@ public sealed class vTextAligned : Command
     return value;
   }
 
-  private readonly record struct TextRecord(Guid ObjectId, TextEntity EntitySnapshot);
+  private readonly record struct CurveObjectCacheItem(Guid ObjectId, Curve Curve);
+
+  private readonly record struct CurveHit(Guid ObjectId, Curve Curve, double Parameter, double Distance);
+
+  private readonly record struct TextHit(Guid ObjectId, double Distance);
+
+  private readonly record struct PickMetrics(bool Inside, double TotalDistance, double PlanarOutside, double PlaneDistance);
+
+  private readonly record struct SideRayResult(
+    Point3d Hit,
+    double Gap,
+    double HalfW,
+    double HalfH,
+    double Du,
+    double Dv,
+    double HalfSize,
+    double CenterDistance,
+    double RawGap);
+
+  private enum TextActionKind
+  {
+    Add,
+    Move
+  }
+
+  private sealed class TextAction
+  {
+    public TextActionKind Kind { get; private init; }
+    public Guid ObjectId { get; set; }
+    public TextEntity? Geo { get; private init; }
+    public TextEntity? Before { get; private init; }
+    public TextEntity? After { get; private init; }
+
+    public static TextAction CreateAdd(Guid id, TextEntity geo)
+    {
+      return new TextAction
+      {
+        Kind = TextActionKind.Add,
+        ObjectId = id,
+        Geo = geo.Duplicate() as TextEntity
+      };
+    }
+
+    public static TextAction CreateMove(Guid id, TextEntity before, TextEntity after)
+    {
+      return new TextAction
+      {
+        Kind = TextActionKind.Move,
+        ObjectId = id,
+        Before = before.Duplicate() as TextEntity,
+        After = after.Duplicate() as TextEntity
+      };
+    }
+  }
+
+  private sealed class MainPointGetter : GetPoint
+  {
+    private readonly RhinoDoc _doc;
+    private readonly string _text;
+    private readonly double _height;
+    private readonly double _offset;
+    private readonly int _rotate90;
+
+    private readonly List<CurveObjectCacheItem> _curveCache;
+    private readonly List<Guid> _textIds;
+
+    private readonly Guid? _activeCurveId;
+    private readonly Guid? _activeTextId;
+    private readonly bool _curveIsLocked;
+
+    private int _lastSideSign;
+
+    public MainPointGetter(
+      RhinoDoc doc,
+      string text,
+      double height,
+      double offset,
+      int rotate90,
+      List<CurveObjectCacheItem> curveCache,
+      List<Guid> textIds,
+      Guid? activeCurveId,
+      Guid? activeTextId,
+      bool curveIsLocked)
+    {
+      _doc = doc;
+      _text = text;
+      _height = height;
+      _offset = offset;
+      _rotate90 = rotate90;
+
+      _curveCache = curveCache;
+      _textIds = textIds;
+      _activeCurveId = activeCurveId;
+      _activeTextId = activeTextId;
+      _curveIsLocked = curveIsLocked;
+
+      SnapTolerance = Math.Max(doc.ModelAbsoluteTolerance * 3.0, 0.25);
+      HoverSnapTolerance = Math.Max(doc.ModelAbsoluteTolerance * 2.0, SnapTolerance * 0.35);
+      PreviewTemplateTextId = _activeTextId ?? (_textIds.Count > 0 ? _textIds[0] : (Guid?)null);
+    }
+
+    public CurveHit? HoverCurve { get; private set; }
+    public TextHit? HoverText { get; private set; }
+    public Plane? PreviewPlane { get; private set; }
+    public Guid? PreviewTemplateTextId { get; }
+    public Point3d? LastCursorPoint { get; private set; }
+
+    public double SnapTolerance { get; }
+    public double HoverSnapTolerance { get; }
+
+    private Curve? CurveById(Guid objectId)
+    {
+      foreach (var item in _curveCache)
+      {
+        if (item.ObjectId == objectId)
+          return item.Curve;
+      }
+
+      return null;
+    }
+
+    private void UpdateState(Point3d point)
+    {
+      LastCursorPoint = point;
+
+      var curveHit = FindClosestCurveHit(_curveCache, point);
+      var textHit = FindClosestTextHit(_doc, _textIds, point, toleranceScale: 1.25, requireInside: false);
+      var snappedCurveHit = IsCurveSnapped(curveHit, HoverSnapTolerance) ? curveHit : null;
+
+      HoverCurve = snappedCurveHit;
+      HoverText = textHit;
+
+      if (!_curveIsLocked && PreferTextHit(snappedCurveHit, textHit, SnapTolerance))
+        HoverCurve = null;
+
+      PreviewPlane = null;
+
+      if (!_curveIsLocked || !_activeCurveId.HasValue)
+        return;
+
+      var curveToUse = CurveById(_activeCurveId.Value);
+      if (curveToUse == null)
+        return;
+
+      if (!curveToUse.ClosestPoint(point, out var t))
+        return;
+
+      HoverCurve = new CurveHit(_activeCurveId.Value, curveToUse, t, point.DistanceTo(curveToUse.PointAt(t)));
+
+      var upAxis = View()?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
+      var sideDeadband = Math.Max(_doc.ModelAbsoluteTolerance * 4.0, _height * 0.1);
+
+      if (BuildPlaneFromCurve(
+            _doc,
+            curveToUse,
+            t,
+            point,
+            _offset,
+            _height,
+            _rotate90,
+            upAxis,
+            out var plane,
+            out var sideSign,
+            _lastSideSign,
+            sideDeadband,
+            PreviewTemplateTextId))
+      {
+        PreviewPlane = plane;
+        if (sideSign is 1 or -1)
+          _lastSideSign = sideSign;
+      }
+    }
+
+    protected override void OnMouseMove(GetPointMouseEventArgs e)
+    {
+      UpdateState(e.Point);
+
+      if (PreviewPlane.HasValue && _activeTextId.HasValue && _curveIsLocked)
+      {
+        _ = ApplySettingsToTextObject(_doc, _activeTextId.Value, _text, _height, PreviewPlane.Value);
+        try
+        {
+          _doc.Views.Redraw();
+        }
+        catch
+        {
+        }
+      }
+
+      base.OnMouseMove(e);
+    }
+
+    protected override void OnDynamicDraw(GetPointDrawEventArgs e)
+    {
+      UpdateState(e.CurrentPoint);
+
+      if (HoverCurve.HasValue)
+        e.Display.DrawCurve(HoverCurve.Value.Curve, System.Drawing.Color.Orange, 3);
+
+      if (HoverText.HasValue)
+      {
+        var obj = _doc.Objects.FindId(HoverText.Value.ObjectId);
+        if (obj?.Geometry is TextEntity text)
+        {
+          try
+          {
+            var bbox = text.GetBoundingBox(true);
+            if (bbox.IsValid)
+              e.Display.DrawBox(bbox, System.Drawing.Color.Gold);
+          }
+          catch
+          {
+          }
+        }
+      }
+
+      if (PreviewPlane.HasValue)
+      {
+        if (_activeTextId.HasValue)
+        {
+          e.Display.DrawPoint(PreviewPlane.Value.Origin, Rhino.Display.PointStyle.RoundSimple, 3, System.Drawing.Color.Cyan);
+        }
+        else
+        {
+          try
+          {
+            TextEntity previewGeo;
+            if (PreviewTemplateTextId.HasValue)
+            {
+              var templateObj = _doc.Objects.FindId(PreviewTemplateTextId.Value);
+              if (templateObj?.Geometry is TextEntity template)
+              {
+                previewGeo = template.Duplicate() as TextEntity ?? BuildTextEntity(_doc, _text, _height, PreviewPlane.Value);
+                previewGeo.Plane = PreviewPlane.Value;
+                SetTextEntityValue(previewGeo, _text);
+                previewGeo.TextHeight = _height;
+              }
+              else
+              {
+                previewGeo = BuildTextEntity(_doc, _text, _height, PreviewPlane.Value);
+              }
+            }
+            else
+            {
+              previewGeo = BuildTextEntity(_doc, _text, _height, PreviewPlane.Value);
+            }
+
+            e.Display.DrawAnnotation(previewGeo, System.Drawing.Color.Cyan);
+          }
+          catch
+          {
+          }
+        }
+      }
+
+      base.OnDynamicDraw(e);
+    }
+  }
 }
