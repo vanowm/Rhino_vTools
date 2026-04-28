@@ -45,6 +45,13 @@ public sealed class vLine : Command
   private static double _angle;
   private static bool _angleRelative;
 
+  // Idle-handler fields for deferred native line mode delegation.
+  // RunScript must not be called from within RunCommand — it disrupts Rhino's command state.
+  // Instead, we exit RunCommand cleanly (keeping vLine as the last command for Enter-repeat),
+  // then launch the native variant from the idle event after the command pipeline is clear.
+  private static EventHandler? _pendingNativeLineLaunchIdleHandler;
+  private static string? _pendingNativeLineMode;
+
   /// <summary>
   /// Rhino command name.
   /// </summary>
@@ -55,15 +62,15 @@ public sealed class vLine : Command
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
+    CancelPendingNativeLineMode();
     LoadPersistedOptions();
 
-    // Outer loop keeps vLine as the active (last) command after native delegation,
-    // so command repeat (Enter) re-runs vLine, not the delegated native command.
-    while (true)
-    {
     var startResult = ResolveFirstPoint(doc, initialBothSides: false, initialChainMode: _chainMode, canUndo: false, canRedo: false);
     if (startResult.DelegatedToNative)
-      continue;
+    {
+      QueueNativeLineMode();
+      return Result.Success;
+    }
     if (!startResult.HasPoint)
       return Result.Cancel;
 
@@ -88,7 +95,6 @@ public sealed class vLine : Command
     var history = new List<ActionRecord>();
     var redo = new List<ActionRecord>();
 
-    var delegatedToNative = false;
     var continueChain = true;
     while (continueChain)
     {
@@ -149,8 +155,8 @@ public sealed class vLine : Command
 
         if (newStartResult.DelegatedToNative)
         {
-          delegatedToNative = true;
-          break;
+          QueueNativeLineMode();
+          return Result.Success;
         }
 
         if (!newStartResult.HasPoint)
@@ -259,8 +265,8 @@ public sealed class vLine : Command
 
           if (newStartResult.DelegatedToNative)
           {
-            delegatedToNative = true;
-            break;
+            QueueNativeLineMode();
+            return Result.Success;
           }
 
           if (!newStartResult.HasPoint)
@@ -273,8 +279,6 @@ public sealed class vLine : Command
           break;
         }
 
-        if (delegatedToNative)
-          break;
         SavePersistedOptions();
         continue;
       }
@@ -288,15 +292,11 @@ public sealed class vLine : Command
       SavePersistedOptions();
     }
 
-    if (delegatedToNative)
-      continue;
-
     if (polylinePoints is { Count: > 1 } && (tempPolylineId == Guid.Empty || doc.Objects.FindId(tempPolylineId) == null))
       _ = doc.Objects.AddPolyline(new Polyline(polylinePoints));
 
     doc.Views.Redraw();
     return Result.Success;
-    } // end while (true)
   }
 
   private static void LoadPersistedOptions()
@@ -429,7 +429,7 @@ public sealed class vLine : Command
 
         if (delegatedModes.TryGetValue(option.Index, out var modeKeyword))
         {
-          RunNativeLineMode(modeKeyword);
+          _pendingNativeLineMode = modeKeyword;
           return FirstPointResult.Delegated(bothSides.CurrentValue, chainModeIndex);
         }
 
@@ -1404,15 +1404,51 @@ public sealed class vLine : Command
     return valid[0].Point;
   }
 
-  private static void RunNativeLineMode(string modeKeyword)
+  private static void CancelPendingNativeLineMode()
   {
-    if (modeKeyword == "BiTangent")
+    if (_pendingNativeLineLaunchIdleHandler != null)
     {
-      RhinoApp.RunScript("! _Line _Tangent _Tangent", false);
-      return;
+      RhinoApp.Idle -= _pendingNativeLineLaunchIdleHandler;
+      _pendingNativeLineLaunchIdleHandler = null;
+    }
+    _pendingNativeLineMode = null;
+  }
+
+  private static void QueueNativeLineMode()
+  {
+    // Unhook any already-queued idle handler without clearing the mode
+    // (_pendingNativeLineMode was set by ResolveFirstPoint just before this call).
+    if (_pendingNativeLineLaunchIdleHandler != null)
+    {
+      RhinoApp.Idle -= _pendingNativeLineLaunchIdleHandler;
+      _pendingNativeLineLaunchIdleHandler = null;
     }
 
-    RhinoApp.RunScript($"! _Line _{modeKeyword}", false);
+    if (_pendingNativeLineMode == null)
+      return;
+
+    _pendingNativeLineLaunchIdleHandler = OnLaunchNativeLineOnIdle;
+    RhinoApp.Idle += _pendingNativeLineLaunchIdleHandler;
+  }
+
+  private static void OnLaunchNativeLineOnIdle(object? sender, EventArgs e)
+  {
+    if (_pendingNativeLineLaunchIdleHandler != null)
+    {
+      RhinoApp.Idle -= _pendingNativeLineLaunchIdleHandler;
+      _pendingNativeLineLaunchIdleHandler = null;
+    }
+
+    var mode = _pendingNativeLineMode;
+    _pendingNativeLineMode = null;
+    if (mode == null)
+      return;
+
+    // echo:false keeps vLine as Rhino's last command so Enter-repeat re-runs vLine.
+    if (mode == "BiTangent")
+      RhinoApp.RunScript("_Line _Tangent _Tangent", false);
+    else
+      RhinoApp.RunScript($"_Line _{mode}", false);
   }
 
   private static bool UndoLastAction(
