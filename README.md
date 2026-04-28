@@ -104,8 +104,9 @@ Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow
 ### vLineLength flow
 
 1. Run `vLineLength`.
-1. Hover and click open curves to apply line length edits.
-1. Use `Length`, `ExtendMode`, and `Mode` options while preview updates in real time.
+1. Click an open curve near the end you want to drive.
+1. Use `Length`, `ExtendMode`, and `Mode` options while editing.
+1. Use `Undo` option to revert the last in-session edit.
 
 ### vOrient2pt flow
 
