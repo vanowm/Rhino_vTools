@@ -92,8 +92,14 @@ Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow
 ### vLine flow
 
 1. Run `vLine`.
-1. The command executes the LinePlus workflow from `LinePlus.py`.
-1. Use LinePlus options (single, chained, polyline, tangent/perpendicular priorities) during point picking.
+1. Pick start and end points.
+1. Use options during point picking:
+
+  - `Mode`: `Normal`, `Perp`, `Tangent`, `Auto`, `PerpNear`, `TanNear`.
+  - `ChainMode`: `Single`, `Multiple`, `Chained`, `Polyline`.
+  - `BothSides`: symmetric output around start point.
+  - `Length`: fixed output length when non-zero.
+  - `Priority`: auto-resolution preference between perpendicular/tangent candidates.
 
 ### vLineLength flow
 
@@ -137,20 +143,38 @@ Hidden keywords while picking points:
 ### vScallop flow
 
 1. Run `vScallop`.
-1. The command executes the Scallop workflow from `Scallop.py`.
-1. Follow command line options/prompts to generate scallop geometry.
+1. Select a line, or press Enter to pick two points.
+1. Pick side point to define bulge direction.
+1. Use options:
+
+  - `Size`: fixed bulge amount.
+  - `Free`: use side-point distance as bulge amount.
+  - `DeleteOriginal`: delete source line after creating the scallop arc.
 
 ### vSplitAtCorners flow
 
 1. Run `vSplitAtCorners`.
-1. The command executes the SplitAtCorners workflow from `SplitAtCorners.py`.
-1. Follow command line options/prompts to split curves at detected corner transitions.
+1. Select curves to split.
+1. Press Enter to run splitting.
+1. Use options:
+
+  - `MinAngle`: minimum detected corner angle (degrees).
+  - `DeleteInput`: keep or delete original curves after split.
 
 ### vTextAligned flow
 
 1. Run `vTextAligned`.
-1. The command executes the TextAligned workflow from `TextAligned.py`.
-1. Use text, height, offset, and rotation options while placing/alignment updates preview.
+1. Select a target curve.
+1. Pick points near the curve to place text aligned to local tangent.
+1. Use options while placing:
+
+  - `Text`, `Height`, `Offset`, `Rotate`.
+  - `Undo` and `Redo`.
+
+Hidden keywords while placing:
+
+- `u` or `undo`
+- `r` or `redo`
 
 ### vTextFlip flow
 
