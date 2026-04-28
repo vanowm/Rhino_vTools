@@ -1,7 +1,10 @@
 using Rhino;
 using Rhino.PlugIns;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 
 namespace vTools;
 
@@ -40,9 +43,55 @@ public class vToolsPlugIn : PlugIn
   protected override LoadReturnCode OnLoad(ref string errorMessage)
   {
     var version = GetType().Assembly.GetName().Version?.ToString() ?? "unknown";
+    var commandNames = CollectRegisteredCommandNames();
     TryLog($"OnLoad OK. Version={version}. Assembly={GetType().Assembly.Location}");
-    RhinoApp.WriteLine($"vTools v{version} loaded. Commands registered: vCurveToSpline, vFitBox, vOrient2pt, vOrient3pt, vTogglePerpGumball, vTrim, vUzip");
+    RhinoApp.WriteLine($"vTools v{version} loaded. Commands registered ({commandNames.Count}): {string.Join(", ", commandNames)}");
     return LoadReturnCode.Success;
+  }
+
+  /// <summary>
+  /// Collects all non-abstract command names from this plug-in assembly.
+  /// </summary>
+  private List<string> CollectRegisteredCommandNames()
+  {
+    var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    try
+    {
+      var commandTypes = GetType()
+        .Assembly
+        .GetTypes()
+        .Where(t =>
+          t != null &&
+          t.IsClass &&
+          !t.IsAbstract &&
+          typeof(Rhino.Commands.Command).IsAssignableFrom(t));
+
+      foreach (var commandType in commandTypes)
+      {
+        try
+        {
+          if (Activator.CreateInstance(commandType) is Rhino.Commands.Command command)
+          {
+            var name = (command.EnglishName ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(name))
+              names.Add(name);
+          }
+        }
+        catch
+        {
+        }
+      }
+    }
+    catch
+    {
+    }
+
+    var ordered = names
+      .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+      .ToList();
+
+    return ordered;
   }
 
   /// <summary>

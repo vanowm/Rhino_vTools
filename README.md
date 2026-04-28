@@ -10,6 +10,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vFitBox](#vfitbox-flow)
   - [vOrient2pt](#vorient2pt-flow)
   - [vOrient3pt](#vorient3pt-flow)
+  - [vPointNormalToSurface / PointSurf](#vpointnormaltosurface--pointsurf-flow)
   - [vTogglePerpGumball](#vtoggleperpgumball-flow)
   - [vTrim](#vtrim-flow)
   - [vUzip](#vuzip-flow)
@@ -55,7 +56,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow).
+Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPointNormalToSurface / PointSurf](#vpointnormaltosurface--pointsurf-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -101,6 +102,19 @@ Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow
 1. Pick source third point.
 1. Pick target third point.
 1. Toggle `Copy` option as needed during point picking.
+
+### vPointNormalToSurface / PointSurf flow
+
+1. Run `vPointNormalToSurface` or `PointSurf`.
+1. Select a target surface or polysurface face.
+1. Pick points in space.
+1. A point is placed on the closest evaluated surface location (normal evaluation point), with live preview from picked point to on-surface point.
+1. Press Enter to finish.
+
+Hidden keywords while picking points:
+
+- `u` or `undo`: remove last created point in the current command session.
+- `r` or `redo`: recreate last undone point in the current command session.
 
 ### vTogglePerpGumball flow
 
