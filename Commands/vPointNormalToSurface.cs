@@ -32,22 +32,6 @@ public sealed class vPointNormalToSurface : Command
 /// <summary>
 /// Short alias for vPointNormalToSurface.
 /// </summary>
-public sealed class PointSurf : Command
-{
-  /// <summary>
-  /// Rhino command name.
-  /// </summary>
-  public override string EnglishName => "PointSurf";
-
-  /// <summary>
-  /// Runs the PointNormalToSurface workflow.
-  /// </summary>
-  protected override Result RunCommand(RhinoDoc doc, RunMode mode)
-  {
-    return PointNormalToSurfaceWorkflow.Run(doc);
-  }
-}
-
 internal static class PointNormalToSurfaceWorkflow
 {
   private const string CommandName = "PointNormalToSurface";
