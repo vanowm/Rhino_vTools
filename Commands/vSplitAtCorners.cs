@@ -316,20 +316,23 @@ public sealed class vSplitAtCorners : Command
     if (!curve.IsValid)
       return candidates;
 
-    var kinkParams = curve.GetNextDiscontinuity(
-      Continuity.G1_continuous,
-      curve.Domain.T0,
-      curve.Domain.T1,
-      out var t) ? new List<double> { t } : new List<double>();
+    var domain = curve.Domain;
+    var kinkParams = new List<double>();
 
-    var seekStart = curve.Domain.T0;
-    while (curve.GetNextDiscontinuity(Continuity.G1_continuous, seekStart, curve.Domain.T1, out t))
+    var seekStart = domain.T0;
+    while (curve.GetNextDiscontinuity(Continuity.G1_continuous, seekStart, domain.T1, out var t))
     {
       kinkParams.Add(t);
       seekStart = t + RhinoMath.SqrtEpsilon;
-      if (seekStart >= curve.Domain.T1)
+      if (seekStart >= domain.T1)
         break;
     }
+
+    // GetNextDiscontinuity only searches strictly between T0 and T1, so the
+    // seam corner of a closed curve (where the last segment meets the first)
+    // is never returned. Test it explicitly.
+    if (curve.IsClosed)
+      kinkParams.Add(domain.T0);
 
     kinkParams = kinkParams
       .Distinct(new DoubleApproxComparer(RhinoMath.ZeroTolerance * 10.0))
@@ -357,14 +360,26 @@ public sealed class vSplitAtCorners : Command
     var t1 = domain.T1;
 
     var eps = Math.Max((t1 - t0) * 1e-6, RhinoMath.ZeroTolerance * 10.0);
-    var left = Math.Max(t0, param - eps);
-    var right = Math.Min(t1, param + eps);
 
-    if (right <= left)
-      return false;
+    Vector3d tanA, tanB;
 
-    var tanA = curve.TangentAt(left);
-    var tanB = curve.TangentAt(right);
+    // Seam of a closed curve: the kink straddles T0==T1, so sample
+    // inbound from the end of the last segment and outbound from the
+    // start of the first segment.
+    if (curve.IsClosed && Math.Abs(param - t0) < eps)
+    {
+      tanA = curve.TangentAt(t1 - eps);
+      tanB = curve.TangentAt(t0 + eps);
+    }
+    else
+    {
+      var left = Math.Max(t0, param - eps);
+      var right = Math.Min(t1, param + eps);
+      if (right <= left)
+        return false;
+      tanA = curve.TangentAt(left);
+      tanB = curve.TangentAt(right);
+    }
     if (!tanA.Unitize() || !tanB.Unitize())
       return false;
 
@@ -374,7 +389,7 @@ public sealed class vSplitAtCorners : Command
     if (angle < angleThresholdDeg)
       return false;
 
-    if (minLength > RhinoMath.ZeroTolerance)
+    if (minLength > RhinoMath.ZeroTolerance && !(curve.IsClosed && Math.Abs(param - t0) < eps))
     {
       var leftSeg = curve.Trim(t0, param);
       var rightSeg = curve.Trim(param, t1);
