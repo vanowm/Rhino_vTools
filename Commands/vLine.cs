@@ -99,7 +99,8 @@ public sealed class vLine : Command
     while (continueChain)
     {
       var segmentBothDefault = firstSegment ? initialBothSides : false;
-      var modeSeed = (persistConstraintState || firstSegment) ? constraintModeState : null;
+      // Endpoint constraint options are single-use in multi-segment modes; only Single mode inherits.
+      var modeSeed = chainModeState == ModeSingle && (persistConstraintState || firstSegment) ? constraintModeState : null;
 
       var secondResult = ResolveSecondPoint(
         doc,
