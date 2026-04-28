@@ -15,6 +15,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vOrient2pt](#vorient2pt-flow) *(26.04.24.093442)* — orients objects from a source two-point frame to a target two-point frame
   - [vOrient3pt](#vorient3pt-flow) *(26.04.24.093442)* — orients objects from a source three-point frame to a target three-point frame
   - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.04.27.210936)* — places points projected onto the closest surface normal evaluation point
+  - [vRectangle](#vrectangle-flow) *(26.04.27)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.04.27.212532)* — creates an arc scallop between two points or along a selected line
   - [vSplitAtCorners](#vsplitatcorners-flow) *(26.04.27.212532)* — splits curves at detected corners with interactive per-corner toggle preview
   - [vTextAligned](#vtextaligned-flow) *(26.04.27.212532)* — places or repositions annotation text aligned and offset along a selected curve
@@ -64,7 +65,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow).
+Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -197,6 +198,16 @@ Hidden keywords while picking points:
 
 - `u` or `undo`: remove last created point in the current command session.
 - `r` or `redo`: recreate last undone point in the current command session.
+
+### vRectangle flow
+
+1. Run `vRectangle`.
+1. If curves are preselected, their total length is used as the width automatically.
+1. Otherwise, set width: select curves to use their total length, type a number, or press Enter to keep the current value.
+1. Set height the same way.
+1. Pick the bottom-left corner. Press Enter to reuse the previous bottom-right position.
+1. Live preview shows the rectangle while moving the cursor.
+1. Use `Width` and `Height` options while picking the corner to adjust values.
 
 ### vScallop flow
 
