@@ -57,9 +57,13 @@ public sealed class vLine : Command
   {
     LoadPersistedOptions();
 
+    // Outer loop keeps vLine as the active (last) command after native delegation,
+    // so command repeat (Enter) re-runs vLine, not the delegated native command.
+    while (true)
+    {
     var startResult = ResolveFirstPoint(doc, initialBothSides: false, initialChainMode: _chainMode, canUndo: false, canRedo: false);
     if (startResult.DelegatedToNative)
-      return Result.Success;
+      continue;
     if (!startResult.HasPoint)
       return Result.Cancel;
 
@@ -84,6 +88,7 @@ public sealed class vLine : Command
     var history = new List<ActionRecord>();
     var redo = new List<ActionRecord>();
 
+    var delegatedToNative = false;
     var continueChain = true;
     while (continueChain)
     {
@@ -143,7 +148,10 @@ public sealed class vLine : Command
         }
 
         if (newStartResult.DelegatedToNative)
-          return Result.Success;
+        {
+          delegatedToNative = true;
+          break;
+        }
 
         if (!newStartResult.HasPoint)
           return Result.Cancel;
@@ -250,7 +258,10 @@ public sealed class vLine : Command
           }
 
           if (newStartResult.DelegatedToNative)
-            return Result.Success;
+          {
+            delegatedToNative = true;
+            break;
+          }
 
           if (!newStartResult.HasPoint)
             return Result.Success;
@@ -262,6 +273,8 @@ public sealed class vLine : Command
           break;
         }
 
+        if (delegatedToNative)
+          break;
         SavePersistedOptions();
         continue;
       }
@@ -275,11 +288,15 @@ public sealed class vLine : Command
       SavePersistedOptions();
     }
 
+    if (delegatedToNative)
+      continue;
+
     if (polylinePoints is { Count: > 1 } && (tempPolylineId == Guid.Empty || doc.Objects.FindId(tempPolylineId) == null))
       _ = doc.Objects.AddPolyline(new Polyline(polylinePoints));
 
     doc.Views.Redraw();
     return Result.Success;
+    } // end while (true)
   }
 
   private static void LoadPersistedOptions()
