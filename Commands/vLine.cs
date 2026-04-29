@@ -361,7 +361,6 @@ public sealed class vLine : Command
   {
     var getPoint = new GetPoint();
     getPoint.SetCommandPrompt("Start of line");
-    getPoint.AcceptString(true);
     getPoint.AcceptNothing(true);
 
     var bothSides = new OptionToggle(initialBothSides, "No", "Yes");
@@ -392,6 +391,9 @@ public sealed class vLine : Command
       [idxExtension] = "Extension"
     };
 
+    var idxFpUndo = canUndo ? getPoint.AddOption("Undo") : -1;
+    var idxFpRedo = canRedo ? getPoint.AddOption("Redo") : -1;
+
     while (true)
     {
       var result = getPoint.Get();
@@ -405,35 +407,23 @@ public sealed class vLine : Command
       if (result == GetResult.Nothing)
         return FirstPointResult.None(bothSides.CurrentValue, chainModeIndex);
 
-      if (result == GetResult.String)
-      {
-        var cmd = (getPoint.StringResult() ?? string.Empty).Trim().ToLowerInvariant().TrimStart('_', '!');
-
-        if (cmd.Length == 0)
-          return FirstPointResult.None(bothSides.CurrentValue, chainModeIndex);
-
-        if (cmd is "undo" or "u")
-        {
-          if (canUndo)
-            return FirstPointResult.UndoRequestedResult(bothSides.CurrentValue, chainModeIndex);
-          continue;
-        }
-
-        if (cmd is "redo" or "r")
-        {
-          if (canRedo)
-            return FirstPointResult.RedoRequestedResult(bothSides.CurrentValue, chainModeIndex);
-          continue;
-        }
-
-        continue;
-      }
-
       if (result == GetResult.Option)
       {
         var option = getPoint.Option();
         if (option == null)
           continue;
+
+        if (idxFpUndo != -1 && option.Index == idxFpUndo)
+        {
+          if (canUndo) return FirstPointResult.UndoRequestedResult(bothSides.CurrentValue, chainModeIndex);
+          continue;
+        }
+
+        if (idxFpRedo != -1 && option.Index == idxFpRedo)
+        {
+          if (canRedo) return FirstPointResult.RedoRequestedResult(bothSides.CurrentValue, chainModeIndex);
+          continue;
+        }
 
         if (delegatedModes.TryGetValue(option.Index, out var modeKeyword))
         {
@@ -471,7 +461,6 @@ public sealed class vLine : Command
     var getPoint = new GetPoint();
     getPoint.SetBasePoint(startPoint, true);
     getPoint.AcceptNumber(true, true);
-    getPoint.AcceptString(true);
     getPoint.AcceptNothing(true);
 
     var bothSides = new OptionToggle(initialBothSides, "No", "Yes");
@@ -497,6 +486,8 @@ public sealed class vLine : Command
     getPoint.AddOptionToggle("AngleLock", ref angleLock);
     var idxAngle = getPoint.AddOptionDouble("Angle", ref angleOption);
     getPoint.AddOptionToggle("AngleRef", ref angleRelative);
+    var idxSpUndo = (canUndo || canUndoStart) ? getPoint.AddOption("Undo") : -1;
+    var idxSpRedo = canRedo ? getPoint.AddOption("Redo") : -1;
 
     var mode = initialMode;
 
@@ -835,6 +826,22 @@ public sealed class vLine : Command
             continue;
           }
 
+          if (idxSpUndo != -1 && option.Index == idxSpUndo)
+          {
+            var state = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
+            if (canUndo)
+              return SecondPointResult.UndoRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
+            if (canUndoStart)
+              return SecondPointResult.UndoStartRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
+            continue;
+          }
+
+          if (idxSpRedo != -1 && option.Index == idxSpRedo && canRedo)
+          {
+            var state = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
+            return SecondPointResult.RedoRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
+          }
+
           continue;
         }
 
@@ -857,33 +864,6 @@ public sealed class vLine : Command
             canUndo,
             canUndoStart,
             canRedo);
-        }
-
-        if (result == GetResult.String)
-        {
-          var cmd = (getPoint.StringResult() ?? string.Empty).Trim().ToLowerInvariant().TrimStart('_', '!');
-          var state = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
-
-          if (cmd.Length == 0)
-            return SecondPointResult.None(bothSides.CurrentValue, chainModeIndex, state);
-
-          if (cmd is "redo" or "r")
-          {
-            if (canRedo)
-              return SecondPointResult.RedoRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
-            continue;
-          }
-
-          if (cmd is "undo" or "u")
-          {
-            if (canUndo)
-              return SecondPointResult.UndoRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
-            if (canUndoStart)
-              return SecondPointResult.UndoStartRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
-            continue;
-          }
-
-          continue;
         }
 
         var fallbackState = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);

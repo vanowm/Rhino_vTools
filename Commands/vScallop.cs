@@ -58,6 +58,7 @@ public sealed class vScallop : Command
       var idxRedo   = redoStack.Count > 0 ? go.AddOption("Redo") : -1;
 
       var outerResult = go.Get();
+      RhinoApp.WriteLine($"[DBG Scallop] get={outerResult} cmdResult={go.CommandResult()}");
 
       if (go.CommandResult() != Result.Success)
       {
