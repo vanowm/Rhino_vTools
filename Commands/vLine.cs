@@ -409,6 +409,9 @@ public sealed class vLine : Command
       {
         var cmd = (getPoint.StringResult() ?? string.Empty).Trim().ToLowerInvariant().TrimStart('_', '!');
 
+        if (cmd.Length == 0)
+          return FirstPointResult.None(bothSides.CurrentValue, chainModeIndex);
+
         if (cmd is "undo" or "u")
         {
           if (canUndo)
@@ -860,6 +863,9 @@ public sealed class vLine : Command
         {
           var cmd = (getPoint.StringResult() ?? string.Empty).Trim().ToLowerInvariant().TrimStart('_', '!');
           var state = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
+
+          if (cmd.Length == 0)
+            return SecondPointResult.None(bothSides.CurrentValue, chainModeIndex, state);
 
           if (cmd is "redo" or "r")
           {

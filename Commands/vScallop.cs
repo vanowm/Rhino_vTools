@@ -86,6 +86,7 @@ public sealed class vScallop : Command
           if (opt.Index == idxUndo && undoStack.Count > 0)
           {
             ApplyUndo(doc, undoStack.Pop(), redoStack);
+            doc.Objects.UnselectAll();
             doc.Views.Redraw();
             SavePersistedOptions();
             continue;
@@ -93,6 +94,7 @@ public sealed class vScallop : Command
           if (opt.Index == idxRedo && redoStack.Count > 0)
           {
             ApplyRedo(doc, redoStack.Pop(), undoStack);
+            doc.Objects.UnselectAll();
             doc.Views.Redraw();
             SavePersistedOptions();
             continue;
