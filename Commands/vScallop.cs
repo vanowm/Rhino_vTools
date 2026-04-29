@@ -44,7 +44,7 @@ public sealed class vScallop : Command
     {
       // ── Outer prompt: select line or Enter for two-point mode ──────────
       var go = new GetObject();
-      go.SetCommandPrompt("Select line or press Enter for points");
+      go.SetCommandPrompt("Select curve or press Enter for points");
       go.GeometryFilter = ObjectType.Curve;
       go.SubObjectSelect = false;
       go.AcceptNothing(true);
@@ -117,14 +117,16 @@ public sealed class vScallop : Command
         if (objRef?.Curve() is not Curve curve)
           continue;
 
-        if (!TryGetLineLikeEndpoints(curve, doc.ModelAbsoluteTolerance, out pointA, out pointB))
+        if (curve.IsClosed)
         {
-          RhinoApp.WriteLine("vScallop: selected curve is not a line.");
+          RhinoApp.WriteLine("vScallop: selected curve is closed; need an open curve.");
           doc.Objects.UnselectAll();
           doc.Views.Redraw();
           continue;
         }
 
+        pointA = curve.PointAtStart;
+        pointB = curve.PointAtEnd;
         sourceLineId = objRef.ObjectId;
       }
       else
@@ -389,28 +391,6 @@ public sealed class vScallop : Command
 
       return true;
     }
-  }
-
-  private static bool TryGetLineLikeEndpoints(Curve curve, double tolerance, out Point3d pointA, out Point3d pointB)
-  {
-    pointA = Point3d.Unset;
-    pointB = Point3d.Unset;
-
-    if (curve is LineCurve lineCurve)
-    {
-      pointA = lineCurve.PointAtStart;
-      pointB = lineCurve.PointAtEnd;
-      return true;
-    }
-
-    if (curve.IsLinear(tolerance))
-    {
-      pointA = curve.PointAtStart;
-      pointB = curve.PointAtEnd;
-      return true;
-    }
-
-    return false;
   }
 
   private static bool TryResolvePerpDirection(RhinoDoc doc, Point3d pointA, Point3d pointB, Point3d sidePoint, out Vector3d direction)
