@@ -13,7 +13,6 @@ namespace vTools.Commands;
 /// <summary>
 /// Native scallop-arc command ported from Scallop.py.
 /// </summary>
-[CommandStyle(Style.NotUndoable)]
 public sealed class vScallop : Command
 {
   private const string OptionsSectionName = "vScallop";
@@ -30,9 +29,8 @@ public sealed class vScallop : Command
   /// </summary>
   public override string EnglishName => "vScallop";
 
-  // Each arc gets its own native undo record (Ctrl+Z undoes one arc at a time after
-  // the command ends). In-command Undo/Redo options manage a parallel manual stack
-  // and clean up the native record via ClearUndoRecords when an arc is in-command-undone.
+  // Supports in-command Undo/Redo; all steps collapse into one Rhino undo record after
+  // the command ends.
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadPersistedOptions();
@@ -178,12 +176,9 @@ public sealed class vScallop : Command
           willDelete = false;
       }
 
-      var undoSerial = doc.BeginUndoRecord("vScallop");
-
       var arcId = doc.Objects.AddCurve(arcCurve);
       if (arcId == Guid.Empty)
       {
-        doc.EndUndoRecord(undoSerial);
         RhinoApp.WriteLine("vScallop: failed to add arc to document.");
         continue;
       }
@@ -193,10 +188,10 @@ public sealed class vScallop : Command
       if (willDelete)
         doc.Objects.Delete(sourceLineId, true);
 
-      doc.EndUndoRecord(undoSerial);
+      doc.Objects.UnselectAll();
 
       undoStack.Push(new ScallopUndoEntry(
-        undoSerial, arcId, arcCurve, arcAttr,
+        arcId, arcCurve, arcAttr,
         willDelete, sourceLineId,
         sourceCurveGeom, sourceCurveAttr));
       redoStack.Clear();
@@ -208,7 +203,6 @@ public sealed class vScallop : Command
   // ── In-command undo/redo helpers ──────────────────────────────────────────
 
   private sealed record ScallopUndoEntry(
-    uint UndoSerial,
     Guid CreatedArcId,
     ArcCurve ArcGeometry,
     ObjectAttributes ArcAttributes,
@@ -228,12 +222,8 @@ public sealed class vScallop : Command
     if (entry.HadDeletedSource && entry.SourceGeometry != null)
       restoredSourceId = doc.Objects.AddCurve(entry.SourceGeometry, entry.SourceAttributes ?? new ObjectAttributes());
 
-    // Remove the native undo record so post-command Ctrl+Z skips this arc.
-    doc.ClearUndoRecords(entry.UndoSerial, false);
-
     redoStack.Push(entry with
     {
-      UndoSerial = 0,
       CreatedArcId = Guid.Empty,
       SourceId = restoredSourceId
     });
@@ -247,14 +237,11 @@ public sealed class vScallop : Command
     if (entry.HadDeletedSource && entry.SourceId != Guid.Empty)
       doc.Objects.Delete(entry.SourceId, true);
 
-    var serial = doc.BeginUndoRecord("vScallop");
     var newArcId = doc.Objects.AddCurve(entry.ArcGeometry, entry.ArcAttributes);
     var newAttr  = doc.Objects.FindId(newArcId)?.Attributes.Duplicate() ?? new ObjectAttributes();
-    doc.EndUndoRecord(serial);
 
     undoStack.Push(entry with
     {
-      UndoSerial   = serial,
       CreatedArcId = newArcId,
       ArcAttributes = newAttr
     });
