@@ -65,7 +65,7 @@ public sealed class vLine : Command
     CancelPendingNativeLineMode();
     LoadPersistedOptions();
 
-    var startResult = ResolveFirstPoint(doc, initialBothSides: false, initialChainMode: _chainMode, canUndo: false, canRedo: false);
+    var startResult = ResolveFirstPoint(doc, initialBothSides: false, initialChainMode: _chainMode);
     if (startResult.DelegatedToNative)
     {
       QueueNativeLineMode();
@@ -92,9 +92,6 @@ public sealed class vLine : Command
     List<Point3d>? polylinePoints = null;
     Guid tempPolylineId = Guid.Empty;
 
-    var history = new List<ActionRecord>();
-    var redo = new List<ActionRecord>();
-
     var continueChain = true;
     while (continueChain)
     {
@@ -114,10 +111,7 @@ public sealed class vLine : Command
         angleLockState,
         angleState,
         angleRelativeState,
-        lastSegmentVector,
-        canUndo: history.Count > 0,
-        canUndoStart: firstSegment,
-        canRedo: redo.Count > 0);
+        lastSegmentVector);
 
       if (secondResult.State != null)
       {
@@ -136,56 +130,6 @@ public sealed class vLine : Command
         _angleLock = angleLockState;
         _angle = angleState;
         _angleRelative = angleRelativeState;
-      }
-
-      if (secondResult.UndoStartRequested)
-      {
-        var newStartResult = ResolveFirstPoint(doc, initialBothSides, chainModeState, canUndo: history.Count > 0, canRedo: redo.Count > 0);
-        if (newStartResult.UndoRequested)
-        {
-          UndoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
-          continue;
-        }
-
-        if (newStartResult.RedoRequested)
-        {
-          RedoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
-          UpdateLastSegmentVector(history, polylinePoints, ref lastSegmentVector);
-          continue;
-        }
-
-        if (newStartResult.DelegatedToNative)
-        {
-          QueueNativeLineMode();
-          return Result.Success;
-        }
-
-        if (!newStartResult.HasPoint)
-          return Result.Cancel;
-
-        currentStart = newStartResult.Point;
-        firstSegment = true;
-        history.Clear();
-        redo.Clear();
-        polylinePoints = null;
-        lastSegmentVector = null;
-        DeleteObjectIfValid(doc, tempPolylineId);
-        tempPolylineId = Guid.Empty;
-        doc.Views.Redraw();
-        continue;
-      }
-
-      if (secondResult.RedoRequested)
-      {
-        RedoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
-        UpdateLastSegmentVector(history, polylinePoints, ref lastSegmentVector);
-        continue;
-      }
-
-      if (secondResult.UndoRequested)
-      {
-        UndoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
-        continue;
       }
 
       if (!secondResult.HasPoint)
@@ -208,9 +152,6 @@ public sealed class vLine : Command
 
         DeleteObjectIfValid(doc, tempPolylineId);
         tempPolylineId = doc.Objects.AddPolyline(new Polyline(polylinePoints));
-
-        history.Add(ActionRecord.CreatePolylineAdd(currentStart, prevPoints, endPoint, tempPolylineId, endPoint));
-        redo.Clear();
 
         if (polylinePoints.Count >= 2)
           lastSegmentVector = polylinePoints[^1] - polylinePoints[^2];
@@ -239,8 +180,6 @@ public sealed class vLine : Command
           lineId = doc.Objects.AddLine(currentStart, endPoint);
         }
 
-        history.Add(ActionRecord.CreateLine(lineId, currentStart, currentStart, endPoint, bothSides, endPoint));
-        redo.Clear();
         lastSegmentVector = endPoint - currentStart;
       }
 
@@ -250,19 +189,7 @@ public sealed class vLine : Command
       {
         while (true)
         {
-          var newStartResult = ResolveFirstPoint(doc, initialBothSides, selectedChainMode, canUndo: history.Count > 0, canRedo: redo.Count > 0);
-
-          if (newStartResult.UndoRequested)
-          {
-            UndoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
-            continue;
-          }
-
-          if (newStartResult.RedoRequested)
-          {
-            RedoLastAction(doc, history, redo, ref currentStart, ref polylinePoints, ref tempPolylineId);
-            continue;
-          }
+          var newStartResult = ResolveFirstPoint(doc, initialBothSides, selectedChainMode);
 
           if (newStartResult.DelegatedToNative)
           {
@@ -357,7 +284,7 @@ public sealed class vLine : Command
       });
   }
 
-  private static FirstPointResult ResolveFirstPoint(RhinoDoc doc, bool initialBothSides, int initialChainMode, bool canUndo, bool canRedo)
+  private static FirstPointResult ResolveFirstPoint(RhinoDoc doc, bool initialBothSides, int initialChainMode)
   {
     var getPoint = new GetPoint();
     getPoint.SetCommandPrompt("Start of line");
@@ -391,9 +318,6 @@ public sealed class vLine : Command
       [idxExtension] = "Extension"
     };
 
-    var idxFpUndo = canUndo ? getPoint.AddOption("Undo") : -1;
-    var idxFpRedo = canRedo ? getPoint.AddOption("Redo") : -1;
-
     while (true)
     {
       var result = getPoint.Get();
@@ -412,18 +336,6 @@ public sealed class vLine : Command
         var option = getPoint.Option();
         if (option == null)
           continue;
-
-        if (idxFpUndo != -1 && option.Index == idxFpUndo)
-        {
-          if (canUndo) return FirstPointResult.UndoRequestedResult(bothSides.CurrentValue, chainModeIndex);
-          continue;
-        }
-
-        if (idxFpRedo != -1 && option.Index == idxFpRedo)
-        {
-          if (canRedo) return FirstPointResult.RedoRequestedResult(bothSides.CurrentValue, chainModeIndex);
-          continue;
-        }
 
         if (delegatedModes.TryGetValue(option.Index, out var modeKeyword))
         {
@@ -453,10 +365,7 @@ public sealed class vLine : Command
     bool initialAngleLock,
     double initialAngle,
     bool initialAngleRelative,
-    Vector3d? referenceVector,
-    bool canUndo,
-    bool canUndoStart,
-    bool canRedo)
+    Vector3d? referenceVector)
   {
     var getPoint = new GetPoint();
     getPoint.SetBasePoint(startPoint, true);
@@ -486,8 +395,6 @@ public sealed class vLine : Command
     getPoint.AddOptionToggle("AngleLock", ref angleLock);
     var idxAngle = getPoint.AddOptionDouble("Angle", ref angleOption);
     getPoint.AddOptionToggle("AngleRef", ref angleRelative);
-    var idxSpUndo = (canUndo || canUndoStart) ? getPoint.AddOption("Undo") : -1;
-    var idxSpRedo = canRedo ? getPoint.AddOption("Redo") : -1;
 
     var mode = initialMode;
 
@@ -826,22 +733,6 @@ public sealed class vLine : Command
             continue;
           }
 
-          if (idxSpUndo != -1 && option.Index == idxSpUndo)
-          {
-            var state = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
-            if (canUndo)
-              return SecondPointResult.UndoRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
-            if (canUndoStart)
-              return SecondPointResult.UndoStartRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
-            continue;
-          }
-
-          if (idxSpRedo != -1 && option.Index == idxSpRedo && canRedo)
-          {
-            var state = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
-            return SecondPointResult.RedoRequestedResult(bothSides.CurrentValue, chainModeIndex, state);
-          }
-
           continue;
         }
 
@@ -860,10 +751,7 @@ public sealed class vLine : Command
             angleLock.CurrentValue,
             angleOption.CurrentValue,
             angleRelative.CurrentValue,
-            referenceVector,
-            canUndo,
-            canUndoStart,
-            canRedo);
+            referenceVector);
         }
 
         var fallbackState = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
@@ -1443,111 +1331,6 @@ public sealed class vLine : Command
       RhinoApp.RunScript($"_Line _{mode}", false);
   }
 
-  private static bool UndoLastAction(
-    RhinoDoc doc,
-    List<ActionRecord> history,
-    List<ActionRecord> redo,
-    ref Point3d currentStart,
-    ref List<Point3d>? polylinePoints,
-    ref Guid tempPolylineId)
-  {
-    if (history.Count == 0)
-      return false;
-
-    var action = history[^1];
-    history.RemoveAt(history.Count - 1);
-
-    if (action.Kind == ActionKind.Line)
-    {
-      DeleteObjectIfValid(doc, action.ObjectId);
-      currentStart = action.PrevStart;
-      redo.Add(ActionRecord.CreateLine(Guid.Empty, action.PrevStart, action.StartPoint, action.EndPoint, action.BothSides, action.NextStart));
-    }
-    else if (action.Kind == ActionKind.PolylineAdd)
-    {
-      DeleteObjectIfValid(doc, tempPolylineId);
-      DeleteObjectIfValid(doc, action.ObjectId);
-
-      var prevPoints = new List<Point3d>(action.PrevPoints ?? new List<Point3d>());
-      polylinePoints = prevPoints.Count > 0 ? prevPoints : null;
-      tempPolylineId = Guid.Empty;
-
-      if (polylinePoints is { Count: > 1 })
-        tempPolylineId = doc.Objects.AddPolyline(new Polyline(polylinePoints));
-      else
-        polylinePoints = null;
-
-      currentStart = action.PrevStart;
-      redo.Add(ActionRecord.CreatePolylineAdd(action.PrevStart, prevPoints, action.AddedPoint, Guid.Empty, action.NextStart));
-    }
-
-    doc.Views.Redraw();
-    return true;
-  }
-
-  private static bool RedoLastAction(
-    RhinoDoc doc,
-    List<ActionRecord> history,
-    List<ActionRecord> redo,
-    ref Point3d currentStart,
-    ref List<Point3d>? polylinePoints,
-    ref Guid tempPolylineId)
-  {
-    if (redo.Count == 0)
-      return false;
-
-    var action = redo[^1];
-    redo.RemoveAt(redo.Count - 1);
-
-    if (action.Kind == ActionKind.Line)
-    {
-      var lineId = action.BothSides
-        ? AddBothSidesLine(doc, action.StartPoint, action.EndPoint)
-        : doc.Objects.AddLine(action.StartPoint, action.EndPoint);
-
-      history.Add(ActionRecord.CreateLine(lineId, action.PrevStart, action.StartPoint, action.EndPoint, action.BothSides, action.NextStart));
-      currentStart = action.NextStart;
-    }
-    else if (action.Kind == ActionKind.PolylineAdd)
-    {
-      var prevPoints = new List<Point3d>(action.PrevPoints ?? new List<Point3d>());
-      polylinePoints = prevPoints;
-      polylinePoints.Add(action.AddedPoint);
-
-      DeleteObjectIfValid(doc, tempPolylineId);
-      tempPolylineId = doc.Objects.AddPolyline(new Polyline(polylinePoints));
-
-      history.Add(ActionRecord.CreatePolylineAdd(action.PrevStart, prevPoints, action.AddedPoint, tempPolylineId, action.NextStart));
-      currentStart = action.NextStart;
-    }
-
-    doc.Views.Redraw();
-    return true;
-  }
-
-  private static void UpdateLastSegmentVector(List<ActionRecord> history, List<Point3d>? polylinePoints, ref Vector3d? lastSegmentVector)
-  {
-    if (history.Count == 0)
-      return;
-
-    var last = history[^1];
-    if (last.Kind == ActionKind.Line)
-      lastSegmentVector = last.EndPoint - last.StartPoint;
-    else if (last.Kind == ActionKind.PolylineAdd && polylinePoints is { Count: >= 2 })
-      lastSegmentVector = polylinePoints[^1] - polylinePoints[^2];
-  }
-
-  private static Guid AddBothSidesLine(RhinoDoc doc, Point3d startPoint, Point3d endPoint)
-  {
-    var vec = endPoint - startPoint;
-    if (vec.IsTiny())
-      return Guid.Empty;
-
-    var a = startPoint - vec;
-    var b = startPoint + vec;
-    return doc.Objects.AddLine(a, b);
-  }
-
   private static void DeleteObjectIfValid(RhinoDoc doc, Guid id)
   {
     if (id == Guid.Empty)
@@ -1564,12 +1347,6 @@ public sealed class vLine : Command
     if (value < 0)
       return 0;
     return value >= count ? count - 1 : value;
-  }
-
-  private enum ActionKind
-  {
-    Line,
-    PolylineAdd
   }
 
   private sealed class CurveCacheState
@@ -1595,47 +1372,21 @@ public sealed class vLine : Command
     double Angle,
     bool AngleRelative);
 
-  private readonly record struct ActionRecord(
-    ActionKind Kind,
-    Guid ObjectId,
-    Point3d PrevStart,
-    Point3d StartPoint,
-    Point3d EndPoint,
-    bool BothSides,
-    Point3d NextStart,
-    List<Point3d>? PrevPoints,
-    Point3d AddedPoint)
-  {
-    public static ActionRecord CreateLine(Guid objectId, Point3d prevStart, Point3d startPoint, Point3d endPoint, bool bothSides, Point3d nextStart)
-      => new(ActionKind.Line, objectId, prevStart, startPoint, endPoint, bothSides, nextStart, null, Point3d.Unset);
-
-    public static ActionRecord CreatePolylineAdd(Point3d prevStart, List<Point3d> prevPoints, Point3d addedPoint, Guid newId, Point3d nextStart)
-      => new(ActionKind.PolylineAdd, newId, prevStart, Point3d.Unset, Point3d.Unset, false, nextStart, prevPoints, addedPoint);
-  }
-
   private readonly record struct FirstPointResult(
     bool HasPoint,
     Point3d Point,
     bool BothSides,
     int ChainMode,
-    bool DelegatedToNative,
-    bool UndoRequested,
-    bool RedoRequested)
+    bool DelegatedToNative)
   {
     public static FirstPointResult WithPoint(Point3d point, bool bothSides, int chainMode)
-      => new(true, point, bothSides, chainMode, false, false, false);
+      => new(true, point, bothSides, chainMode, false);
 
     public static FirstPointResult Delegated(bool bothSides, int chainMode)
-      => new(false, Point3d.Unset, bothSides, chainMode, true, false, false);
+      => new(false, Point3d.Unset, bothSides, chainMode, true);
 
     public static FirstPointResult None(bool bothSides, int chainMode)
-      => new(false, Point3d.Unset, bothSides, chainMode, false, false, false);
-
-    public static FirstPointResult UndoRequestedResult(bool bothSides, int chainMode)
-      => new(false, Point3d.Unset, bothSides, chainMode, false, true, false);
-
-    public static FirstPointResult RedoRequestedResult(bool bothSides, int chainMode)
-      => new(false, Point3d.Unset, bothSides, chainMode, false, false, true);
+      => new(false, Point3d.Unset, bothSides, chainMode, false);
   }
 
   private readonly record struct SecondPointResult(
@@ -1643,24 +1394,12 @@ public sealed class vLine : Command
     Point3d Point,
     bool BothSides,
     int ChainMode,
-    bool UndoRequested,
-    bool UndoStartRequested,
-    bool RedoRequested,
     ConstraintState? State)
   {
     public static SecondPointResult WithPoint(Point3d point, bool bothSides, int chainMode, ConstraintState state)
-      => new(true, point, bothSides, chainMode, false, false, false, state);
+      => new(true, point, bothSides, chainMode, state);
 
     public static SecondPointResult None(bool bothSides, int chainMode, ConstraintState state)
-      => new(false, Point3d.Unset, bothSides, chainMode, false, false, false, state);
-
-    public static SecondPointResult UndoRequestedResult(bool bothSides, int chainMode, ConstraintState state)
-      => new(false, Point3d.Unset, bothSides, chainMode, true, false, false, state);
-
-    public static SecondPointResult UndoStartRequestedResult(bool bothSides, int chainMode, ConstraintState state)
-      => new(false, Point3d.Unset, bothSides, chainMode, false, true, false, state);
-
-    public static SecondPointResult RedoRequestedResult(bool bothSides, int chainMode, ConstraintState state)
-      => new(false, Point3d.Unset, bothSides, chainMode, false, false, true, state);
+      => new(false, Point3d.Unset, bothSides, chainMode, state);
   }
 }
