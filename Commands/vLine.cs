@@ -1269,9 +1269,9 @@ public sealed class vLine : Command
       return;
 
     if (mode == "BiTangent")
-      RhinoApp.RunScript("! _Line _Tangent _Tangent", false);
+      RhinoApp.RunScript("_Line _Tangent _Tangent", false);
     else
-      RhinoApp.RunScript($"! _Line _{mode}", false);
+      RhinoApp.RunScript($"_Line _{mode}", false);
   }
 
   private static void DeleteObjectIfValid(RhinoDoc doc, Guid id)
