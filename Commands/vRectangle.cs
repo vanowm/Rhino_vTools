@@ -207,19 +207,9 @@ public sealed class vRectangle : Command
         if (opt != null)
         {
           if (opt.Index == idxWidth)
-          {
-            var picked = PromptDimension(doc, "Set Width", w);
-            if (!picked.HasValue)
-              return false;
-            w = picked.Value;
-          }
+            w = widthOpt.CurrentValue;
           else if (opt.Index == idxHeight)
-          {
-            var picked = PromptDimension(doc, "Set Height", h);
-            if (!picked.HasValue)
-              return false;
-            h = picked.Value;
-          }
+            h = heightOpt.CurrentValue;
         }
 
         if (w <= 0.0 || h <= 0.0)
