@@ -24,15 +24,11 @@ public sealed class vTrim : Command
 
   private static bool _extendAsLine = true;
   private static bool _joinAfterTrim = true;
-  private static EventHandler? _nativeTrimLaunchIdleHandler;
-  private static Guid[]? _pendingNativeTrimCutters;
-  private static uint _pendingNativeTrimDocSerial;
 
   public override string EnglishName => "vTrim";
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
-    CancelPendingNativeTrimLaunch();
     LoadPersistedOptions();
 
     var history = new SessionHistory();
@@ -40,12 +36,6 @@ public sealed class vTrim : Command
     var cutters = PickCutters(doc);
     if (cutters.State == PickerState.Cancel)
       return Result.Cancel;
-
-    if (!cutters.AutoMode && cutters.CutterIds.Count > 0)
-    {
-      SavePersistedOptions();
-      return QueueBuiltInTrimWithCutters(doc, cutters.CutterIds);
-    }
 
     // Deselect cutter curves so Delete key doesn't destroy them while target picking.
     doc.Objects.UnselectAll();
@@ -143,102 +133,6 @@ public sealed class vTrim : Command
         RhinoApp.WriteLine("vTrim: click did not produce a valid trim/extend result.");
       }
     }
-  }
-
-  private static Result QueueBuiltInTrimWithCutters(RhinoDoc doc, IReadOnlyList<Guid> cutterIds)
-  {
-    var validIds = cutterIds
-      .Where(id => id != Guid.Empty)
-      .Distinct()
-      .ToArray();
-
-    if (validIds.Length == 0)
-    {
-      RhinoApp.WriteLine("vTrim: no valid cutting curves selected for native Trim.");
-      return Result.Cancel;
-    }
-
-    _pendingNativeTrimCutters = validIds;
-    _pendingNativeTrimDocSerial = doc.RuntimeSerialNumber;
-
-    if (_nativeTrimLaunchIdleHandler != null)
-      RhinoApp.Idle -= _nativeTrimLaunchIdleHandler;
-
-    _nativeTrimLaunchIdleHandler = OnLaunchNativeTrimOnIdle;
-    RhinoApp.Idle += _nativeTrimLaunchIdleHandler;
-
-    return Result.Success;
-  }
-
-  private static void CancelPendingNativeTrimLaunch()
-  {
-    if (_nativeTrimLaunchIdleHandler != null)
-    {
-      RhinoApp.Idle -= _nativeTrimLaunchIdleHandler;
-      _nativeTrimLaunchIdleHandler = null;
-    }
-
-    _pendingNativeTrimCutters = null;
-    _pendingNativeTrimDocSerial = 0u;
-  }
-
-  private static void OnLaunchNativeTrimOnIdle(object? sender, EventArgs e)
-  {
-    if (_nativeTrimLaunchIdleHandler != null)
-    {
-      RhinoApp.Idle -= _nativeTrimLaunchIdleHandler;
-      _nativeTrimLaunchIdleHandler = null;
-    }
-
-    var cutterIds = _pendingNativeTrimCutters;
-    var docSerial = _pendingNativeTrimDocSerial;
-    _pendingNativeTrimCutters = null;
-    _pendingNativeTrimDocSerial = 0u;
-
-    if (cutterIds == null || cutterIds.Length == 0)
-      return;
-
-    var doc = RhinoDoc.ActiveDoc;
-    if (doc == null || doc.RuntimeSerialNumber != docSerial)
-      return;
-
-    doc.Objects.UnselectAll();
-
-    var selectedAny = false;
-    var selectedCutters = new List<Guid>();
-    foreach (var id in cutterIds)
-    {
-      if (id == Guid.Empty)
-        continue;
-
-      var obj = doc.Objects.FindId(id);
-      if (obj?.Geometry is not Curve)
-        continue;
-
-      if (doc.Objects.Select(id))
-      {
-        selectedAny = true;
-        selectedCutters.Add(id);
-      }
-    }
-
-    doc.Views.Redraw();
-
-    if (!selectedAny)
-    {
-      RhinoApp.WriteLine("vTrim: no valid cutting curves selected for native Trim.");
-      return;
-    }
-
-    _ = RhinoApp.RunScript("_Trim", false);
-
-    foreach (var id in selectedCutters)
-    {
-      if (id != Guid.Empty)
-        doc.Objects.Select(id, false);
-    }
-
-    doc.Views.Redraw();
   }
 
   private static void LoadPersistedOptions()
