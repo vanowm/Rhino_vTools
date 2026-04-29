@@ -58,6 +58,11 @@ public sealed class vLine : Command
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
+    if (_pendingNativeLineLaunchIdleHandler != null)
+    {
+      RhinoApp.Idle -= _pendingNativeLineLaunchIdleHandler;
+      _pendingNativeLineLaunchIdleHandler = null;
+    }
     _pendingNativeLineMode = null;
     LoadPersistedOptions();
 
@@ -1267,37 +1272,33 @@ public sealed class vLine : Command
   private static void LaunchNativeLineMode()
   {
     var mode = _pendingNativeLineMode;
+    _pendingNativeLineMode = null;
     vToolsPlugIn.TryLog($"[DBG vLine] LaunchNativeLineMode: mode={mode ?? "(null)"}");
     if (mode == null)
       return;
 
-    if (_pendingNativeLineLaunchIdleHandler != null)
-      RhinoApp.Idle -= _pendingNativeLineLaunchIdleHandler;
-
-    _pendingNativeLineLaunchIdleHandler = OnLaunchNativeLineOnIdle;
-    RhinoApp.Idle += _pendingNativeLineLaunchIdleHandler;
-    vToolsPlugIn.TryLog($"[DBG vLine] Idle handler registered");
-  }
-
-  private static void OnLaunchNativeLineOnIdle(object? sender, EventArgs e)
-  {
-    vToolsPlugIn.TryLog($"[DBG vLine] Idle fired");
     if (_pendingNativeLineLaunchIdleHandler != null)
     {
       RhinoApp.Idle -= _pendingNativeLineLaunchIdleHandler;
       _pendingNativeLineLaunchIdleHandler = null;
     }
 
-    var mode = _pendingNativeLineMode;
-    _pendingNativeLineMode = null;
-    vToolsPlugIn.TryLog($"[DBG vLine] Idle mode={mode ?? "(null)"}");
-    if (mode == null)
-      return;
+    var script = mode == "BiTangent" ? "_Line _Tangent _Tangent" : $"_Line _{mode}";
 
-    string script = mode == "BiTangent" ? "_Line _Tangent _Tangent" : $"_Line _{mode}";
-    vToolsPlugIn.TryLog($"[DBG vLine] Idle RunScript: {script}");
-    var ok = RhinoApp.RunScript(script, false);
-    vToolsPlugIn.TryLog($"[DBG vLine] Idle RunScript returned: {ok}");
+    EventHandler handler = null!;
+    handler = (_, _) =>
+    {
+      RhinoApp.Idle -= handler;
+      if (_pendingNativeLineLaunchIdleHandler == handler)
+        _pendingNativeLineLaunchIdleHandler = null;
+      vToolsPlugIn.TryLog($"[DBG vLine] Idle fired, RunScript: {script}");
+      var ok = RhinoApp.RunScript(script, false);
+      vToolsPlugIn.TryLog($"[DBG vLine] RunScript returned: {ok}");
+    };
+
+    _pendingNativeLineLaunchIdleHandler = handler;
+    RhinoApp.Idle += handler;
+    vToolsPlugIn.TryLog($"[DBG vLine] Idle handler registered for: {script}");
   }
 
   private static void DeleteObjectIfValid(RhinoDoc doc, Guid id)
