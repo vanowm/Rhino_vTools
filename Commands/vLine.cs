@@ -63,7 +63,7 @@ public sealed class vLine : Command
     var startResult = ResolveFirstPoint(doc, initialBothSides: false, initialChainMode: _chainMode);
     if (startResult.DelegatedToNative)
     {
-      RhinoApp.WriteLine($"[DBG vLine] startResult.DelegatedToNative=true, calling LaunchNativeLineMode");
+      vToolsPlugIn.TryLog($"[DBG vLine] startResult.DelegatedToNative=true, calling LaunchNativeLineMode");
       LaunchNativeLineMode();
       return Result.Success;
     }
@@ -335,7 +335,7 @@ public sealed class vLine : Command
 
         if (delegatedModes.TryGetValue(option.Index, out var modeKeyword))
         {
-          RhinoApp.WriteLine($"[DBG vLine] Delegating to native: {modeKeyword}");
+          vToolsPlugIn.TryLog($"[DBG vLine] Delegating to native: {modeKeyword}");
           _pendingNativeLineMode = modeKeyword;
           return FirstPointResult.Delegated(bothSides.CurrentValue, chainModeIndex);
         }
@@ -1267,7 +1267,7 @@ public sealed class vLine : Command
   {
     var mode = _pendingNativeLineMode;
     _pendingNativeLineMode = null;
-    RhinoApp.WriteLine($"[DBG vLine] LaunchNativeLineMode: mode={mode ?? "(null)"}");
+    vToolsPlugIn.TryLog($"[DBG vLine] LaunchNativeLineMode: mode={mode ?? "(null)"}");
     if (mode == null)
       return;
 
@@ -1277,9 +1277,9 @@ public sealed class vLine : Command
     else
       script = $"_Line _{mode}";
 
-    RhinoApp.WriteLine($"[DBG vLine] RunScript: {script}");
+    vToolsPlugIn.TryLog($"[DBG vLine] RunScript: {script}");
     var ok = RhinoApp.RunScript(script, false);
-    RhinoApp.WriteLine($"[DBG vLine] RunScript returned: {ok}");
+    vToolsPlugIn.TryLog($"[DBG vLine] RunScript returned: {ok}");
   }
 
   private static void DeleteObjectIfValid(RhinoDoc doc, Guid id)

@@ -97,7 +97,7 @@ public class vToolsPlugIn : PlugIn
   /// <summary>
   /// Appends one log message to the plug-in log file.
   /// </summary>
-  private static void TryLog(string message)
+  internal static void TryLog(string message)
   {
     try
     {
