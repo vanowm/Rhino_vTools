@@ -21,7 +21,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vTextAligned](#vtextaligned-flow) *(26.04.27.212532)* — places or repositions annotation text aligned and offset along a selected curve
   - [vTextFlip](#vtextflip-flow) *(26.04.27.212532)* — flips or rotates annotation text around its object plane
   - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.04.24.171217)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
-  - [vTrim](#vtrim-flow) *(26.04.24.163301)* — trims and extends curves with auto-cutter detection, join, and undo/redo
+  - [vTrim](#vtrim-flow) *(26.04.24.163301)* — trims and extends curves with auto-cutter detection and join
   - [vUzip](#vuzip-flow) *(26.04.24.093442)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
@@ -126,11 +126,6 @@ Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow
     - `AngleRef`: `Absolute` uses CPlane X-axis; `Relative` uses previous segment direction.
     - `Mode` and `BothSides`: also available while placing the end point.
 
-Hidden keywords while picking:
-
-- `u` or `undo`: undo last in-session segment action.
-- `r` or `redo`: redo last undone in-session segment action.
-
 ### vLineLength flow
 
 1. Run `vLineLength`.
@@ -145,7 +140,6 @@ Hidden keywords while picking:
       - `Total`: resulting full curve length.
       - `Add`: add value to current length.
       - `Subtract`: subtract value from current length.
-    - `Undo`: revert the last in-session edit.
 
 Hidden keywords while editing:
 
@@ -194,11 +188,6 @@ Hidden keywords while editing:
 1. A point is placed on the closest evaluated surface location (normal evaluation point), with live preview from picked point to on-surface point.
 1. Press Enter to finish.
 
-Hidden keywords while picking points:
-
-- `u` or `undo`: remove last created point in the current command session.
-- `r` or `redo`: recreate last undone point in the current command session.
-
 ### vRectangle flow
 
 1. Run `vRectangle`.
@@ -224,26 +213,15 @@ Hidden keywords while picking points:
 
 1. Run `vSplitAtCorners`.
 1. Select curves to split.
-1. Review highlighted corners and click to toggle behavior before applying.
-1. Press Enter to run splitting.
-1. Use options:
+1. Auto-detected corners appear as orange dots; click any to toggle it off (gray = excluded).
+1. Click anywhere along a selected curve to add a manual split point (cyan X); click an existing cyan X to remove it.
+1. Press Enter to apply splitting.
+1. Options:
 
     - `Angle`: minimum detected corner angle in degrees.
     - `MinLength`: minimum resulting segment length to keep.
-    - `ClearManual`: remove all manually forced split points.
-    - `ClearSuppressed`: restore all suppressed auto-corners.
-    - `ClearAll`: clear both manual and suppressed overrides.
-
-Click behavior in preview phase:
-
-- Clicking an auto-highlighted corner toggles suppression for that corner.
-- Clicking a manual point toggles that manual split point on/off.
-
-String shortcuts in preview phase:
-
-- `manual`: prints guidance for adding manual split points.
-- `suppress`: prints guidance for suppressing auto corners.
-- `clear`/`clearall`: clears both manual and suppressed sets.
+    - `ClearManual`: remove all manually added split points.
+    - `ClearAll`: restore all removed auto-corners and remove all manual points.
 
 ### vTextAligned flow
 
@@ -256,11 +234,6 @@ String shortcuts in preview phase:
     - `Height`: text height.
     - `Offset`: signed side offset from curve toward text bounds.
     - `Rotate`: rotates text orientation by 90 degrees each use.
-
-Hidden keywords while placing:
-
-- `u` or `undo`: undo last in-session add/move action.
-- `r` or `redo`: redo last undone add/move action.
 
 ### vTextFlip flow
 
@@ -294,11 +267,6 @@ Hidden keywords while placing:
 
     - Trim removal preview: red.
     - Extend addition preview: green.
-
-Hidden keywords while picking targets:
-
-- `u` or `undo`: undo last vTrim action in the current command session.
-- `r` or `redo`: redo last undone vTrim action in the current command session.
 
 ### vUzip flow
 
