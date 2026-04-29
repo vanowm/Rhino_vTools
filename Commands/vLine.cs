@@ -1271,34 +1271,24 @@ public sealed class vLine : Command
 
   private static void LaunchNativeLineMode()
   {
-    var mode = _pendingNativeLineMode;
-    _pendingNativeLineMode = null;
-    vToolsPlugIn.TryLog($"[DBG vLine] LaunchNativeLineMode: mode={mode ?? "(null)"}");
-    if (mode == null)
-      return;
-
+    // Cancel any previously queued idle handler
     if (_pendingNativeLineLaunchIdleHandler != null)
     {
       RhinoApp.Idle -= _pendingNativeLineLaunchIdleHandler;
       _pendingNativeLineLaunchIdleHandler = null;
     }
 
-    var script = mode == "BiTangent" ? "_Line _Tangent _Tangent" : $"_Line _{mode}";
+    var mode = _pendingNativeLineMode;
+    _pendingNativeLineMode = null;
+    vToolsPlugIn.TryLog($"[DBG vLine] LaunchNativeLineMode: mode={mode ?? "(null)"}");
+    if (mode == null)
+      return;
 
-    EventHandler handler = null!;
-    handler = (_, _) =>
-    {
-      RhinoApp.Idle -= handler;
-      if (_pendingNativeLineLaunchIdleHandler == handler)
-        _pendingNativeLineLaunchIdleHandler = null;
-      vToolsPlugIn.TryLog($"[DBG vLine] Idle fired, RunScript: {script}");
-      var ok = RhinoApp.RunScript(script, false);
-      vToolsPlugIn.TryLog($"[DBG vLine] RunScript returned: {ok}");
-    };
-
-    _pendingNativeLineLaunchIdleHandler = handler;
-    RhinoApp.Idle += handler;
-    vToolsPlugIn.TryLog($"[DBG vLine] Idle handler registered for: {script}");
+    // SendKeystrokes posts to Rhino's input queue — processed after RunCommand returns,
+    // no re-entrancy issue, no idle timing dependency.
+    string script = mode == "BiTangent" ? "_Line _Tangent _Tangent" : $"_Line _{mode}";
+    vToolsPlugIn.TryLog($"[DBG vLine] SendKeystrokes: {script}");
+    RhinoApp.SendKeystrokes(script, true);
   }
 
   private static void DeleteObjectIfValid(RhinoDoc doc, Guid id)
