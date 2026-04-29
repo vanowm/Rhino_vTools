@@ -24,11 +24,24 @@ public sealed class vTrim : Command
 
   private static bool _extendAsLine = true;
   private static bool _joinAfterTrim = true;
+  private static bool _restartingAfterTrimDelegate;
+  private static EventHandler? _nativeTrimLaunchIdleHandler;
+  private static Guid[]? _pendingNativeTrimCutters;
+  private static uint _pendingNativeTrimDocSerial;
 
   public override string EnglishName => "vTrim";
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
+    // Silent no-op re-run after delegating to _-Trim — registers vTrim as the
+    // repeatable last command without showing any prompt.
+    if (_restartingAfterTrimDelegate)
+    {
+      _restartingAfterTrimDelegate = false;
+      return Result.Success;
+    }
+
+    CancelPendingNativeTrimLaunch();
     LoadPersistedOptions();
 
     var history = new SessionHistory();
@@ -37,7 +50,15 @@ public sealed class vTrim : Command
     if (cutters.State == PickerState.Cancel)
       return Result.Cancel;
 
-    // Deselect cutter curves so Delete key doesn't destroy them while target picking.
+    // Explicit cutters selected: delegate to built-in _-Trim with those cutters
+    // pre-selected so the user gets native trim behaviour.
+    if (!cutters.AutoMode && cutters.CutterIds.Count > 0)
+    {
+      SavePersistedOptions();
+      return QueueBuiltInTrimWithCutters(doc, cutters.CutterIds);
+    }
+
+    // Auto-mode: deselect any remnants and run the custom hover-trim loop.
     doc.Objects.UnselectAll();
     doc.Views.Redraw();
 
@@ -133,6 +154,95 @@ public sealed class vTrim : Command
         RhinoApp.WriteLine("vTrim: click did not produce a valid trim/extend result.");
       }
     }
+  }
+
+  private static Result QueueBuiltInTrimWithCutters(RhinoDoc doc, IReadOnlyList<Guid> cutterIds)
+  {
+    var validIds = cutterIds.Where(id => id != Guid.Empty).Distinct().ToArray();
+    if (validIds.Length == 0)
+    {
+      RhinoApp.WriteLine("vTrim: no valid cutting curves selected.");
+      return Result.Cancel;
+    }
+
+    _pendingNativeTrimCutters = validIds;
+    _pendingNativeTrimDocSerial = doc.RuntimeSerialNumber;
+
+    if (_nativeTrimLaunchIdleHandler != null)
+      RhinoApp.Idle -= _nativeTrimLaunchIdleHandler;
+
+    _nativeTrimLaunchIdleHandler = OnLaunchNativeTrimOnIdle;
+    RhinoApp.Idle += _nativeTrimLaunchIdleHandler;
+
+    return Result.Success;
+  }
+
+  private static void CancelPendingNativeTrimLaunch()
+  {
+    if (_nativeTrimLaunchIdleHandler != null)
+    {
+      RhinoApp.Idle -= _nativeTrimLaunchIdleHandler;
+      _nativeTrimLaunchIdleHandler = null;
+    }
+
+    _pendingNativeTrimCutters = null;
+    _pendingNativeTrimDocSerial = 0u;
+  }
+
+  private static void OnLaunchNativeTrimOnIdle(object? sender, EventArgs e)
+  {
+    if (_nativeTrimLaunchIdleHandler != null)
+    {
+      RhinoApp.Idle -= _nativeTrimLaunchIdleHandler;
+      _nativeTrimLaunchIdleHandler = null;
+    }
+
+    var cutterIds = _pendingNativeTrimCutters;
+    var docSerial = _pendingNativeTrimDocSerial;
+    _pendingNativeTrimCutters = null;
+    _pendingNativeTrimDocSerial = 0u;
+
+    if (cutterIds == null || cutterIds.Length == 0)
+      return;
+
+    var doc = RhinoDoc.ActiveDoc;
+    if (doc == null || doc.RuntimeSerialNumber != docSerial)
+      return;
+
+    doc.Objects.UnselectAll();
+
+    var selectedCutters = new List<Guid>();
+    foreach (var id in cutterIds)
+    {
+      if (id == Guid.Empty)
+        continue;
+      var obj = doc.Objects.FindId(id);
+      if (obj?.Geometry is not Curve)
+        continue;
+      if (doc.Objects.Select(id))
+        selectedCutters.Add(id);
+    }
+
+    doc.Views.Redraw();
+
+    if (selectedCutters.Count == 0)
+    {
+      RhinoApp.WriteLine("vTrim: no valid cutting curves for native Trim.");
+      return;
+    }
+
+    // _-Trim (scripted) auto-accepts pre-selected cutting curves without
+    // requiring an extra Enter confirmation, then waits for target picks.
+    _ = RhinoApp.RunScript("_-Trim", false);
+
+    doc.Objects.UnselectAll();
+    doc.Views.Redraw();
+
+    // Silently re-run vTrim (restart flag set so RunCommand returns immediately)
+    // so that pressing Enter afterward repeats vTrim, not _-Trim.
+    _restartingAfterTrimDelegate = true;
+    _ = RhinoApp.RunScript("_vTrim", false);
+    _restartingAfterTrimDelegate = false; // safety clear if RunScript didn't invoke us
   }
 
   private static void LoadPersistedOptions()
