@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using Rhino;
 using Rhino.Commands;
@@ -29,44 +30,205 @@ public sealed class vScallop : Command
   public override string EnglishName => "vScallop";
 
   /// <summary>
-  /// Creates a scallop arc from a selected line or two picked points.
+  /// Creates scallop arcs in a loop until the user presses Escape.
+  /// Supports in-command Undo/Redo; all steps are hidden under one Rhino undo record.
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadPersistedOptions();
 
-    if (!TryGetInputBase(doc, out var pointA, out var pointB, out var sourceLineId))
-      return Result.Cancel;
+    var undoStack = new Stack<ScallopUndoEntry>();
+    var redoStack = new Stack<ScallopUndoEntry>();
 
-    if (pointA.DistanceTo(pointB) <= doc.ModelAbsoluteTolerance)
+    while (true)
     {
-      RhinoApp.WriteLine("vScallop: points are too close together.");
-      return Result.Failure;
+      // ── Outer prompt: select line or Enter for two-point mode ──────────
+      var go = new GetObject();
+      go.SetCommandPrompt("Select line or press Enter for points");
+      go.GeometryFilter = ObjectType.Curve;
+      go.SubObjectSelect = false;
+      go.AcceptNothing(true);
+      go.AcceptNumber(true, false);
+
+      var sizeOpt   = new OptionDouble(_size, doc.ModelAbsoluteTolerance, 1.0e300);
+      var deleteOpt = new OptionToggle(_deleteOriginal, "No", "Yes");
+      var freeOpt   = new OptionToggle(_free, "No", "Yes");
+      go.AddOptionDouble("Size", ref sizeOpt);
+      go.AddOptionToggle("DeleteOriginal", ref deleteOpt);
+      go.AddOptionToggle("Free", ref freeOpt);
+
+      var idxUndo = undoStack.Count > 0 ? go.AddOption("Undo") : -1;
+      var idxRedo = redoStack.Count > 0 ? go.AddOption("Redo") : -1;
+
+      var outerResult = go.Get();
+
+      if (go.CommandResult() != Result.Success)
+      {
+        SavePersistedOptions();
+        return Result.Success;
+      }
+
+      _size           = Math.Max(sizeOpt.CurrentValue, doc.ModelAbsoluteTolerance);
+      _deleteOriginal = deleteOpt.CurrentValue;
+      _free           = freeOpt.CurrentValue;
+
+      if (outerResult == GetResult.Number)
+      {
+        _size = Math.Max(go.Number(), doc.ModelAbsoluteTolerance);
+        SavePersistedOptions();
+        continue;
+      }
+
+      if (outerResult == GetResult.Option)
+      {
+        var opt = go.Option();
+        if (opt != null)
+        {
+          if (opt.Index == idxUndo && undoStack.Count > 0)
+          {
+            ApplyUndo(doc, undoStack.Pop(), redoStack);
+            doc.Views.Redraw();
+          }
+          else if (opt.Index == idxRedo && redoStack.Count > 0)
+          {
+            ApplyRedo(doc, redoStack.Pop(), undoStack);
+            doc.Views.Redraw();
+          }
+        }
+        SavePersistedOptions();
+        continue;
+      }
+
+      // ── Resolve input points ───────────────────────────────────────────
+      Point3d pointA, pointB;
+      Guid sourceLineId;
+
+      if (outerResult == GetResult.Nothing)
+      {
+        if (!TryPickPoint(doc, "Pick first point", null, out pointA))
+          continue;
+        if (!TryPickPoint(doc, "Pick second point", pointA, out pointB))
+          continue;
+        sourceLineId = Guid.Empty;
+      }
+      else if (outerResult == GetResult.Object)
+      {
+        var objRef = go.Object(0);
+        if (objRef?.Curve() is not Curve curve)
+          continue;
+
+        if (!TryGetLineLikeEndpoints(curve, doc.ModelAbsoluteTolerance, out pointA, out pointB))
+        {
+          RhinoApp.WriteLine("vScallop: selected curve is not a line.");
+          doc.Objects.UnselectAll();
+          doc.Views.Redraw();
+          continue;
+        }
+
+        sourceLineId = objRef.ObjectId;
+      }
+      else
+        continue;
+
+      if (pointA.DistanceTo(pointB) <= doc.ModelAbsoluteTolerance)
+      {
+        RhinoApp.WriteLine("vScallop: points are too close together.");
+        continue;
+      }
+
+      // ── Side / bulge ───────────────────────────────────────────────────
+      if (!TryGetSideAndBulge(doc, pointA, pointB, out var sideDirection, out var bulgeSize))
+        continue;
+
+      // ── Create arc ────────────────────────────────────────────────────
+      var arcCurve = CreateScallopArc(pointA, pointB, sideDirection, bulgeSize);
+      if (arcCurve == null || !arcCurve.IsValid)
+      {
+        RhinoApp.WriteLine("vScallop: failed to create arc.");
+        continue;
+      }
+
+      // Capture source geometry before deleting it
+      Curve? sourceCurveGeom = null;
+      ObjectAttributes? sourceCurveAttr = null;
+      var willDelete = _deleteOriginal && sourceLineId != Guid.Empty;
+      if (willDelete)
+      {
+        var srcObj = doc.Objects.FindId(sourceLineId);
+        sourceCurveGeom = (srcObj?.Geometry as Curve)?.DuplicateCurve();
+        sourceCurveAttr = srcObj?.Attributes.Duplicate();
+        if (sourceCurveGeom == null)
+          willDelete = false;
+      }
+
+      var arcId = doc.Objects.AddCurve(arcCurve);
+      if (arcId == Guid.Empty)
+      {
+        RhinoApp.WriteLine("vScallop: failed to add arc to document.");
+        continue;
+      }
+
+      var arcAttr = doc.Objects.FindId(arcId)?.Attributes.Duplicate() ?? new ObjectAttributes();
+
+      if (willDelete)
+        doc.Objects.Delete(sourceLineId, true);
+
+      undoStack.Push(new ScallopUndoEntry(
+        arcId, arcCurve, arcAttr,
+        willDelete, sourceLineId,
+        sourceCurveGeom, sourceCurveAttr));
+
+      redoStack.Clear();
+      SavePersistedOptions();
+      doc.Views.Redraw();
     }
+  }
 
-    if (!TryGetSideAndBulge(doc, pointA, pointB, out var sideDirection, out var bulgeSize))
-      return Result.Cancel;
+  // ── In-command undo/redo helpers ──────────────────────────────────────────
 
-    var arcCurve = CreateScallopArc(pointA, pointB, sideDirection, bulgeSize);
-    if (arcCurve == null || !arcCurve.IsValid)
+  private sealed record ScallopUndoEntry(
+    Guid CreatedArcId,
+    ArcCurve ArcGeometry,
+    ObjectAttributes ArcAttributes,
+    bool HadDeletedSource,
+    Guid SourceId,
+    Curve? SourceGeometry,
+    ObjectAttributes? SourceAttributes);
+
+  private static void ApplyUndo(
+    RhinoDoc doc,
+    ScallopUndoEntry entry,
+    Stack<ScallopUndoEntry> redoStack)
+  {
+    doc.Objects.Delete(entry.CreatedArcId, true);
+
+    var restoredSourceId = Guid.Empty;
+    if (entry.HadDeletedSource && entry.SourceGeometry != null)
+      restoredSourceId = doc.Objects.AddCurve(entry.SourceGeometry, entry.SourceAttributes ?? new ObjectAttributes());
+
+    redoStack.Push(entry with
     {
-      RhinoApp.WriteLine("vScallop: failed to create arc.");
-      return Result.Failure;
-    }
+      CreatedArcId = Guid.Empty,
+      SourceId = restoredSourceId
+    });
+  }
 
-    var newId = doc.Objects.AddCurve(arcCurve);
-    if (newId == Guid.Empty)
+  private static void ApplyRedo(
+    RhinoDoc doc,
+    ScallopUndoEntry entry,
+    Stack<ScallopUndoEntry> undoStack)
+  {
+    if (entry.HadDeletedSource && entry.SourceId != Guid.Empty)
+      doc.Objects.Delete(entry.SourceId, true);
+
+    var newArcId = doc.Objects.AddCurve(entry.ArcGeometry, entry.ArcAttributes);
+    var newAttr  = doc.Objects.FindId(newArcId)?.Attributes.Duplicate() ?? new ObjectAttributes();
+
+    undoStack.Push(entry with
     {
-      RhinoApp.WriteLine("vScallop: failed to add arc to document.");
-      return Result.Failure;
-    }
-
-    if (_deleteOriginal && sourceLineId != Guid.Empty)
-      doc.Objects.Delete(sourceLineId, true);
-
-    SavePersistedOptions();
-    doc.Views.Redraw();
-    return Result.Success;
+      CreatedArcId = newArcId,
+      ArcAttributes = newAttr
+    });
   }
 
   private static void LoadPersistedOptions()
@@ -104,78 +266,6 @@ public sealed class vScallop : Command
         section[DeleteOriginalKey] = _deleteOriginal;
         section[FreeKey] = _free;
       });
-  }
-
-  private static bool TryGetInputBase(RhinoDoc doc, out Point3d pointA, out Point3d pointB, out Guid sourceLineId)
-  {
-    pointA = Point3d.Unset;
-    pointB = Point3d.Unset;
-    sourceLineId = Guid.Empty;
-
-    while (true)
-    {
-      var go = new GetObject();
-      go.SetCommandPrompt("Select line or press Enter for points");
-      go.GeometryFilter = ObjectType.Curve;
-      go.SubObjectSelect = false;
-      go.AcceptNothing(true);
-      go.AcceptNumber(true, false);
-
-      var sizeOption = new OptionDouble(_size, doc.ModelAbsoluteTolerance, 1.0e300);
-      var deleteOption = new OptionToggle(_deleteOriginal, "No", "Yes");
-      var freeOption = new OptionToggle(_free, "No", "Yes");
-
-      go.AddOptionDouble("Size", ref sizeOption);
-      go.AddOptionToggle("DeleteOriginal", ref deleteOption);
-      go.AddOptionToggle("Free", ref freeOption);
-
-      var result = go.Get();
-      if (go.CommandResult() != Result.Success)
-        return false;
-
-      if (result == GetResult.Option)
-      {
-        _size = Math.Max(sizeOption.CurrentValue, doc.ModelAbsoluteTolerance);
-        _deleteOriginal = deleteOption.CurrentValue;
-        _free = freeOption.CurrentValue;
-        SavePersistedOptions();
-        continue;
-      }
-
-      if (result == GetResult.Number)
-      {
-        _size = Math.Max(go.Number(), doc.ModelAbsoluteTolerance);
-        SavePersistedOptions();
-        continue;
-      }
-
-      if (result == GetResult.Nothing)
-      {
-        if (!TryPickPoint(doc, "Pick first point", null, out pointA))
-          return false;
-        if (!TryPickPoint(doc, "Pick second point", pointA, out pointB))
-          return false;
-        return true;
-      }
-
-      if (result != GetResult.Object)
-        return false;
-
-      var objRef = go.Object(0);
-      if (objRef?.Curve() is not Curve curve)
-        continue;
-
-      if (!TryGetLineLikeEndpoints(curve, doc.ModelAbsoluteTolerance, out pointA, out pointB))
-      {
-        RhinoApp.WriteLine("vScallop: selected curve is not a line.");
-        doc.Objects.UnselectAll();
-        doc.Views.Redraw();
-        continue;
-      }
-
-      sourceLineId = objRef.ObjectId;
-      return true;
-    }
   }
 
   private static bool TryPickPoint(RhinoDoc doc, string prompt, Point3d? basePoint, out Point3d point)
