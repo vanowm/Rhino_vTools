@@ -362,6 +362,7 @@ public sealed class vLine : Command
     var getPoint = new GetPoint();
     getPoint.SetCommandPrompt("Start of line");
     getPoint.AcceptString(true);
+    getPoint.AcceptNothing(true);
 
     var bothSides = new OptionToggle(initialBothSides, "No", "Yes");
     var chainModeIndex = ClampIndex(initialChainMode, ChainModeValues.Length);
@@ -400,6 +401,9 @@ public sealed class vLine : Command
         _chainMode = chainModeIndex;
         return FirstPointResult.WithPoint(getPoint.Point(), bothSides.CurrentValue, chainModeIndex);
       }
+
+      if (result == GetResult.Nothing)
+        return FirstPointResult.None(bothSides.CurrentValue, chainModeIndex);
 
       if (result == GetResult.String)
       {

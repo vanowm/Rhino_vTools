@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using Rhino;
 using Rhino.Commands;
@@ -29,19 +30,23 @@ public sealed class vScallop : Command
   /// </summary>
   public override string EnglishName => "vScallop";
 
-  // Each arc is wrapped in its own undo record so Ctrl+Z undoes one arc at a time.
+  // Each arc gets its own native undo record (Ctrl+Z undoes one arc at a time after
+  // the command ends). In-command Undo/Redo options manage a parallel manual stack
+  // and clean up the native record via ClearUndoRecords when an arc is in-command-undone.
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadPersistedOptions();
 
+    var undoStack = new Stack<ScallopUndoEntry>();
+    var redoStack = new Stack<ScallopUndoEntry>();
+
     while (true)
     {
-      // ── Outer prompt: select line or Enter for two-point mode ──────────
+      // ── Outer prompt: select curve or choose Points ──────────────────
       var go = new GetObject();
-      go.SetCommandPrompt("Select curve or press Enter for points");
+      go.SetCommandPrompt("Select curve");
       go.GeometryFilter = ObjectType.Curve;
       go.SubObjectSelect = false;
-      go.AcceptNothing(true);
       go.AcceptNumber(true, false);
 
       var sizeOpt   = new OptionDouble(_size, doc.ModelAbsoluteTolerance, 1.0e300);
@@ -50,6 +55,9 @@ public sealed class vScallop : Command
       go.AddOptionDouble("Size", ref sizeOpt);
       go.AddOptionToggle("DeleteOriginal", ref deleteOpt);
       go.AddOptionToggle("Free", ref freeOpt);
+      var idxPoints = go.AddOption("Points");
+      var idxUndo   = undoStack.Count > 0 ? go.AddOption("Undo") : -1;
+      var idxRedo   = redoStack.Count > 0 ? go.AddOption("Redo") : -1;
 
       var outerResult = go.Get();
 
@@ -70,17 +78,47 @@ public sealed class vScallop : Command
         continue;
       }
 
+      // ── Handle options ────────────────────────────────────────────────
+      var twoPointMode = false;
       if (outerResult == GetResult.Option)
       {
-        SavePersistedOptions();
-        continue;
+        var opt = go.Option();
+        if (opt != null)
+        {
+          if (opt.Index == idxUndo && undoStack.Count > 0)
+          {
+            ApplyUndo(doc, undoStack.Pop(), redoStack);
+            doc.Views.Redraw();
+            SavePersistedOptions();
+            continue;
+          }
+          if (opt.Index == idxRedo && redoStack.Count > 0)
+          {
+            ApplyRedo(doc, redoStack.Pop(), undoStack);
+            doc.Views.Redraw();
+            SavePersistedOptions();
+            continue;
+          }
+          if (opt.Index == idxPoints)
+            twoPointMode = true;
+          else
+          {
+            SavePersistedOptions();
+            continue;
+          }
+        }
+        else
+        {
+          SavePersistedOptions();
+          continue;
+        }
       }
 
       // ── Resolve input points ───────────────────────────────────────────
       Point3d pointA, pointB;
       Guid sourceLineId;
 
-      if (outerResult == GetResult.Nothing)
+      if (twoPointMode)
       {
         if (!TryPickPoint(doc, "Pick first point", null, out pointA))
           continue;
@@ -127,6 +165,19 @@ public sealed class vScallop : Command
         continue;
       }
 
+      // Capture source geometry before deleting it (needed for in-command Undo)
+      Curve? sourceCurveGeom = null;
+      ObjectAttributes? sourceCurveAttr = null;
+      var willDelete = _deleteOriginal && sourceLineId != Guid.Empty;
+      if (willDelete)
+      {
+        var srcObj = doc.Objects.FindId(sourceLineId);
+        sourceCurveGeom = (srcObj?.Geometry as Curve)?.DuplicateCurve();
+        sourceCurveAttr = srcObj?.Attributes.Duplicate();
+        if (sourceCurveGeom == null)
+          willDelete = false;
+      }
+
       var undoSerial = doc.BeginUndoRecord("vScallop");
 
       var arcId = doc.Objects.AddCurve(arcCurve);
@@ -137,13 +188,76 @@ public sealed class vScallop : Command
         continue;
       }
 
-      if (_deleteOriginal && sourceLineId != Guid.Empty)
+      var arcAttr = doc.Objects.FindId(arcId)?.Attributes.Duplicate() ?? new ObjectAttributes();
+
+      if (willDelete)
         doc.Objects.Delete(sourceLineId, true);
 
       doc.EndUndoRecord(undoSerial);
+
+      undoStack.Push(new ScallopUndoEntry(
+        undoSerial, arcId, arcCurve, arcAttr,
+        willDelete, sourceLineId,
+        sourceCurveGeom, sourceCurveAttr));
+      redoStack.Clear();
       SavePersistedOptions();
       doc.Views.Redraw();
     }
+  }
+
+  // ── In-command undo/redo helpers ──────────────────────────────────────────
+
+  private sealed record ScallopUndoEntry(
+    uint UndoSerial,
+    Guid CreatedArcId,
+    ArcCurve ArcGeometry,
+    ObjectAttributes ArcAttributes,
+    bool HadDeletedSource,
+    Guid SourceId,
+    Curve? SourceGeometry,
+    ObjectAttributes? SourceAttributes);
+
+  private static void ApplyUndo(
+    RhinoDoc doc,
+    ScallopUndoEntry entry,
+    Stack<ScallopUndoEntry> redoStack)
+  {
+    doc.Objects.Delete(entry.CreatedArcId, true);
+
+    var restoredSourceId = Guid.Empty;
+    if (entry.HadDeletedSource && entry.SourceGeometry != null)
+      restoredSourceId = doc.Objects.AddCurve(entry.SourceGeometry, entry.SourceAttributes ?? new ObjectAttributes());
+
+    // Remove the native undo record so post-command Ctrl+Z skips this arc.
+    doc.ClearUndoRecords(entry.UndoSerial, false);
+
+    redoStack.Push(entry with
+    {
+      UndoSerial = 0,
+      CreatedArcId = Guid.Empty,
+      SourceId = restoredSourceId
+    });
+  }
+
+  private static void ApplyRedo(
+    RhinoDoc doc,
+    ScallopUndoEntry entry,
+    Stack<ScallopUndoEntry> undoStack)
+  {
+    if (entry.HadDeletedSource && entry.SourceId != Guid.Empty)
+      doc.Objects.Delete(entry.SourceId, true);
+
+    var serial = doc.BeginUndoRecord("vScallop");
+    var newArcId = doc.Objects.AddCurve(entry.ArcGeometry, entry.ArcAttributes);
+    var newAttr  = doc.Objects.FindId(newArcId)?.Attributes.Duplicate() ?? new ObjectAttributes();
+    doc.EndUndoRecord(serial);
+
+    undoStack.Push(entry with
+    {
+      UndoSerial   = serial,
+      CreatedArcId = newArcId,
+      ArcAttributes = newAttr
+    });
   }
 
   private static void LoadPersistedOptions()
