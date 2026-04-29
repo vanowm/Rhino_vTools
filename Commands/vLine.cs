@@ -63,6 +63,7 @@ public sealed class vLine : Command
     var startResult = ResolveFirstPoint(doc, initialBothSides: false, initialChainMode: _chainMode);
     if (startResult.DelegatedToNative)
     {
+      RhinoApp.WriteLine($"[DBG vLine] startResult.DelegatedToNative=true, calling LaunchNativeLineMode");
       LaunchNativeLineMode();
       return Result.Success;
     }
@@ -334,6 +335,7 @@ public sealed class vLine : Command
 
         if (delegatedModes.TryGetValue(option.Index, out var modeKeyword))
         {
+          RhinoApp.WriteLine($"[DBG vLine] Delegating to native: {modeKeyword}");
           _pendingNativeLineMode = modeKeyword;
           return FirstPointResult.Delegated(bothSides.CurrentValue, chainModeIndex);
         }
@@ -1265,13 +1267,19 @@ public sealed class vLine : Command
   {
     var mode = _pendingNativeLineMode;
     _pendingNativeLineMode = null;
+    RhinoApp.WriteLine($"[DBG vLine] LaunchNativeLineMode: mode={mode ?? "(null)"}");
     if (mode == null)
       return;
 
+    string script;
     if (mode == "BiTangent")
-      RhinoApp.RunScript("_Line _Tangent _Tangent", false);
+      script = "_Line _Tangent _Tangent";
     else
-      RhinoApp.RunScript($"_Line _{mode}", false);
+      script = $"_Line _{mode}";
+
+    RhinoApp.WriteLine($"[DBG vLine] RunScript: {script}");
+    var ok = RhinoApp.RunScript(script, false);
+    RhinoApp.WriteLine($"[DBG vLine] RunScript returned: {ok}");
   }
 
   private static void DeleteObjectIfValid(RhinoDoc doc, Guid id)
