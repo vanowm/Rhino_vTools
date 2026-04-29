@@ -486,18 +486,12 @@ public sealed class vLine : Command
       if (curveCache.Count == 0 || string.IsNullOrWhiteSpace(modeName))
         return null;
 
-      var captureTolerance = Math.Max(doc.ModelAbsoluteTolerance * 0.25, 1e-9);
-      Curve? curve;
-
-      if (modeName is "perp_any" or "tangent_any" or "auto")
-        curve = NearestCurveToPoint(cursorPoint, curveCache);
-      else
-        curve = CurveAtCursorPoint(cursorPoint, curveCache, captureTolerance);
+      var curve = NearestCurveToPoint(cursorPoint, curveCache);
 
       if (curve == null)
         return null;
 
-      if (modeName == "perp")
+      if (modeName is "perp" or "perp_any")
       {
         var pt = PerpPointFromStartWithHint(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
         if (pt.HasValue)
@@ -506,19 +500,7 @@ public sealed class vLine : Command
         return PerpFallbackToPointedSegment(startPoint, curve, cursorPoint, preview);
       }
 
-      if (modeName == "tangent")
-        return TangentPointFromStart(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
-
-      if (modeName == "perp_any")
-      {
-        var pt = PerpPointFromStartWithHint(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
-        if (pt.HasValue)
-          return pt.Value;
-
-        return PerpFallbackToPointedSegment(startPoint, curve, cursorPoint, preview);
-      }
-
-      if (modeName == "tangent_any")
+      if (modeName is "tangent" or "tangent_any")
         return TangentPointFromStart(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
 
       if (modeName == "auto")
