@@ -47,6 +47,10 @@ public sealed class vTrim : Command
       return QueueBuiltInTrimWithCutters(doc, cutters.CutterIds);
     }
 
+    // Deselect cutter curves so Delete key doesn't destroy them while target picking.
+    doc.Objects.UnselectAll();
+    doc.Views.Redraw();
+
     var allowDoneInTargetPrompt = false;
 
     while (true)
@@ -960,11 +964,11 @@ public sealed class vTrim : Command
     {
       try
       {
-        return Math.Max(1.0, Rhino.ApplicationSettings.ModelAidSettings.MousePickboxRadius);
+        return Math.Max(12.0, Rhino.ApplicationSettings.ModelAidSettings.MousePickboxRadius * 3.0);
       }
       catch
       {
-        return 8.0;
+        return 12.0;
       }
     }
   }
