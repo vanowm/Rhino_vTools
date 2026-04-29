@@ -469,6 +469,7 @@ public sealed class vLine : Command
     getPoint.SetBasePoint(startPoint, true);
     getPoint.AcceptNumber(true, true);
     getPoint.AcceptString(true);
+    getPoint.AcceptNothing(true);
 
     var bothSides = new OptionToggle(initialBothSides, "No", "Yes");
     var chainModeIndex = ClampIndex(initialChainMode, ChainModeValues.Length);
