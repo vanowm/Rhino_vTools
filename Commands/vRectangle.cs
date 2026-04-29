@@ -58,7 +58,7 @@ public sealed class vRectangle : Command
     else
     {
       // Prompt for width — accept curve selection, number input, or Enter for current.
-      var pickedWidth = PromptDimension(doc, "Width (select curves, type number, or Enter for current)", _width);
+      var pickedWidth = PromptDimension(doc, $"Width <{_width:G}> (select curves, type number, or Enter for current)", _width);
       if (!pickedWidth.HasValue)
         return Result.Cancel;
       width = pickedWidth.Value;
@@ -67,7 +67,7 @@ public sealed class vRectangle : Command
       doc.Objects.UnselectAll();
       doc.Views.Redraw();
 
-      var pickedHeight = PromptDimension(doc, "Height (select curves, type number, or Enter for current)", _height);
+      var pickedHeight = PromptDimension(doc, $"Height <{_height:G}> (select curves, type number, or Enter for current)", _height);
       if (!pickedHeight.HasValue)
         return Result.Cancel;
       height = pickedHeight.Value;
