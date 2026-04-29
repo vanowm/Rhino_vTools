@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Drawing;
 using Rhino;
 using Rhino.Commands;
@@ -13,6 +12,7 @@ namespace vTools.Commands;
 /// <summary>
 /// Native scallop-arc command ported from Scallop.py.
 /// </summary>
+[CommandStyle(Style.NotUndoable)]
 public sealed class vScallop : Command
 {
   private const string OptionsSectionName = "vScallop";
@@ -29,16 +29,10 @@ public sealed class vScallop : Command
   /// </summary>
   public override string EnglishName => "vScallop";
 
-  /// <summary>
-  /// Creates scallop arcs in a loop until the user presses Escape.
-  /// Supports in-command Undo/Redo; all steps are hidden under one Rhino undo record.
-  /// </summary>
+  // Each arc is wrapped in its own undo record so Ctrl+Z undoes one arc at a time.
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadPersistedOptions();
-
-    var undoStack = new Stack<ScallopUndoEntry>();
-    var redoStack = new Stack<ScallopUndoEntry>();
 
     while (true)
     {
@@ -56,9 +50,6 @@ public sealed class vScallop : Command
       go.AddOptionDouble("Size", ref sizeOpt);
       go.AddOptionToggle("DeleteOriginal", ref deleteOpt);
       go.AddOptionToggle("Free", ref freeOpt);
-
-      var idxUndo = undoStack.Count > 0 ? go.AddOption("Undo") : -1;
-      var idxRedo = redoStack.Count > 0 ? go.AddOption("Redo") : -1;
 
       var outerResult = go.Get();
 
@@ -81,20 +72,6 @@ public sealed class vScallop : Command
 
       if (outerResult == GetResult.Option)
       {
-        var opt = go.Option();
-        if (opt != null)
-        {
-          if (opt.Index == idxUndo && undoStack.Count > 0)
-          {
-            ApplyUndo(doc, undoStack.Pop(), redoStack);
-            doc.Views.Redraw();
-          }
-          else if (opt.Index == idxRedo && redoStack.Count > 0)
-          {
-            ApplyRedo(doc, redoStack.Pop(), undoStack);
-            doc.Views.Redraw();
-          }
-        }
         SavePersistedOptions();
         continue;
       }
@@ -150,87 +127,23 @@ public sealed class vScallop : Command
         continue;
       }
 
-      // Capture source geometry before deleting it
-      Curve? sourceCurveGeom = null;
-      ObjectAttributes? sourceCurveAttr = null;
-      var willDelete = _deleteOriginal && sourceLineId != Guid.Empty;
-      if (willDelete)
-      {
-        var srcObj = doc.Objects.FindId(sourceLineId);
-        sourceCurveGeom = (srcObj?.Geometry as Curve)?.DuplicateCurve();
-        sourceCurveAttr = srcObj?.Attributes.Duplicate();
-        if (sourceCurveGeom == null)
-          willDelete = false;
-      }
+      var undoSerial = doc.BeginUndoRecord("vScallop");
 
       var arcId = doc.Objects.AddCurve(arcCurve);
       if (arcId == Guid.Empty)
       {
+        doc.EndUndoRecord(undoSerial);
         RhinoApp.WriteLine("vScallop: failed to add arc to document.");
         continue;
       }
 
-      var arcAttr = doc.Objects.FindId(arcId)?.Attributes.Duplicate() ?? new ObjectAttributes();
-
-      if (willDelete)
+      if (_deleteOriginal && sourceLineId != Guid.Empty)
         doc.Objects.Delete(sourceLineId, true);
 
-      undoStack.Push(new ScallopUndoEntry(
-        arcId, arcCurve, arcAttr,
-        willDelete, sourceLineId,
-        sourceCurveGeom, sourceCurveAttr));
-
-      redoStack.Clear();
+      doc.EndUndoRecord(undoSerial);
       SavePersistedOptions();
       doc.Views.Redraw();
     }
-  }
-
-  // ── In-command undo/redo helpers ──────────────────────────────────────────
-
-  private sealed record ScallopUndoEntry(
-    Guid CreatedArcId,
-    ArcCurve ArcGeometry,
-    ObjectAttributes ArcAttributes,
-    bool HadDeletedSource,
-    Guid SourceId,
-    Curve? SourceGeometry,
-    ObjectAttributes? SourceAttributes);
-
-  private static void ApplyUndo(
-    RhinoDoc doc,
-    ScallopUndoEntry entry,
-    Stack<ScallopUndoEntry> redoStack)
-  {
-    doc.Objects.Delete(entry.CreatedArcId, true);
-
-    var restoredSourceId = Guid.Empty;
-    if (entry.HadDeletedSource && entry.SourceGeometry != null)
-      restoredSourceId = doc.Objects.AddCurve(entry.SourceGeometry, entry.SourceAttributes ?? new ObjectAttributes());
-
-    redoStack.Push(entry with
-    {
-      CreatedArcId = Guid.Empty,
-      SourceId = restoredSourceId
-    });
-  }
-
-  private static void ApplyRedo(
-    RhinoDoc doc,
-    ScallopUndoEntry entry,
-    Stack<ScallopUndoEntry> undoStack)
-  {
-    if (entry.HadDeletedSource && entry.SourceId != Guid.Empty)
-      doc.Objects.Delete(entry.SourceId, true);
-
-    var newArcId = doc.Objects.AddCurve(entry.ArcGeometry, entry.ArcAttributes);
-    var newAttr  = doc.Objects.FindId(newArcId)?.Attributes.Duplicate() ?? new ObjectAttributes();
-
-    undoStack.Push(entry with
-    {
-      CreatedArcId = newArcId,
-      ArcAttributes = newAttr
-    });
   }
 
   private static void LoadPersistedOptions()
