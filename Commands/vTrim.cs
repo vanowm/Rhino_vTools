@@ -112,7 +112,7 @@ public sealed class vTrim : Command
           pick.TargetCurve,
           pick.PickPoint,
           cutterCurves,
-          allowBoundaryExtend: !cutters.AutoMode && cutters.CutterIds.Count > 0,
+          allowBoundaryExtend: false,
           extendAsLine: _extendAsLine,
           _joinAfterTrim,
           out record);
@@ -742,6 +742,21 @@ public sealed class vTrim : Command
 
     protected override void DrawOverlay(Rhino.Display.DrawEventArgs e)
     {
+      // Draw explicit cutter curves highlighted so the user can see them
+      // even after they are deselected.
+      if (!_autoMode && _cutterIds.Count > 0)
+      {
+        var cutterColor = Rhino.ApplicationSettings.AppearanceSettings.SelectedObjectColor;
+        foreach (var id in _cutterIds)
+        {
+          if (id == Guid.Empty)
+            continue;
+          var obj = _doc.Objects.FindId(id);
+          if (obj?.Geometry is Curve cutterCurve)
+            e.Display.DrawCurve(cutterCurve, cutterColor, 2);
+        }
+      }
+
       if (HoverObject == null || HoverCurve == null || !HoverPoint.IsValid)
         return;
 
@@ -762,7 +777,7 @@ public sealed class vTrim : Command
           HoverCurve,
           HoverPoint,
           cutters,
-          allowBoundaryExtend: !_autoMode && _cutterIds.Count > 0,
+          allowBoundaryExtend: false,
           extendAsLine: ExtendAsLine);
         if (removedPiece != null)
           e.Display.DrawCurve(removedPiece, Color.Red, 2);
