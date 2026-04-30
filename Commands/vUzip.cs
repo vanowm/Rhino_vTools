@@ -2005,9 +2005,12 @@ public class vUzip : Command
 
     // Add end cap curves directly, trimmed to fit the band.  We skip SplitAndFilterForBand
     // for caps (see comment above near deduplicatedEndCurves).
-    foreach (var cap in deduplicatedEndCurves)
+    // The inner/outer boundaries were extended to meet the WIDENED caps (addedEndCurves),
+    // so we trim the widened cap using those intersections, not the original narrow cap.
+    for (var ci = 0; ci < addedEndCurves.Count; ci++)
     {
-      var trimmedCap = TrimCapToBandBoundaries(doc, cap, insideBoundary, outsideBoundary);
+      var widenedCap = addedEndCurves[ci];
+      var trimmedCap = TrimCapToBandBoundaries(doc, widenedCap, insideBoundary, outsideBoundary);
       var capId = AddCurve(doc, trimmedCap, LayerCut);
       if (capId != Guid.Empty)
       {
@@ -2495,12 +2498,11 @@ public class vUzip : Command
   }
 
   /// <summary>
-  /// Trims a cap curve (perpendicular to the arm) to span only between the inner and outer
-  /// band boundaries.  We use combined intersection parameters rather than the
-  /// CurveInsideOuterBoundary distance heuristic, which over-counts 3D distance for caps
-  /// that extend past the arm tip and would otherwise drop the cap entirely.
-  /// If fewer than two boundary intersections are found the cap is returned unchanged
-  /// (it already fits within the band, or is too narrow to reach either boundary).
+  /// Trims a cap curve (typically the widened end cap) to span only between the inner and outer
+  /// band boundary curves.  Both boundaries were extended to meet this widened cap via
+  /// ExtendCurveToEnd, so both will intersect it.  We take the innermost intersection of each
+  /// boundary and trim to [min, max] — i.e. keep exactly the band-width segment.
+  /// If fewer than two distinct intersection params are found the cap is returned unchanged.
   /// </summary>
   private static Curve TrimCapToBandBoundaries(RhinoDoc doc, Curve cap, Curve? innerBoundary, Curve? outerBoundary)
   {
@@ -2515,7 +2517,14 @@ public class vUzip : Command
     if (ps.Count < 2)
       return cap.DuplicateCurve();
 
-    var trimmed = cap.Trim(new Interval(ps.Min(), ps.Max()));
+    // Keep the segment between the two most-central params (closest to cap midpoint).
+    // When each boundary intersects at one point this equals [min, max].
+    var mid = cap.Domain.Mid;
+    var sorted = ps.OrderBy(t => Math.Abs(t - mid)).ToList();
+    var lo = Math.Min(sorted[0], sorted[1]);
+    var hi = Math.Max(sorted[0], sorted[1]);
+
+    var trimmed = cap.Trim(new Interval(lo, hi));
     return trimmed ?? cap.DuplicateCurve();
   }
 }
