@@ -191,7 +191,9 @@ public sealed class vLine : Command
       {
         while (true)
         {
+          vToolsPlugIn.TryLog("[vLine Multi] calling ResolveFirstPoint");
           var newStartResult = ResolveFirstPoint(doc, initialBothSides, selectedChainMode);
+          vToolsPlugIn.TryLog($"[vLine Multi] ResolveFirstPoint returned HasPoint={newStartResult.HasPoint} Delegated={newStartResult.DelegatedToNative}");
 
           if (newStartResult.DelegatedToNative)
           {
@@ -200,7 +202,10 @@ public sealed class vLine : Command
           }
 
           if (!newStartResult.HasPoint)
+          {
+            vToolsPlugIn.TryLog("[vLine Multi] !HasPoint → returning Success");
             return Result.Success;
+          }
 
           currentStart = newStartResult.Point;
           firstSegment = true;
@@ -291,7 +296,6 @@ public sealed class vLine : Command
     var getPoint = new GetPoint();
     getPoint.SetCommandPrompt("Start of line");
     getPoint.AcceptNothing(true);
-
     var bothSides = new OptionToggle(initialBothSides, "No", "Yes");
     var chainModeIndex = ClampIndex(initialChainMode, ChainModeValues.Length);
     var chainModeOptionIndex = getPoint.AddOptionList("Mode", ChainModeValues, chainModeIndex);
@@ -323,6 +327,7 @@ public sealed class vLine : Command
     while (true)
     {
       var result = getPoint.Get();
+      vToolsPlugIn.TryLog($"[vLine RFP] Get() returned {result}");
 
       if (result == GetResult.Point)
       {
