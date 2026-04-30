@@ -1909,6 +1909,8 @@ public class vUzip : Command
 
     // Widen end cap curves to span the full band width so that all offset curves
     // (including outer offsets wider than the original source caps) can be trimmed.
+    // Only the widened versions are used for offset trimming; the original caps go
+    // into selected so that SplitAndFilterForBand handles them at their true geometry.
     var maxAbsOffset = spec.Offsets.Count > 0 ? spec.Offsets.Max(o => Math.Abs(o.Offset)) : 0.0;
     var addedEndCurves = new List<Curve>();
     var rawEndCurvesForDedup = new List<Curve>();
@@ -1917,11 +1919,11 @@ public class vUzip : Command
       if (rawEndCurvesForDedup.Any(existing => CurvesNearlySame(doc, existing, end)))
         continue;
       rawEndCurvesForDedup.Add(end);
+      selected.Add(new CurveItem(end, LayerCut, null));
       var widenedEnd = maxAbsOffset > doc.ModelAbsoluteTolerance
         ? (end.Extend(CurveEnd.Both, maxAbsOffset, CurveExtensionStyle.Line) ?? end)
         : end;
       addedEndCurves.Add(widenedEnd);
-      selected.Add(new CurveItem(widenedEnd, LayerCut, null));
     }
 
     var centerLayer = string.IsNullOrWhiteSpace(spec.CenterLayer) ? centerItem.LayerName : spec.CenterLayer!;
