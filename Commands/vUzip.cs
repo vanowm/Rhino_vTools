@@ -1907,19 +1907,20 @@ public class vUzip : Command
     var selected = new List<CurveItem>(preselectedItems);
     var endItemIds = new HashSet<Guid>();
 
-    // Widen end cap curves to span the full band width so that all offset curves
-    // (including outer offsets wider than the original source caps) can be trimmed.
-    // Only the widened versions are used for offset trimming; the original caps go
-    // into selected so that SplitAndFilterForBand handles them at their true geometry.
+    // Widen end cap curves so that wider offset curves (e.g. +1.125 outer) can reach
+    // and intersect them for trimming. End caps are NOT added to `selected` because
+    // CurveInsideOuterBoundary uses 3D distance to the nearest center endpoint; for
+    // caps past the arm tip the tail component inflates that distance above the outer
+    // band limit, causing the cap to be falsely classified as outside and dropped.
+    // Instead we trim and add caps directly after the band-filter loop.
     var maxAbsOffset = spec.Offsets.Count > 0 ? spec.Offsets.Max(o => Math.Abs(o.Offset)) : 0.0;
     var addedEndCurves = new List<Curve>();
-    var rawEndCurvesForDedup = new List<Curve>();
+    var deduplicatedEndCurves = new List<Curve>();
     foreach (var end in endCurves)
     {
-      if (rawEndCurvesForDedup.Any(existing => CurvesNearlySame(doc, existing, end)))
+      if (deduplicatedEndCurves.Any(existing => CurvesNearlySame(doc, existing, end)))
         continue;
-      rawEndCurvesForDedup.Add(end);
-      selected.Add(new CurveItem(end, LayerCut, null));
+      deduplicatedEndCurves.Add(end);
       var widenedEnd = maxAbsOffset > doc.ModelAbsoluteTolerance
         ? (end.Extend(CurveEnd.Both, maxAbsOffset, CurveExtensionStyle.Line) ?? end)
         : end;
@@ -1999,6 +2000,19 @@ public class vUzip : Command
         var id = AddCurve(doc, item.Curve.DuplicateCurve(), item.LayerName);
         if (id != Guid.Empty)
           partObjects.Add(id);
+      }
+    }
+
+    // Add end cap curves directly, trimmed to fit the band.  We skip SplitAndFilterForBand
+    // for caps (see comment above near deduplicatedEndCurves).
+    foreach (var cap in deduplicatedEndCurves)
+    {
+      var trimmedCap = TrimCapToBandBoundaries(doc, cap, insideBoundary, outsideBoundary);
+      var capId = AddCurve(doc, trimmedCap, LayerCut);
+      if (capId != Guid.Empty)
+      {
+        partObjects.Add(capId);
+        endItemIds.Add(capId);
       }
     }
 
@@ -2478,5 +2492,30 @@ public class vUzip : Command
     if (string.IsNullOrWhiteSpace(magText))
       magText = "0";
     return $"{side}_{magText}";
+  }
+
+  /// <summary>
+  /// Trims a cap curve (perpendicular to the arm) to span only between the inner and outer
+  /// band boundaries.  We use combined intersection parameters rather than the
+  /// CurveInsideOuterBoundary distance heuristic, which over-counts 3D distance for caps
+  /// that extend past the arm tip and would otherwise drop the cap entirely.
+  /// If fewer than two boundary intersections are found the cap is returned unchanged
+  /// (it already fits within the band, or is too narrow to reach either boundary).
+  /// </summary>
+  private static Curve TrimCapToBandBoundaries(RhinoDoc doc, Curve cap, Curve? innerBoundary, Curve? outerBoundary)
+  {
+    var tol = doc.ModelAbsoluteTolerance;
+    var allParams = new List<double>();
+    if (innerBoundary != null)
+      allParams.AddRange(IntersectionParams(doc, cap, innerBoundary));
+    if (outerBoundary != null)
+      allParams.AddRange(IntersectionParams(doc, cap, outerBoundary));
+
+    var ps = UniqueParams(allParams, tol);
+    if (ps.Count < 2)
+      return cap.DuplicateCurve();
+
+    var trimmed = cap.Trim(new Interval(ps.Min(), ps.Max()));
+    return trimmed ?? cap.DuplicateCurve();
   }
 }
