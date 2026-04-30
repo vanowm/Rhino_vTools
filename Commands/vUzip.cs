@@ -1907,13 +1907,21 @@ public class vUzip : Command
     var selected = new List<CurveItem>(preselectedItems);
     var endItemIds = new HashSet<Guid>();
 
+    // Widen end cap curves to span the full band width so that all offset curves
+    // (including outer offsets wider than the original source caps) can be trimmed.
+    var maxAbsOffset = spec.Offsets.Count > 0 ? spec.Offsets.Max(o => Math.Abs(o.Offset)) : 0.0;
     var addedEndCurves = new List<Curve>();
+    var rawEndCurvesForDedup = new List<Curve>();
     foreach (var end in endCurves)
     {
-      if (addedEndCurves.Any(existing => CurvesNearlySame(doc, existing, end)))
+      if (rawEndCurvesForDedup.Any(existing => CurvesNearlySame(doc, existing, end)))
         continue;
-      addedEndCurves.Add(end);
-      selected.Add(new CurveItem(end, LayerCut, null));
+      rawEndCurvesForDedup.Add(end);
+      var widenedEnd = maxAbsOffset > doc.ModelAbsoluteTolerance
+        ? (end.Extend(CurveEnd.Both, maxAbsOffset, CurveExtensionStyle.Line) ?? end)
+        : end;
+      addedEndCurves.Add(widenedEnd);
+      selected.Add(new CurveItem(widenedEnd, LayerCut, null));
     }
 
     var centerLayer = string.IsNullOrWhiteSpace(spec.CenterLayer) ? centerItem.LayerName : spec.CenterLayer!;
@@ -1937,7 +1945,7 @@ public class vUzip : Command
       var offsetCurve = OffsetAtSide(doc, centerCurve, plane, insideSign, distance, side);
       if (offsetCurve == null)
         continue;
-      offsetCurve = ExtendCurveToEnd(doc, offsetCurve, endCurves, centerMid);
+      offsetCurve = ExtendCurveToEnd(doc, offsetCurve, addedEndCurves, centerMid);
       offsets[off.Name] = offsetCurve;
     }
 
