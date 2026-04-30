@@ -203,8 +203,9 @@ public sealed class vLine : Command
 
           if (!newStartResult.HasPoint)
           {
-            vToolsPlugIn.TryLog("[vLine Multi] !HasPoint → returning Success");
-            return Result.Success;
+            vToolsPlugIn.TryLog("[vLine Multi] !HasPoint → returning Cancel (prevents Enter-repeat)");
+            SavePersistedOptions();
+            return Result.Cancel;
           }
 
           currentStart = newStartResult.Point;
