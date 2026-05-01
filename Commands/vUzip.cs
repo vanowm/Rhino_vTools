@@ -2298,7 +2298,26 @@ public class vUzip : Command
     var tailOpt = new OptionDouble(tail, 0.0, 1e9);
     gp.AddOptionDouble("Tail", ref tailOpt);
     EventHandler<GetPointDrawEventArgs> handler = (_, e) =>
+    {
       conduit.CurrentPoint = e.CurrentPoint;
+      // DynamicDraw fires on every mouse move — draw here for smooth tracking.
+      var moveVec = e.CurrentPoint - basePoint;
+      var xform = Transform.Translation(moveVec);
+      foreach (var (geom, color) in previewItems)
+      {
+        var draw = geom.Duplicate();
+        if (draw == null) continue;
+        draw.Transform(xform);
+        switch (draw)
+        {
+          case Curve c:       e.Display.DrawCurve(c, color, 1); break;
+          case Brep b:        e.Display.DrawBrepWires(b, color, 1); break;
+          case Mesh m:        e.Display.DrawMeshWires(m, color); break;
+          case TextEntity te: e.Display.DrawAnnotation(te, color); break;
+          case Point p:       e.Display.DrawPoint(p.Location, Rhino.Display.PointStyle.Simple, 2, color); break;
+        }
+      }
+    };
     gp.DynamicDraw += handler;
 
     while (true)
