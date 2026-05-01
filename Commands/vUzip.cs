@@ -2199,6 +2199,7 @@ public class vUzip : Command
     private readonly List<(GeometryBase Geom, System.Drawing.Color Color)> _items;
     public Point3d BasePoint;
     public Point3d CurrentPoint;
+    public bool DrawEnabled;  // only draw during option sub-prompts; DynamicDraw handles normal tracking
 
     public PlacementPreviewConduit(
       IEnumerable<(GeometryBase Geom, System.Drawing.Color Color)> items,
@@ -2211,6 +2212,8 @@ public class vUzip : Command
 
     protected override void PostDrawObjects(Rhino.Display.DrawEventArgs e)
     {
+      if (!DrawEnabled)
+        return;
       var move = CurrentPoint - BasePoint;
       var xform = Transform.Translation(move);
       foreach (var (geom, color) in _items)
@@ -2289,7 +2292,7 @@ public class vUzip : Command
       doc.Objects.Hide(id, true);
 
     var conduit = new PlacementPreviewConduit(previewItems, basePoint);
-    conduit.Enabled = true;
+    conduit.Enabled = true;  // conduit is enabled but DrawEnabled=false; only draws during option entry
     doc.Views.Redraw();
 
     var gp = new GetPoint();
@@ -2300,7 +2303,7 @@ public class vUzip : Command
     EventHandler<GetPointDrawEventArgs> handler = (_, e) =>
     {
       conduit.CurrentPoint = e.CurrentPoint;
-      // DynamicDraw fires on every mouse move — draw here for smooth tracking.
+      // DynamicDraw fires on every mouse move — sole drawing path during normal tracking.
       var moveVec = e.CurrentPoint - basePoint;
       var xform = Transform.Translation(moveVec);
       foreach (var (geom, color) in previewItems)
@@ -2323,8 +2326,6 @@ public class vUzip : Command
     while (true)
     {
       var result = gp.Get();
-      // Redraw so conduit shows preview at last cursor position while option is processed.
-      doc.Views.Redraw();
       var newTail = Math.Max(0.0, tailOpt.CurrentValue);
 
       if (result == GetResult.Option)
@@ -2332,8 +2333,12 @@ public class vUzip : Command
         var opt = gp.Option();
         if (opt != null && opt.Index == labelOptionIndex)
         {
+          // Enable conduit to hold preview during GetString sub-prompt.
+          conduit.DrawEnabled = true;
+          doc.Views.Redraw();
           var newLabel = label;
           RhinoGet.GetString("Label", true, ref newLabel);
+          conduit.DrawEnabled = false;
           var trimmedLabel = (newLabel ?? DefaultLabel).Trim();
           if (trimmedLabel != label)
           {
