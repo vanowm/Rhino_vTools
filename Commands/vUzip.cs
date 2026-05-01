@@ -2304,9 +2304,13 @@ public class vUzip : Command
           gp.DynamicDraw -= handler;
           var newLabel = label;
           RhinoGet.GetString("Label", true, ref newLabel);
-          label = (newLabel ?? DefaultLabel).Trim();
+          var trimmedLabel = (newLabel ?? DefaultLabel).Trim();
           gp.DynamicDraw += handler;
-          // Rebuild option indexes with new label current value.
+          if (trimmedLabel != label)
+          {
+            return (true, trimmedLabel, newTail);
+          }
+          // Label unchanged — just refresh option display.
           gp.ClearCommandOptions();
           labelOptionIndex = gp.AddOption("Label", label);
           tailOpt = new OptionDouble(newTail, 0.0, 1e9);
