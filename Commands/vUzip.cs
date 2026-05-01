@@ -2194,6 +2194,43 @@ public class vUzip : Command
     }
   }
 
+  private sealed class PlacementPreviewConduit : Rhino.Display.DisplayConduit
+  {
+    private readonly List<(GeometryBase Geom, System.Drawing.Color Color)> _items;
+    public Point3d BasePoint;
+    public Point3d CurrentPoint;
+
+    public PlacementPreviewConduit(
+      IEnumerable<(GeometryBase Geom, System.Drawing.Color Color)> items,
+      Point3d basePoint)
+    {
+      _items = new List<(GeometryBase, System.Drawing.Color)>(items);
+      BasePoint = basePoint;
+      CurrentPoint = basePoint;
+    }
+
+    protected override void PostDrawObjects(Rhino.Display.DrawEventArgs e)
+    {
+      var move = CurrentPoint - BasePoint;
+      var xform = Transform.Translation(move);
+      foreach (var (geom, color) in _items)
+      {
+        var draw = geom.Duplicate();
+        if (draw == null)
+          continue;
+        draw.Transform(xform);
+        switch (draw)
+        {
+          case Curve c:       e.Display.DrawCurve(c, color, 1); break;
+          case Brep b:        e.Display.DrawBrepWires(b, color, 1); break;
+          case Mesh m:        e.Display.DrawMeshWires(m, color); break;
+          case TextEntity te: e.Display.DrawAnnotation(te, color); break;
+          case Point p:       e.Display.DrawPoint(p.Location, Rhino.Display.PointStyle.Simple, 2, color); break;
+        }
+      }
+    }
+  }
+
   private static (bool NeedsRebuild, string Label, double Tail) PlaceGroupsWithPickOrDelete(RhinoDoc doc, List<string> groupNames, string? anchorGroupName, string label, double tail)
   {
     var selectedIds = new HashSet<Guid>();
@@ -2250,6 +2287,9 @@ public class vUzip : Command
 
     foreach (var id in selectedIds)
       doc.Objects.Hide(id, true);
+
+    var conduit = new PlacementPreviewConduit(previewItems, basePoint);
+    conduit.Enabled = true;
     doc.Views.Redraw();
 
     var gp = new GetPoint();
@@ -2258,42 +2298,14 @@ public class vUzip : Command
     var tailOpt = new OptionDouble(tail, 0.0, 1e9);
     gp.AddOptionDouble("Tail", ref tailOpt);
     EventHandler<GetPointDrawEventArgs> handler = (_, e) =>
-    {
-      var moveVec = e.CurrentPoint - basePoint;
-      var xform = Transform.Translation(moveVec);
-
-      foreach (var (geom, color) in previewItems)
-      {
-        var draw = geom.Duplicate();
-        if (draw == null)
-          continue;
-
-        draw.Transform(xform);
-        switch (draw)
-        {
-          case Curve c:
-            e.Display.DrawCurve(c, color, 1);
-            break;
-          case Brep b:
-            e.Display.DrawBrepWires(b, color, 1);
-            break;
-          case Mesh m:
-            e.Display.DrawMeshWires(m, color);
-            break;
-          case TextEntity te:
-            e.Display.DrawAnnotation(te, color);
-            break;
-          case Point p:
-            e.Display.DrawPoint(p.Location, Rhino.Display.PointStyle.Simple, 2, color);
-            break;
-        }
-      }
-    };
+      conduit.CurrentPoint = e.CurrentPoint;
     gp.DynamicDraw += handler;
 
     while (true)
     {
       var result = gp.Get();
+      // Redraw so conduit shows preview at last cursor position while option is processed.
+      doc.Views.Redraw();
       var newTail = Math.Max(0.0, tailOpt.CurrentValue);
 
       if (result == GetResult.Option)
@@ -2301,16 +2313,16 @@ public class vUzip : Command
         var opt = gp.Option();
         if (opt != null && opt.Index == labelOptionIndex)
         {
-          gp.DynamicDraw -= handler;
           var newLabel = label;
           RhinoGet.GetString("Label", true, ref newLabel);
           var trimmedLabel = (newLabel ?? DefaultLabel).Trim();
-          gp.DynamicDraw += handler;
           if (trimmedLabel != label)
           {
+            gp.DynamicDraw -= handler;
+            conduit.Enabled = false;
             return (true, trimmedLabel, newTail);
           }
-          // Label unchanged — just refresh option display.
+          // Label unchanged — refresh option display.
           gp.ClearCommandOptions();
           labelOptionIndex = gp.AddOption("Label", label);
           tailOpt = new OptionDouble(newTail, 0.0, 1e9);
@@ -2320,12 +2332,14 @@ public class vUzip : Command
         {
           tail = newTail;
           gp.DynamicDraw -= handler;
+          conduit.Enabled = false;
           return (true, label, tail);
         }
         continue;
       }
 
       gp.DynamicDraw -= handler;
+      conduit.Enabled = false;
 
       if (result != GetResult.Point)
       {
