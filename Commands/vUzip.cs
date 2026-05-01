@@ -2199,6 +2199,7 @@ public class vUzip : Command
     private readonly List<(GeometryBase Geom, System.Drawing.Color Color)> _items;
     public Point3d BasePoint;
     public Point3d CurrentPoint;
+    public bool DrawEnabled;  // true only during sub-prompt entry (Label/Tail); prevents ghost with DynamicDraw
 
     public PlacementPreviewConduit(
       IEnumerable<(GeometryBase Geom, System.Drawing.Color Color)> items,
@@ -2211,6 +2212,8 @@ public class vUzip : Command
 
     protected override void PostDrawObjects(Rhino.Display.DrawEventArgs e)
     {
+      if (!DrawEnabled)
+        return;
       var move = CurrentPoint - BasePoint;
       var xform = Transform.Translation(move);
       foreach (var (geom, color) in _items)
@@ -2295,45 +2298,78 @@ public class vUzip : Command
     var gp = new GetPoint();
     gp.SetCommandPrompt("Pick placement point for created parts (Esc to cancel and delete)");
     var labelOptionIndex = gp.AddOption("Label", label);
-    var tailOpt = new OptionDouble(tail, 0.0, 1e9);
-    gp.AddOptionDouble("Tail", ref tailOpt);
-    // DynamicDraw: only update CurrentPoint for conduit tracking — conduit does the actual drawing.
+    var tailOptionIndex = gp.AddOption("Tail", tail.ToString("0.##"));
+    // DynamicDraw: draw preview for smooth cursor tracking and keep conduit CurrentPoint in sync.
     EventHandler<GetPointDrawEventArgs> handler = (_, e) =>
+    {
       conduit.CurrentPoint = e.CurrentPoint;
+      var moveVec = e.CurrentPoint - basePoint;
+      var xform = Transform.Translation(moveVec);
+      foreach (var (geom, color) in previewItems)
+      {
+        var draw = geom.Duplicate();
+        if (draw == null) continue;
+        draw.Transform(xform);
+        switch (draw)
+        {
+          case Curve c:       e.Display.DrawCurve(c, color, 1); break;
+          case Brep b:        e.Display.DrawBrepWires(b, color, 1); break;
+          case Mesh m:        e.Display.DrawMeshWires(m, color); break;
+          case TextEntity te: e.Display.DrawAnnotation(te, color); break;
+          case Point p:       e.Display.DrawPoint(p.Location, Rhino.Display.PointStyle.Simple, 2, color); break;
+        }
+      }
+    };
     gp.DynamicDraw += handler;
 
     while (true)
     {
       var result = gp.Get();
-      var newTail = Math.Max(0.0, tailOpt.CurrentValue);
 
       if (result == GetResult.Option)
       {
         var opt = gp.Option();
         if (opt != null && opt.Index == labelOptionIndex)
         {
+          // Bracket sub-prompt with conduit so preview holds while user types.
+          conduit.DrawEnabled = true;
+          doc.Views.Redraw();
           var newLabel = label;
           RhinoGet.GetString("Label", true, ref newLabel);
+          conduit.DrawEnabled = false;
+          doc.Views.Redraw();
           var trimmedLabel = (newLabel ?? DefaultLabel).Trim();
           if (trimmedLabel != label)
           {
             gp.DynamicDraw -= handler;
             conduit.Enabled = false;
-            doc.Views.Redraw();
-            return (true, trimmedLabel, newTail);
+            return (true, trimmedLabel, tail);
           }
-          // Label unchanged — refresh option display.
+          // Label unchanged — refresh options.
           gp.ClearCommandOptions();
           labelOptionIndex = gp.AddOption("Label", label);
-          tailOpt = new OptionDouble(newTail, 0.0, 1e9);
-          gp.AddOptionDouble("Tail", ref tailOpt);
+          tailOptionIndex = gp.AddOption("Tail", tail.ToString("0.##"));
         }
-        else if (newTail != tail)
+        else if (opt != null && opt.Index == tailOptionIndex)
         {
-          tail = newTail;
-          gp.DynamicDraw -= handler;
-          conduit.Enabled = false;
-          return (true, label, tail);
+          // Bracket sub-prompt with conduit so preview holds while user types.
+          conduit.DrawEnabled = true;
+          doc.Views.Redraw();
+          var newTail = tail;
+          RhinoGet.GetNumber("Tail length", true, ref newTail);
+          conduit.DrawEnabled = false;
+          doc.Views.Redraw();
+          newTail = Math.Max(0.0, newTail);
+          if (Math.Abs(newTail - tail) > RhinoMath.ZeroTolerance)
+          {
+            gp.DynamicDraw -= handler;
+            conduit.Enabled = false;
+            return (true, label, newTail);
+          }
+          // Tail unchanged — refresh options.
+          gp.ClearCommandOptions();
+          labelOptionIndex = gp.AddOption("Label", label);
+          tailOptionIndex = gp.AddOption("Tail", tail.ToString("0.##"));
         }
         continue;
       }
@@ -2345,7 +2381,7 @@ public class vUzip : Command
       {
         DeleteCreatedGroupsAndMembers(doc, groupNames);
         doc.Views.Redraw();
-        return (false, label, newTail);
+        return (false, label, tail);
       }
 
       var target = gp.Point();
@@ -2371,7 +2407,7 @@ public class vUzip : Command
       foreach (var id in selectedIds)
         doc.Objects.Select(id);
       doc.Views.Redraw();
-      return (false, label, newTail);
+      return (false, label, tail);
     }
   }
 
