@@ -2063,12 +2063,15 @@ public class vUzip : Command
     for (var ci = 0; ci < addedEndCurves.Count; ci++)
     {
       var widenedCap = addedEndCurves[ci];
-      var trimmedCap = TrimCapToBandBoundaries(doc, widenedCap, insideBoundary, outsideBoundary, logPfx, ci);
-      var capId = AddCurve(doc, trimmedCap, LayerCut);
-      if (capId != Guid.Empty)
+      var capPieces = TrimCapToBandBoundaries(doc, widenedCap, insideBoundary, outsideBoundary, logPfx, ci);
+      foreach (var capPiece in capPieces)
       {
-        partObjects.Add(capId);
-        endItemIds.Add(capId);
+        var capId = AddCurve(doc, capPiece, LayerCut);
+        if (capId != Guid.Empty)
+        {
+          partObjects.Add(capId);
+          endItemIds.Add(capId);
+        }
       }
     }
 
@@ -2553,11 +2556,12 @@ public class vUzip : Command
   /// <summary>
   /// Trims a cap curve (typically the widened end cap) to span only between the inner and outer
   /// band boundary curves.  Both boundaries were extended to meet this widened cap via
-  /// ExtendCurveToEnd, so both will intersect it.  We take the innermost intersection of each
-  /// boundary and trim to [min, max] — i.e. keep exactly the band-width segment.
-  /// If fewer than two distinct intersection params are found the cap is returned unchanged.
+  /// ExtendCurveToEnd, so both will intersect it.  Returns two pieces — one per arm end:
+  ///   left:  [outer_lo, inner_lo]   right: [inner_hi, outer_hi]
+  /// This removes the inner section (between the inner rails) from the cap.
+  /// Falls back to a single piece when only one boundary provides params.
   /// </summary>
-  private static Curve TrimCapToBandBoundaries(RhinoDoc doc, Curve cap, Curve? innerBoundary, Curve? outerBoundary, string logPfx, int capIndex)
+  private static List<Curve> TrimCapToBandBoundaries(RhinoDoc doc, Curve cap, Curve? innerBoundary, Curve? outerBoundary, string logPfx, int capIndex)
   {
     var tol = doc.ModelAbsoluteTolerance;
     var innerParams = innerBoundary != null ? UniqueParams(IntersectionParams(doc, cap, innerBoundary), tol) : new List<double>();
@@ -2566,27 +2570,39 @@ public class vUzip : Command
     vToolsPlugIn.TryLog($"{logPfx}     innerBoundary={(innerBoundary != null ? $"len={innerBoundary.GetLength():F4} params=[{string.Join(",", innerParams.Select(p => $"{p:F6}"))}]" : "NULL")}");
     vToolsPlugIn.TryLog($"{logPfx}     outerBoundary={(outerBoundary != null ? $"len={outerBoundary.GetLength():F4} params=[{string.Join(",", outerParams.Select(p => $"{p:F6}"))}]" : "NULL")}");
 
+    // Two pieces per cap: [outer_lo, inner_lo] and [inner_hi, outer_hi].
+    // Requires at least 2 inner params AND 2 outer params.
+    if (innerParams.Count >= 2 && outerParams.Count >= 2)
+    {
+      var outerLo = outerParams.Min();
+      var outerHi = outerParams.Max();
+      var innerLo = innerParams.Min();
+      var innerHi = innerParams.Max();
+      vToolsPlugIn.TryLog($"{logPfx}     → two pieces: [{outerLo:F6},{innerLo:F6}] [{innerHi:F6},{outerHi:F6}] domain={cap.Domain.T0:F6}..{cap.Domain.T1:F6}");
+      var result = new List<Curve>();
+      var left = cap.Trim(new Interval(outerLo, innerLo));
+      if (left != null && left.GetLength() > tol) result.Add(left);
+      var right = cap.Trim(new Interval(innerHi, outerHi));
+      if (right != null && right.GetLength() > tol) result.Add(right);
+      vToolsPlugIn.TryLog($"{logPfx}     → pieces={result.Count} lens=[{string.Join(",", result.Select(c => $"{c.GetLength():F4}"))}]");
+      if (result.Count > 0) return result;
+    }
+
+    // Fallback: single piece spanning all available params.
     var allParams = new List<double>(innerParams);
     allParams.AddRange(outerParams);
     var ps = UniqueParams(allParams, tol);
     vToolsPlugIn.TryLog($"{logPfx}     combined uniqueParams={ps.Count} [{string.Join(",", ps.Select(p => $"{p:F6}"))}]");
-
     if (ps.Count < 2)
     {
       vToolsPlugIn.TryLog($"{logPfx}     → <2 params, returning cap unchanged");
-      return cap.DuplicateCurve();
+      return new List<Curve> { cap.DuplicateCurve() };
     }
-
-    // Keep the segment between the two most-central params (closest to cap midpoint).
-    // Use the full extent: trim from the outermost left param to the outermost right param.
-    // The two boundary curves intersect the cap on opposite sides (one near each arm), so
-    // min/max gives the correct full-band-width segment.
     var lo = ps.Min();
     var hi = ps.Max();
-    vToolsPlugIn.TryLog($"{logPfx}     → trim [{lo:F6}, {hi:F6}] domain={cap.Domain.T0:F6}..{cap.Domain.T1:F6}");
-
+    vToolsPlugIn.TryLog($"{logPfx}     → fallback trim [{lo:F6}, {hi:F6}] domain={cap.Domain.T0:F6}..{cap.Domain.T1:F6}");
     var trimmed = cap.Trim(new Interval(lo, hi));
     vToolsPlugIn.TryLog($"{logPfx}     → trimmed len={(trimmed != null ? $"{trimmed.GetLength():F4}" : "NULL")}");
-    return trimmed ?? cap.DuplicateCurve();
+    return new List<Curve> { trimmed ?? cap.DuplicateCurve() };
   }
 }
