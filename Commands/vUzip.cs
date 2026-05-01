@@ -1171,7 +1171,17 @@ public class vUzip : Command
       }
       else
       {
-        var trimmedOuter = TrimCurveEndsOutsideOuter(doc, source, outerBoundary, centerCurve);
+        // When split() drops a near-endpoint param (splitOuter < expected), recover by trimming
+        // directly to [min, max] of the outer intersection params before trying the heavier fallback.
+        Curve? trimmedOuter = null;
+        if (outParams.Count >= 2)
+        {
+          var directTrim = source.Trim(outParams.Min(), outParams.Max());
+          if (directTrim != null && directTrim.GetLength() > tol)
+            trimmedOuter = directTrim;
+        }
+        if (trimmedOuter == null)
+          trimmedOuter = TrimCurveEndsOutsideOuter(doc, source, outerBoundary, centerCurve);
         if (logKey != null)
           vToolsPlugIn.TryLog($"{logKey} trimmedOuter={(trimmedOuter != null ? $"len={trimmedOuter.GetLength():F4}" : "NULL")}");
         if (trimmedOuter != null && trimmedOuter.GetLength() > tol && !CurvesNearlySame(doc, trimmedOuter, source))
