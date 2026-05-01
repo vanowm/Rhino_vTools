@@ -69,7 +69,6 @@ public sealed class vLine : Command
     var startResult = ResolveFirstPoint(doc, initialBothSides: false, initialChainMode: _chainMode);
     if (startResult.DelegatedToNative)
     {
-      vToolsPlugIn.TryLog($"[DBG vLine] startResult.DelegatedToNative=true, calling LaunchNativeLineMode");
       LaunchNativeLineMode();
       return Result.Success;
     }
@@ -191,9 +190,7 @@ public sealed class vLine : Command
       {
         while (true)
         {
-          vToolsPlugIn.TryLog("[vLine Multi] calling ResolveFirstPoint");
           var newStartResult = ResolveFirstPoint(doc, initialBothSides, selectedChainMode);
-          vToolsPlugIn.TryLog($"[vLine Multi] ResolveFirstPoint returned HasPoint={newStartResult.HasPoint} Delegated={newStartResult.DelegatedToNative}");
 
           if (newStartResult.DelegatedToNative)
           {
@@ -203,7 +200,6 @@ public sealed class vLine : Command
 
           if (!newStartResult.HasPoint)
           {
-            vToolsPlugIn.TryLog("[vLine Multi] !HasPoint → returning Cancel (prevents Enter-repeat)");
             SavePersistedOptions();
             return Result.Cancel;
           }
@@ -328,7 +324,6 @@ public sealed class vLine : Command
     while (true)
     {
       var result = getPoint.Get();
-      vToolsPlugIn.TryLog($"[vLine RFP] Get() returned {result}");
 
       if (result == GetResult.Point)
       {
@@ -347,7 +342,6 @@ public sealed class vLine : Command
 
         if (delegatedModes.TryGetValue(option.Index, out var modeKeyword))
         {
-          vToolsPlugIn.TryLog($"[DBG vLine] Delegating to native: {modeKeyword}");
           _pendingNativeLineMode = modeKeyword;
           return FirstPointResult.Delegated(bothSides.CurrentValue, chainModeIndex);
         }
@@ -1286,14 +1280,12 @@ public sealed class vLine : Command
 
     var mode = _pendingNativeLineMode;
     _pendingNativeLineMode = null;
-    vToolsPlugIn.TryLog($"[DBG vLine] LaunchNativeLineMode: mode={mode ?? "(null)"}");
     if (mode == null)
       return;
 
     // SendKeystrokes posts to Rhino's input queue — processed after RunCommand returns,
     // no re-entrancy issue, no idle timing dependency.
     string script = mode == "BiTangent" ? "_Line _Tangent _Tangent" : $"_Line _{mode}";
-    vToolsPlugIn.TryLog($"[DBG vLine] SendKeystrokes: {script}");
     RhinoApp.SendKeystrokes(script, true);
   }
 

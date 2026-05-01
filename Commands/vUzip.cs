@@ -1141,14 +1141,12 @@ public class vUzip : Command
     return true;
   }
 
-  private static List<Curve> SplitAndFilterForBand(RhinoDoc doc, Curve source, Curve innerBoundary, Curve outerBoundary, Curve centerCurve, bool useEndpointSideKeep, string? logKey = null)
+  private static List<Curve> SplitAndFilterForBand(RhinoDoc doc, Curve source, Curve innerBoundary, Curve outerBoundary, Curve centerCurve, bool useEndpointSideKeep)
   {
     var tol = doc.ModelAbsoluteTolerance;
     var final = new List<Curve>();
 
     var outParams = UniqueParams(IntersectionParams(doc, source, outerBoundary), tol);
-    if (logKey != null)
-      vToolsPlugIn.TryLog($"{logKey} outerParams={outParams.Count}[{string.Join(",", outParams.Select(p => $"{p:F4}"))}]");
     List<Curve> afterOuter;
     if (outParams.Count == 0)
     {
@@ -1162,9 +1160,6 @@ public class vUzip : Command
         .Where(c => CurveInsideOuterBoundary(doc, c, outerBoundary, centerCurve))
         .Select(c => c.DuplicateCurve())
         .ToList();
-      if (logKey != null)
-        vToolsPlugIn.TryLog($"{logKey} splitOuter={splitOuter.Length} classifiedOuter={classifiedOuter.Count}");
-
       if (classifiedOuter.Count > 0)
       {
         afterOuter = classifiedOuter;
@@ -1182,22 +1177,15 @@ public class vUzip : Command
         }
         if (trimmedOuter == null)
           trimmedOuter = TrimCurveEndsOutsideOuter(doc, source, outerBoundary, centerCurve);
-        if (logKey != null)
-          vToolsPlugIn.TryLog($"{logKey} trimmedOuter={(trimmedOuter != null ? $"len={trimmedOuter.GetLength():F4}" : "NULL")}");
         if (trimmedOuter != null && trimmedOuter.GetLength() > tol && !CurvesNearlySame(doc, trimmedOuter, source))
           afterOuter = new List<Curve> { trimmedOuter };
         else
           afterOuter = new List<Curve>();
       }
     }
-    if (logKey != null)
-      vToolsPlugIn.TryLog($"{logKey} afterOuter={afterOuter.Count}");
-
     foreach (var piece in afterOuter)
     {
       var inParams = UniqueParams(IntersectionParams(doc, piece, innerBoundary), tol);
-      if (logKey != null)
-        vToolsPlugIn.TryLog($"{logKey}   piece len={piece.GetLength():F4} inParams={inParams.Count}[{string.Join(",", inParams.Select(p => $"{p:F4}"))}]");
       if (inParams.Count == 0)
       {
         final.Add(piece.DuplicateCurve());
@@ -1207,15 +1195,11 @@ public class vUzip : Command
       if (inParams.Count >= 2)
       {
         var (_, keep, _) = OutsidePiecesForInnerTrim(doc, piece, innerBoundary, centerCurve, inParams);
-        if (logKey != null)
-          vToolsPlugIn.TryLog($"{logKey}   inParams>=2 keep={keep.Count}");
         final.AddRange(keep.Where(c => c != null).Select(c => c.DuplicateCurve()));
         continue;
       }
 
       var (trimmedInner, trimStart, trimEnd, sCenter, sInner, eCenter, eInner) = TrimCurveEndsInsideInnerDetailed(doc, piece, innerBoundary, centerCurve);
-      if (logKey != null)
-        vToolsPlugIn.TryLog($"{logKey}   trimmedInner={(trimmedInner != null ? $"len={trimmedInner.GetLength():F4}" : "NULL")} trimStart={trimStart} trimEnd={trimEnd} sC={sCenter:F4} sI={sInner:F4} eC={eCenter:F4} eI={eInner:F4}");
 
       if (useEndpointSideKeep)
       {
@@ -1253,9 +1237,6 @@ public class vUzip : Command
         trimmedInner = OutsidePieceForInnerOneCrossing(doc, piece, innerBoundary, centerCurve);
       }
 
-      if (logKey != null)
-        vToolsPlugIn.TryLog($"{logKey}   after inner resolve: trimmedInner={(trimmedInner != null ? $"len={trimmedInner.GetLength():F4}" : "NULL")}");
-
       if (trimmedInner != null)
       {
         final.Add(trimmedInner);
@@ -1266,8 +1247,6 @@ public class vUzip : Command
       var outsideInner = splitInner.Where(c => c != null)
         .Where(c => CurveOutsideInnerBoundary(doc, c, innerBoundary, centerCurve))
         .Select(c => c.DuplicateCurve()).ToList();
-      if (logKey != null)
-        vToolsPlugIn.TryLog($"{logKey}   fallback splitInner={splitInner.Length} outsideInner={outsideInner.Count}");
       final.AddRange(outsideInner);
     }
 
@@ -1931,19 +1910,6 @@ public class vUzip : Command
     List<Curve> endCurves,
     PartSpec spec)
   {
-    var logPfx = $"[MakePart p{partIndex}/{spec.Name}]";
-    vToolsPlugIn.TryLog($"{logPfx} START endCurves={endCurves.Count} preselected={preselectedItems.Count} insideSign={insideSign}");
-    for (var ei = 0; ei < endCurves.Count; ei++)
-    {
-      var ec = endCurves[ei];
-      vToolsPlugIn.TryLog($"{logPfx}   endCurve[{ei}] len={ec.GetLength():F4} start={ec.PointAtStart:F4} end={ec.PointAtEnd:F4}");
-    }
-    for (var si = 0; si < preselectedItems.Count; si++)
-    {
-      var item = preselectedItems[si];
-      vToolsPlugIn.TryLog($"{logPfx}   preselected[{si}] layer={item.LayerName} len={item.Curve.GetLength():F4} hasId={item.ObjectId.HasValue} touching={item.ObjectId.HasValue && touchingIds.Contains(item.ObjectId!.Value)}");
-    }
-
     var centerMid = CurveMidpoint(centerCurve);
     var partObjects = new List<Guid>();
 
@@ -1969,13 +1935,6 @@ public class vUzip : Command
         : end;
       addedEndCurves.Add(widenedEnd);
     }
-    vToolsPlugIn.TryLog($"{logPfx} dedup={deduplicatedEndCurves.Count} maxAbsOffset={maxAbsOffset:F4}");
-    for (var wi = 0; wi < addedEndCurves.Count; wi++)
-    {
-      var wc = addedEndCurves[wi];
-      vToolsPlugIn.TryLog($"{logPfx}   widenedCap[{wi}] len={wc.GetLength():F4} start={wc.PointAtStart:F4} end={wc.PointAtEnd:F4}");
-    }
-
     var centerLayer = string.IsNullOrWhiteSpace(spec.CenterLayer) ? centerItem.LayerName : spec.CenterLayer!;
     Curve centerForPart;
     if (spec.CenterEndMode == "extend_trim")
@@ -2014,8 +1973,6 @@ public class vUzip : Command
     offsets.TryGetValue(spec.BandInsideName, out var insideBoundary);
     offsets.TryGetValue(spec.BandOutsideName, out var outsideBoundary);
 
-    vToolsPlugIn.TryLog($"{logPfx} bandInside='{spec.BandInsideName}'({(insideBoundary != null ? $"len={insideBoundary.GetLength():F4}" : "NULL")}) bandOutside='{spec.BandOutsideName}'({(outsideBoundary != null ? $"len={outsideBoundary.GetLength():F4}" : "NULL")})");
-
     if (insideBoundary != null && outsideBoundary != null)
     {
       foreach (var item in selected)
@@ -2025,9 +1982,7 @@ public class vUzip : Command
           continue;
 
         var useEndpointSideKeep = !item.ObjectId.HasValue || !touchingIds.Contains(item.ObjectId.Value);
-        var innerLogKey = $"{logPfx} [{item.LayerName} len={item.Curve.GetLength():F4}]";
-        var pieces = SplitAndFilterForBand(doc, source, insideBoundary, outsideBoundary, centerCurve, useEndpointSideKeep, innerLogKey);
-        vToolsPlugIn.TryLog($"{logPfx}   selected layer={item.LayerName} len={item.Curve.GetLength():F4} useEPKeep={useEndpointSideKeep} → pieces={pieces.Count}");
+        var pieces = SplitAndFilterForBand(doc, source, insideBoundary, outsideBoundary, centerCurve, useEndpointSideKeep);
         if (pieces.Count == 0)
           continue;
 
@@ -2063,7 +2018,7 @@ public class vUzip : Command
     for (var ci = 0; ci < addedEndCurves.Count; ci++)
     {
       var widenedCap = addedEndCurves[ci];
-      var capPieces = TrimCapToBandBoundaries(doc, widenedCap, insideBoundary, outsideBoundary, logPfx, ci);
+      var capPieces = TrimCapToBandBoundaries(doc, widenedCap, insideBoundary, outsideBoundary);
       foreach (var capPiece in capPieces)
       {
         var capId = AddCurve(doc, capPiece, LayerCut);
@@ -2561,14 +2516,11 @@ public class vUzip : Command
   /// This removes the inner section (between the inner rails) from the cap.
   /// Falls back to a single piece when only one boundary provides params.
   /// </summary>
-  private static List<Curve> TrimCapToBandBoundaries(RhinoDoc doc, Curve cap, Curve? innerBoundary, Curve? outerBoundary, string logPfx, int capIndex)
+  private static List<Curve> TrimCapToBandBoundaries(RhinoDoc doc, Curve cap, Curve? innerBoundary, Curve? outerBoundary)
   {
     var tol = doc.ModelAbsoluteTolerance;
     var innerParams = innerBoundary != null ? UniqueParams(IntersectionParams(doc, cap, innerBoundary), tol) : new List<double>();
     var outerParams = outerBoundary != null ? UniqueParams(IntersectionParams(doc, cap, outerBoundary), tol) : new List<double>();
-    vToolsPlugIn.TryLog($"{logPfx}   cap[{capIndex}] len={cap.GetLength():F4} start={cap.PointAtStart:F4} end={cap.PointAtEnd:F4}");
-    vToolsPlugIn.TryLog($"{logPfx}     innerBoundary={(innerBoundary != null ? $"len={innerBoundary.GetLength():F4} params=[{string.Join(",", innerParams.Select(p => $"{p:F6}"))}]" : "NULL")}");
-    vToolsPlugIn.TryLog($"{logPfx}     outerBoundary={(outerBoundary != null ? $"len={outerBoundary.GetLength():F4} params=[{string.Join(",", outerParams.Select(p => $"{p:F6}"))}]" : "NULL")}");
 
     // Two pieces per cap: [outer_lo, inner_lo] and [inner_hi, outer_hi].
     // Requires at least 2 inner params AND 2 outer params.
@@ -2578,13 +2530,11 @@ public class vUzip : Command
       var outerHi = outerParams.Max();
       var innerLo = innerParams.Min();
       var innerHi = innerParams.Max();
-      vToolsPlugIn.TryLog($"{logPfx}     → two pieces: [{outerLo:F6},{innerLo:F6}] [{innerHi:F6},{outerHi:F6}] domain={cap.Domain.T0:F6}..{cap.Domain.T1:F6}");
       var result = new List<Curve>();
       var left = cap.Trim(new Interval(outerLo, innerLo));
       if (left != null && left.GetLength() > tol) result.Add(left);
       var right = cap.Trim(new Interval(innerHi, outerHi));
       if (right != null && right.GetLength() > tol) result.Add(right);
-      vToolsPlugIn.TryLog($"{logPfx}     → pieces={result.Count} lens=[{string.Join(",", result.Select(c => $"{c.GetLength():F4}"))}]");
       if (result.Count > 0) return result;
     }
 
@@ -2592,17 +2542,11 @@ public class vUzip : Command
     var allParams = new List<double>(innerParams);
     allParams.AddRange(outerParams);
     var ps = UniqueParams(allParams, tol);
-    vToolsPlugIn.TryLog($"{logPfx}     combined uniqueParams={ps.Count} [{string.Join(",", ps.Select(p => $"{p:F6}"))}]");
     if (ps.Count < 2)
-    {
-      vToolsPlugIn.TryLog($"{logPfx}     → <2 params, returning cap unchanged");
       return new List<Curve> { cap.DuplicateCurve() };
-    }
     var lo = ps.Min();
     var hi = ps.Max();
-    vToolsPlugIn.TryLog($"{logPfx}     → fallback trim [{lo:F6}, {hi:F6}] domain={cap.Domain.T0:F6}..{cap.Domain.T1:F6}");
     var trimmed = cap.Trim(new Interval(lo, hi));
-    vToolsPlugIn.TryLog($"{logPfx}     → trimmed len={(trimmed != null ? $"{trimmed.GetLength():F4}" : "NULL")}");
     return new List<Curve> { trimmed ?? cap.DuplicateCurve() };
   }
 }
