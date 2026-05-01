@@ -2339,6 +2339,7 @@ public class vUzip : Command
           var newLabel = label;
           RhinoGet.GetString("Label", true, ref newLabel);
           conduit.DrawEnabled = false;
+          doc.Views.Redraw();  // clear the conduit-drawn preview immediately
           var trimmedLabel = (newLabel ?? DefaultLabel).Trim();
           if (trimmedLabel != label)
           {
