@@ -2199,7 +2199,6 @@ public class vUzip : Command
     private readonly List<(GeometryBase Geom, System.Drawing.Color Color)> _items;
     public Point3d BasePoint;
     public Point3d CurrentPoint;
-    public bool DrawEnabled;  // only draw during option sub-prompts; DynamicDraw handles normal tracking
 
     public PlacementPreviewConduit(
       IEnumerable<(GeometryBase Geom, System.Drawing.Color Color)> items,
@@ -2212,8 +2211,6 @@ public class vUzip : Command
 
     protected override void PostDrawObjects(Rhino.Display.DrawEventArgs e)
     {
-      if (!DrawEnabled)
-        return;
       var move = CurrentPoint - BasePoint;
       var xform = Transform.Translation(move);
       foreach (var (geom, color) in _items)
@@ -2292,7 +2289,7 @@ public class vUzip : Command
       doc.Objects.Hide(id, true);
 
     var conduit = new PlacementPreviewConduit(previewItems, basePoint);
-    conduit.Enabled = true;  // conduit is enabled but DrawEnabled=false; only draws during option entry
+    conduit.Enabled = true;
     doc.Views.Redraw();
 
     var gp = new GetPoint();
@@ -2300,27 +2297,9 @@ public class vUzip : Command
     var labelOptionIndex = gp.AddOption("Label", label);
     var tailOpt = new OptionDouble(tail, 0.0, 1e9);
     gp.AddOptionDouble("Tail", ref tailOpt);
+    // DynamicDraw: only update CurrentPoint for conduit tracking — conduit does the actual drawing.
     EventHandler<GetPointDrawEventArgs> handler = (_, e) =>
-    {
       conduit.CurrentPoint = e.CurrentPoint;
-      // DynamicDraw fires on every mouse move — sole drawing path during normal tracking.
-      var moveVec = e.CurrentPoint - basePoint;
-      var xform = Transform.Translation(moveVec);
-      foreach (var (geom, color) in previewItems)
-      {
-        var draw = geom.Duplicate();
-        if (draw == null) continue;
-        draw.Transform(xform);
-        switch (draw)
-        {
-          case Curve c:       e.Display.DrawCurve(c, color, 1); break;
-          case Brep b:        e.Display.DrawBrepWires(b, color, 1); break;
-          case Mesh m:        e.Display.DrawMeshWires(m, color); break;
-          case TextEntity te: e.Display.DrawAnnotation(te, color); break;
-          case Point p:       e.Display.DrawPoint(p.Location, Rhino.Display.PointStyle.Simple, 2, color); break;
-        }
-      }
-    };
     gp.DynamicDraw += handler;
 
     while (true)
@@ -2333,18 +2312,14 @@ public class vUzip : Command
         var opt = gp.Option();
         if (opt != null && opt.Index == labelOptionIndex)
         {
-          // Enable conduit to hold preview during GetString sub-prompt.
-          conduit.DrawEnabled = true;
-          doc.Views.Redraw();
           var newLabel = label;
           RhinoGet.GetString("Label", true, ref newLabel);
-          conduit.DrawEnabled = false;
-          doc.Views.Redraw();  // clear the conduit-drawn preview immediately
           var trimmedLabel = (newLabel ?? DefaultLabel).Trim();
           if (trimmedLabel != label)
           {
             gp.DynamicDraw -= handler;
             conduit.Enabled = false;
+            doc.Views.Redraw();
             return (true, trimmedLabel, newTail);
           }
           // Label unchanged — refresh option display.
