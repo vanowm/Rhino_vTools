@@ -202,14 +202,21 @@ public class vUzip : Command
     var touching = CollectPreselected(doc, selected.CenterId, centerCurve, preselected, requireTouch: true);
     var allPreselected = CollectPreselected(doc, selected.CenterId, centerCurve, preselected, requireTouch: false);
 
+    // Save originals so a tail change during placement can re-derive endCurves correctly.
+    var originalTouching = touching;
+    var originalAllPreselected = allPreselected;
+
     var plane = GetCurvePlane(centerCurve);
     var insideSign = SolveInsideSign(doc, centerCurve, plane);
 
-    var (endCurves, endParentIds) = BuildEndCurves(doc, touching, centerCurve, plane, selected.Tail);
-    if (Math.Abs(selected.Tail) <= RhinoMath.ZeroTolerance && endParentIds.Count > 0)
+    var currentLabel = selected.Label;
+    var currentTail = selected.Tail;
+
+    var (endCurves, endParentIds) = BuildEndCurves(doc, originalTouching, centerCurve, plane, currentTail);
+    if (Math.Abs(currentTail) <= RhinoMath.ZeroTolerance && endParentIds.Count > 0)
     {
-      allPreselected = allPreselected.Where(i => !i.ObjectId.HasValue || !endParentIds.Contains(i.ObjectId.Value)).ToList();
-      touching = touching.Where(i => !i.ObjectId.HasValue || !endParentIds.Contains(i.ObjectId.Value)).ToList();
+      allPreselected = originalAllPreselected.Where(i => !i.ObjectId.HasValue || !endParentIds.Contains(i.ObjectId.Value)).ToList();
+      touching = originalTouching.Where(i => !i.ObjectId.HasValue || !endParentIds.Contains(i.ObjectId.Value)).ToList();
     }
 
     var touchingIds = touching.Where(t => t.ObjectId.HasValue).Select(t => t.ObjectId!.Value).ToHashSet();
@@ -222,51 +229,46 @@ public class vUzip : Command
     }
     var stamp = DateTime.Now.ToString("yyMMddHHmmss", CultureInfo.InvariantCulture);
 
-    var watch = System.Diagnostics.Stopwatch.StartNew();
-
     var allPartObjectIds = new List<List<Guid>>();
     var createdGroups = new List<string>();
 
-    doc.Views.RedrawEnabled = false;
-    try
-    {
-      for (var i = 0; i < specs.Count; i++)
-      {
-        var (partIds, groupName) = MakePart(
-          doc,
-          i + 1,
-          stamp,
-          selected.Label,
-          centerItem,
-          allPreselected,
-          touchingIds,
-          centerCurve,
-          plane,
-          insideSign,
-          endCurves,
-          specs[i]);
-
-        allPartObjectIds.Add(partIds);
-        if (!string.IsNullOrWhiteSpace(groupName))
-          createdGroups.Add(groupName);
-      }
-
-      StackPartsDown(doc, allPartObjectIds, PartGap);
-    }
-    finally
-    {
-      doc.Views.RedrawEnabled = true;
-      doc.Views.Redraw();
-    }
-
+    var watch = System.Diagnostics.Stopwatch.StartNew();
+    BuildAllParts(doc, stamp, currentLabel, centerItem, allPreselected, touchingIds, centerCurve, plane, insideSign, endCurves, specs, allPartObjectIds, createdGroups);
     watch.Stop();
     RhinoApp.WriteLine($"vUzip built in {watch.Elapsed.TotalSeconds:F3}s");
 
-    var anchorGroup = createdGroups.Count > 0 ? createdGroups[0] : null;
-    PlaceGroupsWithPickOrDelete(doc, createdGroups, anchorGroup);
+    while (true)
+    {
+      var anchorGroup = createdGroups.Count > 0 ? createdGroups[0] : null;
+      var (needsRebuild, newLabel, newTail) = PlaceGroupsWithPickOrDelete(doc, createdGroups, anchorGroup, currentLabel, currentTail);
+      if (!needsRebuild)
+        break;
 
-    uZipConfig.Label = (selected.Label ?? DefaultLabel).Trim();
-    uZipConfig.Tail = Math.Max(0.0, selected.Tail);
+      // Delete previous parts and rebuild with updated label/tail.
+      DeleteCreatedGroupsAndMembers(doc, createdGroups);
+      allPartObjectIds.Clear();
+      createdGroups.Clear();
+      currentLabel = newLabel;
+      currentTail = newTail;
+
+      var (rebuildEndCurves, rebuildEndParentIds) = BuildEndCurves(doc, originalTouching, centerCurve, plane, currentTail);
+      var rebuildAllPreselected = originalAllPreselected;
+      var rebuildTouching = originalTouching;
+      if (Math.Abs(currentTail) <= RhinoMath.ZeroTolerance && rebuildEndParentIds.Count > 0)
+      {
+        rebuildAllPreselected = originalAllPreselected.Where(i => !i.ObjectId.HasValue || !rebuildEndParentIds.Contains(i.ObjectId.Value)).ToList();
+        rebuildTouching = originalTouching.Where(i => !i.ObjectId.HasValue || !rebuildEndParentIds.Contains(i.ObjectId.Value)).ToList();
+      }
+      var rebuildTouchingIds = rebuildTouching.Where(t => t.ObjectId.HasValue).Select(t => t.ObjectId!.Value).ToHashSet();
+
+      watch.Restart();
+      BuildAllParts(doc, stamp, currentLabel, centerItem, rebuildAllPreselected, rebuildTouchingIds, centerCurve, plane, insideSign, rebuildEndCurves, specs, allPartObjectIds, createdGroups);
+      watch.Stop();
+      RhinoApp.WriteLine($"vUzip rebuilt in {watch.Elapsed.TotalSeconds:F3}s");
+    }
+
+    uZipConfig.Label = (currentLabel ?? DefaultLabel).Trim();
+    uZipConfig.Tail = Math.Max(0.0, currentTail);
     uZipConfig.Layers = layerRuntime.ToConfig();
     uZipConfig.Parts = specs;
 
@@ -1896,6 +1898,54 @@ public class vUzip : Command
     return finalName;
   }
 
+  private static void BuildAllParts(
+    RhinoDoc doc,
+    string stamp,
+    string label,
+    CurveItem centerItem,
+    List<CurveItem> allPreselected,
+    HashSet<Guid> touchingIds,
+    Curve centerCurve,
+    Plane plane,
+    int insideSign,
+    List<Curve> endCurves,
+    List<PartSpec> specs,
+    List<List<Guid>> allPartObjectIds,
+    List<string> createdGroups)
+  {
+    doc.Views.RedrawEnabled = false;
+    try
+    {
+      for (var i = 0; i < specs.Count; i++)
+      {
+        var (partIds, groupName) = MakePart(
+          doc,
+          i + 1,
+          stamp,
+          label,
+          centerItem,
+          allPreselected,
+          touchingIds,
+          centerCurve,
+          plane,
+          insideSign,
+          endCurves,
+          specs[i]);
+
+        allPartObjectIds.Add(partIds);
+        if (!string.IsNullOrWhiteSpace(groupName))
+          createdGroups.Add(groupName);
+      }
+
+      StackPartsDown(doc, allPartObjectIds, PartGap);
+    }
+    finally
+    {
+      doc.Views.RedrawEnabled = true;
+      doc.Views.Redraw();
+    }
+  }
+
   private static (List<Guid> PartObjects, string? GroupName) MakePart(
     RhinoDoc doc,
     int partIndex,
@@ -2144,7 +2194,7 @@ public class vUzip : Command
     }
   }
 
-  private static void PlaceGroupsWithPickOrDelete(RhinoDoc doc, List<string> groupNames, string? anchorGroupName)
+  private static (bool NeedsRebuild, string Label, double Tail) PlaceGroupsWithPickOrDelete(RhinoDoc doc, List<string> groupNames, string? anchorGroupName, string label, double tail)
   {
     var selectedIds = new HashSet<Guid>();
     foreach (var name in groupNames)
@@ -2161,7 +2211,7 @@ public class vUzip : Command
     }
 
     if (selectedIds.Count == 0)
-      return;
+      return (false, label, tail);
 
     var bbox = BoundingBox.Empty;
     foreach (var id in selectedIds)
@@ -2176,7 +2226,7 @@ public class vUzip : Command
     }
 
     if (!bbox.IsValid)
-      return;
+      return (false, label, tail);
 
     var basePoint = PartLeftEndOuterAnchor(doc, anchorGroupName)
       ?? new Point3d(bbox.Min.X, bbox.Max.Y, 0.5 * (bbox.Min.Z + bbox.Max.Z));
@@ -2204,6 +2254,9 @@ public class vUzip : Command
 
     var gp = new GetPoint();
     gp.SetCommandPrompt("Pick placement point for created parts (Esc to cancel and delete)");
+    var labelOptionIndex = gp.AddOption("Label", label);
+    var tailOpt = new OptionDouble(tail, 0.0, 1e9);
+    gp.AddOptionDouble("Tail", ref tailOpt);
     EventHandler<GetPointDrawEventArgs> handler = (_, e) =>
     {
       var moveVec = e.CurrentPoint - basePoint;
@@ -2238,39 +2291,70 @@ public class vUzip : Command
     };
     gp.DynamicDraw += handler;
 
-    var result = gp.Get();
-    gp.DynamicDraw -= handler;
-
-    if (result != GetResult.Point)
+    while (true)
     {
-      DeleteCreatedGroupsAndMembers(doc, groupNames);
-      doc.Views.Redraw();
-      return;
-    }
+      var result = gp.Get();
+      var newTail = Math.Max(0.0, tailOpt.CurrentValue);
 
-    var target = gp.Point();
-    var move = target - basePoint;
-    if (move.Length > doc.ModelAbsoluteTolerance)
-    {
-      var xform = Transform.Translation(move);
-      foreach (var id in selectedIds.ToList())
+      if (result == GetResult.Option)
       {
-        var newId = doc.Objects.Transform(id, xform, true);
-        if (newId != Guid.Empty)
+        var opt = gp.Option();
+        if (opt != null && opt.Index == labelOptionIndex)
         {
-          selectedIds.Remove(id);
-          selectedIds.Add(newId);
+          gp.DynamicDraw -= handler;
+          var newLabel = label;
+          RhinoGet.GetString("Label", true, ref newLabel);
+          label = (newLabel ?? DefaultLabel).Trim();
+          gp.DynamicDraw += handler;
+          // Rebuild option indexes with new label current value.
+          gp.ClearCommandOptions();
+          labelOptionIndex = gp.AddOption("Label", label);
+          tailOpt = new OptionDouble(newTail, 0.0, 1e9);
+          gp.AddOptionDouble("Tail", ref tailOpt);
+        }
+        else if (newTail != tail)
+        {
+          tail = newTail;
+          gp.DynamicDraw -= handler;
+          return (true, label, tail);
+        }
+        continue;
+      }
+
+      gp.DynamicDraw -= handler;
+
+      if (result != GetResult.Point)
+      {
+        DeleteCreatedGroupsAndMembers(doc, groupNames);
+        doc.Views.Redraw();
+        return (false, label, newTail);
+      }
+
+      var target = gp.Point();
+      var move = target - basePoint;
+      if (move.Length > doc.ModelAbsoluteTolerance)
+      {
+        var xform = Transform.Translation(move);
+        foreach (var id in selectedIds.ToList())
+        {
+          var newId = doc.Objects.Transform(id, xform, true);
+          if (newId != Guid.Empty)
+          {
+            selectedIds.Remove(id);
+            selectedIds.Add(newId);
+          }
         }
       }
+
+      foreach (var id in selectedIds)
+        doc.Objects.Show(id, true);
+
+      doc.Objects.UnselectAll();
+      foreach (var id in selectedIds)
+        doc.Objects.Select(id);
+      doc.Views.Redraw();
+      return (false, label, newTail);
     }
-
-    foreach (var id in selectedIds)
-      doc.Objects.Show(id, true);
-
-    doc.Objects.UnselectAll();
-    foreach (var id in selectedIds)
-      doc.Objects.Select(id);
-    doc.Views.Redraw();
   }
 
   private static void DeleteCreatedGroupsAndMembers(RhinoDoc doc, IEnumerable<string> groupNames)
