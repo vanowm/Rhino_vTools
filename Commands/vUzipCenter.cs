@@ -34,7 +34,7 @@ public sealed class vUzipCenter : Command
 
   // ── Settings ──────────────────────────────────────────────────────────────
 
-  private sealed class Settings
+  private sealed class UzipCenterSettings
   {
     public double Left   { get; set; } = DefaultLeft;
     public double Right  { get; set; } = DefaultRight;
@@ -42,10 +42,10 @@ public sealed class vUzipCenter : Command
     public double Radius { get; set; } = DefaultRadius;
   }
 
-  private static Settings LoadSettings() =>
-    vToolsOptionStore.Read<Settings>(SettingsSection, section =>
+  private static UzipCenterSettings LoadSettings() =>
+    vToolsOptionStore.Read<UzipCenterSettings>(SettingsSection, section =>
     {
-      var s = new Settings();
+      var s = new UzipCenterSettings();
       if (vToolsOptionStore.TryGetDouble(section, "left",   out var l))   s.Left   = l;
       if (vToolsOptionStore.TryGetDouble(section, "right",  out var r))   s.Right  = r;
       if (vToolsOptionStore.TryGetDouble(section, "bottom", out var b))   s.Bottom = b;
@@ -53,7 +53,7 @@ public sealed class vUzipCenter : Command
       return s;
     });
 
-  private static void SaveSettings(Settings s) =>
+  private static void SaveSettings(UzipCenterSettings s) =>
     vToolsOptionStore.Update(SettingsSection, section =>
     {
       section["left"]   = s.Left;
@@ -715,7 +715,7 @@ public sealed class vUzipCenter : Command
     if (displayCurve != null)
       doc.Objects.AddCurve(displayCurve);
 
-    SaveSettings(new Settings { Left = offL, Right = offR, Bottom = offB, Radius = radius });
+    SaveSettings(new UzipCenterSettings { Left = offL, Right = offR, Bottom = offB, Radius = radius });
     doc.Views.Redraw();
     return Result.Success;
   }
