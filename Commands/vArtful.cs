@@ -163,7 +163,7 @@ public sealed class vArtful : Command
             foreach (var tv in template.Views)
             {
                 var name = tv?.ActiveViewport?.Name;
-                if (name != null) byName[name] = tv;
+                if (tv != null && name != null) byName[name] = tv;
             }
 
             Rhino.Display.RhinoView? fallback = null;
