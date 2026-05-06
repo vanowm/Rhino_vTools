@@ -8,10 +8,10 @@ using System.Reflection;
 
 namespace vTools;
 
-[System.Runtime.InteropServices.Guid("2607512e-a1fc-4cf9-9329-a293431437a0")]
 /// <summary>
 /// Rhino plug-in entry point for the vTools command set.
 /// </summary>
+[System.Runtime.InteropServices.Guid("2607512e-a1fc-4cf9-9329-a293431437a0")]
 public class vToolsPlugIn : PlugIn
 {
   /// <summary>
