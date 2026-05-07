@@ -178,27 +178,31 @@ public sealed class vFitBox : Command
 
   private sealed class SelectionPreviewConduit : DisplayConduit
   {
-    public BoundingBox PreviewBBox = BoundingBox.Empty;
+    public Box PreviewBox = Box.Unset;
 
     protected override void DrawOverlay(DrawEventArgs e)
     {
-      if (!PreviewBBox.IsValid) return;
-      var box = new Box(Plane.WorldXY, new[] { PreviewBBox.Min, PreviewBBox.Max });
-      if (box.IsValid)
-        e.Display.DrawBox(box, System.Drawing.Color.Gray, 1);
+      if (!PreviewBox.IsValid) return;
+      e.Display.DrawBox(PreviewBox, System.Drawing.Color.Gray, 1);
     }
   }
 
-  private static BoundingBox ComputeSelectionBBox(RhinoDoc doc)
+  private static void UpdatePreviewBox(
+    RhinoDoc doc, SelectionPreviewConduit conduit, string fitMode)
   {
-    var bbox = BoundingBox.Empty;
-    foreach (var obj in doc.Objects.GetSelectedObjects(false, false))
-    {
-      if (obj?.Geometry == null) continue;
-      var b = obj.Geometry.GetBoundingBox(false);
-      if (b.IsValid) bbox.Union(b);
-    }
-    return bbox;
+    var ids = CollectIdsFromDocSelection(doc);
+    if (ids.Count == 0) { conduit.PreviewBox = Box.Unset; return; }
+    var geoms = CollectGeometries(doc, ids);
+    if (geoms.Count == 0) { conduit.PreviewBox = Box.Unset; return; }
+    var basePlane = ActiveBasePlane(doc);
+    // Use a coarse step for a fast preview; result is the same fitted box, just rough.
+    var fit = FindBestFit(doc, geoms, basePlane, 5.0, fitMode);
+    if (fit == null) { conduit.PreviewBox = Box.Unset; return; }
+    conduit.PreviewBox = new Box(
+      fit.Plane,
+      new Interval(fit.MinX, fit.MaxX),
+      new Interval(fit.MinY, fit.MaxY),
+      new Interval(fit.MinZ, fit.MaxZ));
   }
 
   /// <summary>
@@ -245,7 +249,8 @@ public sealed class vFitBox : Command
       go.AddOptionToggle("Fit", ref fitToggle);
 
       var result = go.GetMultiple(1, 0);
-      conduit.PreviewBBox = ComputeSelectionBBox(doc);
+      var currentFitMode = fitToggle.CurrentValue ? "area" : "height";
+      UpdatePreviewBox(doc, conduit, currentFitMode);
       doc.Views.Redraw();
       if (go.CommandResult() != Result.Success)
       {
