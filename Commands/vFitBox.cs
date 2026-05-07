@@ -523,26 +523,21 @@ public sealed class vFitBox : Command
   }
 
   /// <summary>
-  /// Builds a final-rotation source plane that keeps the longest in-plane side horizontal
-  /// and prefers the equivalent orientation that avoids a 180-degree flip.
+  /// Builds a final-rotation source plane that maps the fit plane directly to the
+  /// target (base) plane, optionally flipping 180° to avoid unnecessary reversals.
+  /// No axis swap is done — swapping Width/Depth breaks idempotency (a second run
+  /// after rotation would find swapped dimensions).
   /// </summary>
   private static Plane BuildRotationSourcePlane(FitCandidate fit, Plane targetPlane, double tolerance)
   {
-    if (!fit.Plane.IsValid)
+    if (!fit.Plane.IsValid || !targetPlane.IsValid)
+      return fit.Plane.IsValid ? fit.Plane : Plane.WorldXY;
+
+    var primary = new Plane(fit.Plane.Origin, fit.Plane.XAxis, fit.Plane.YAxis);
+    if (!primary.IsValid)
       return fit.Plane;
 
-    var useDepthAsHorizontal = fit.Depth > fit.Width + Math.Max(0.0, tolerance);
-    var xAxis = useDepthAsHorizontal ? fit.Plane.YAxis : fit.Plane.XAxis;
-    var yAxis = useDepthAsHorizontal ? -fit.Plane.XAxis : fit.Plane.YAxis;
-
-    if (xAxis.IsTiny() || yAxis.IsTiny() || !xAxis.Unitize() || !yAxis.Unitize())
-      return fit.Plane;
-
-    var primary = new Plane(fit.Plane.Origin, xAxis, yAxis);
-    if (!primary.IsValid || !targetPlane.IsValid)
-      return primary.IsValid ? primary : fit.Plane;
-
-    var flipped = new Plane(fit.Plane.Origin, -xAxis, -yAxis);
+    var flipped = new Plane(fit.Plane.Origin, -fit.Plane.XAxis, -fit.Plane.YAxis);
     if (!flipped.IsValid)
       return primary;
 
