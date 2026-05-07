@@ -42,7 +42,9 @@ public class vToolsPlugIn : PlugIn
   /// </summary>
   protected override LoadReturnCode OnLoad(ref string errorMessage)
   {
-    var version = GetType().Assembly.GetName().Version?.ToString() ?? "unknown";
+    var version = GetType().Assembly
+      .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+      ?.InformationalVersion ?? GetType().Assembly.GetName().Version?.ToString() ?? "unknown";
     var commandNames = CollectRegisteredCommandNames();
     TryLog($"OnLoad OK. Version={version}. Assembly={GetType().Assembly.Location}");
     RhinoApp.WriteLine($"vTools v{version} loaded. Commands registered ({commandNames.Count}): {string.Join(", ", commandNames)}");

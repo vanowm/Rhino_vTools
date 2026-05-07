@@ -256,11 +256,11 @@ public sealed class vChamfer : Command
 
     protected override void DrawOverlay(DrawEventArgs e)
     {
-      // Extensions: thin gray, drawn before cut-off so cut-off overlaps
+      // Extensions: orange
       if (Ext1 is { } ext1)
-        e.Display.DrawLine(ext1, Color.FromArgb(160, 160, 160), 1);
+        e.Display.DrawLine(ext1, Color.FromArgb(255, 165, 0), 2);
       if (Ext2 is { } ext2)
-        e.Display.DrawLine(ext2, Color.FromArgb(160, 160, 160), 1);
+        e.Display.DrawLine(ext2, Color.FromArgb(255, 165, 0), 2);
 
       // Corner pieces removed by trim — red
       if (ShowTrim)
@@ -285,18 +285,21 @@ public sealed class vChamfer : Command
   /// </summary>
   private static void UpdateConduit(
     ChamferPreviewConduit conduit,
-    Curve crv1, bool c1AtStart,
-    Curve crv2, bool c2AtStart,
-    Point3d corner,
+    Curve crv1, Curve work1, bool c1AtStart,
+    Curve crv2, Curve work2, bool c2AtStart,
     double tA, double tB, Point3d ptA, Point3d ptB)
   {
-    // Extension lines (gray): line from original corner endpoint to virtual corner,
-    // visible whenever the curves don't already reach the virtual corner.
-    var ep1 = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
-    conduit.Ext1 = ep1.DistanceTo(corner) > 1e-6 ? new Line(ep1, corner) : (Line?)null;
+    // Extension lines: original endpoint → actual extended endpoint on working copy.
+    // Only non-null when ExtendToCorner actually moved the endpoint.
+    var crv1End  = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
+    var work1End = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
+    conduit.Ext1 = crv1End.DistanceTo(work1End) > 1e-6
+      ? new Line(crv1End, work1End) : (Line?)null;
 
-    var ep2 = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
-    conduit.Ext2 = ep2.DistanceTo(corner) > 1e-6 ? new Line(ep2, corner) : (Line?)null;
+    var crv2End  = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
+    var work2End = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
+    conduit.Ext2 = crv2End.DistanceTo(work2End) > 1e-6
+      ? new Line(crv2End, work2End) : (Line?)null;
 
     // Cut-off curve pieces (red when Trim=Yes): original curve corner end → chamfer point.
     // Use crv1/crv2 (not the extended work copies) so the extension segment is not
@@ -350,7 +353,7 @@ public sealed class vChamfer : Command
     }
 
     var conduit = new ChamferPreviewConduit();
-    UpdateConduit(conduit, crv1, c1AtStart, crv2, c2AtStart, corner, tA, tB, ptA, ptB);
+    UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
     conduit.Enabled = true;
     doc.Views.Redraw();
 
@@ -387,7 +390,7 @@ public sealed class vChamfer : Command
 
           if (ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length, cplane,
                 out ptA, out ptB, out tA, out tB))
-            UpdateConduit(conduit, crv1, c1AtStart, crv2, c2AtStart, corner, tA, tB, ptA, ptB);
+            UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
           else
           {
             conduit.ShowTrim = _trim;   // still reflect trim toggle even when invalid
