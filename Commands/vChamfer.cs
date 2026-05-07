@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Globalization;
 using Rhino;
@@ -242,15 +242,73 @@ public sealed class vChamfer : Command
 
   private sealed class ChamferPreviewConduit : DisplayConduit
   {
-    public Line? ChamferLine { get; set; }
+    public Line?  ChamferLine { get; set; }
+    /// <summary>Straight extension added to work1 to reach virtual corner.</summary>
+    public Line?  Ext1        { get; set; }
+    /// <summary>Straight extension added to work2 to reach virtual corner.</summary>
+    public Line?  Ext2        { get; set; }
+    /// <summary>Corner piece trimmed from work1 (corner end → chamfer point).</summary>
+    public Curve? CutOff1     { get; set; }
+    /// <summary>Corner piece trimmed from work2 (corner end → chamfer point).</summary>
+    public Curve? CutOff2     { get; set; }
+    /// <summary>Whether to draw cut-off geometry in red (Trim=Yes).</summary>
+    public bool   ShowTrim    { get; set; }
 
     protected override void DrawOverlay(DrawEventArgs e)
     {
+      // Extensions: thin gray, drawn before cut-off so cut-off overlaps
+      if (Ext1 is { } ext1)
+        e.Display.DrawLine(ext1, Color.FromArgb(160, 160, 160), 1);
+      if (Ext2 is { } ext2)
+        e.Display.DrawLine(ext2, Color.FromArgb(160, 160, 160), 1);
+
+      // Corner pieces removed by trim — red
+      if (ShowTrim)
+      {
+        if (CutOff1 != null)
+          e.Display.DrawCurve(CutOff1, Color.Red, 2);
+        if (CutOff2 != null)
+          e.Display.DrawCurve(CutOff2, Color.Red, 2);
+      }
+
+      // Chamfer line — cyan, drawn on top
       if (ChamferLine is { } line)
         e.Display.DrawLine(line, Color.Cyan, 2);
     }
   }
 
+
+  // -- Conduit update helper --------------------------------------------------
+
+  /// <summary>
+  /// Recomputes all conduit preview geometry from current state.
+  /// </summary>
+  private static void UpdateConduit(
+    ChamferPreviewConduit conduit,
+    Curve crv1, Curve work1, bool c1AtStart,
+    Curve crv2, Curve work2, bool c2AtStart,
+    double tA, double tB, Point3d ptA, Point3d ptB)
+  {
+    // Extension lines (gray): shown when a working copy was extended.
+    var ep1 = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
+    var wp1 = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
+    conduit.Ext1 = ep1.DistanceTo(wp1) > 1e-6 ? new Line(ep1, wp1) : (Line?)null;
+
+    var ep2 = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
+    var wp2 = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
+    conduit.Ext2 = ep2.DistanceTo(wp2) > 1e-6 ? new Line(ep2, wp2) : (Line?)null;
+
+    // Cut-off curve pieces (red when Trim=Yes): corner end to chamfer point.
+    conduit.CutOff1 = c1AtStart
+      ? work1.Trim(work1.Domain.Min, tA)
+      : work1.Trim(tA, work1.Domain.Max);
+    conduit.CutOff2 = c2AtStart
+      ? work2.Trim(work2.Domain.Min, tB)
+      : work2.Trim(tB, work2.Domain.Max);
+
+    conduit.ChamferLine = new Line(ptA, ptB);
+    conduit.ShowTrim    = _trim;
+  }
   // â”€â”€ Command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
@@ -284,7 +342,8 @@ public sealed class vChamfer : Command
       return Result.Failure;
     }
 
-    var conduit = new ChamferPreviewConduit { ChamferLine = new Line(ptA, ptB) };
+    var conduit = new ChamferPreviewConduit();
+    UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
     conduit.Enabled = true;
     doc.Views.Redraw();
 
@@ -321,9 +380,12 @@ public sealed class vChamfer : Command
 
           if (ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length, cplane,
                 out ptA, out ptB, out tA, out tB))
-            conduit.ChamferLine = new Line(ptA, ptB);
+            UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
           else
+          {
+            conduit.ShowTrim = _trim;   // still reflect trim toggle even when invalid
             RhinoApp.WriteLine("vChamfer: length too large for this corner.");
+          }
 
           doc.Views.Redraw();
         }
