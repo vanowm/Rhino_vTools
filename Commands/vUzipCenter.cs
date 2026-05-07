@@ -40,26 +40,44 @@ public sealed class vUzipCenter : Command
     public double Right  { get; set; } = DefaultRight;
     public double Bottom { get; set; } = DefaultBottom;
     public double Radius { get; set; } = DefaultRadius;
+    public bool   Glass       { get; set; } = false;
+    public double GlassOffset { get; set; } = 0.25;
+    public string GlassLayer  { get; set; } = "Glass";
+    public bool   Vis         { get; set; } = false;
+    public double VisOffset   { get; set; } = 0.75;
+    public string VisLayer    { get; set; } = "Vis-Line";
   }
 
   private static UzipCenterSettings LoadSettings() =>
     vToolsOptionStore.Read<UzipCenterSettings>(SettingsSection, section =>
     {
       var s = new UzipCenterSettings();
-      if (vToolsOptionStore.TryGetDouble(section, "left",   out var l))   s.Left   = l;
-      if (vToolsOptionStore.TryGetDouble(section, "right",  out var r))   s.Right  = r;
-      if (vToolsOptionStore.TryGetDouble(section, "bottom", out var b))   s.Bottom = b;
-      if (vToolsOptionStore.TryGetDouble(section, "radius", out var rad)) s.Radius = rad;
+      if (vToolsOptionStore.TryGetDouble(section, "left",        out var l))   s.Left        = l;
+      if (vToolsOptionStore.TryGetDouble(section, "right",       out var r))   s.Right       = r;
+      if (vToolsOptionStore.TryGetDouble(section, "bottom",      out var b))   s.Bottom      = b;
+      if (vToolsOptionStore.TryGetDouble(section, "radius",      out var rad)) s.Radius      = rad;
+      if (vToolsOptionStore.TryGetBool  (section, "glass",       out var g))   s.Glass       = g;
+      if (vToolsOptionStore.TryGetDouble(section, "glassOffset", out var go))  s.GlassOffset = go;
+      if (vToolsOptionStore.TryGetString(section, "glassLayer",  out var gl))  s.GlassLayer  = gl;
+      if (vToolsOptionStore.TryGetBool  (section, "vis",         out var v))   s.Vis         = v;
+      if (vToolsOptionStore.TryGetDouble(section, "visOffset",   out var vo))  s.VisOffset   = vo;
+      if (vToolsOptionStore.TryGetString(section, "visLayer",    out var vl))  s.VisLayer    = vl;
       return s;
     });
 
   private static void SaveSettings(UzipCenterSettings s) =>
     vToolsOptionStore.Update(SettingsSection, section =>
     {
-      section["left"]   = s.Left;
-      section["right"]  = s.Right;
-      section["bottom"] = s.Bottom;
-      section["radius"] = s.Radius;
+      section["left"]        = s.Left;
+      section["right"]       = s.Right;
+      section["bottom"]      = s.Bottom;
+      section["radius"]      = s.Radius;
+      section["glass"]       = s.Glass;
+      section["glassOffset"] = s.GlassOffset;
+      section["glassLayer"]  = s.GlassLayer;
+      section["vis"]         = s.Vis;
+      section["visOffset"]   = s.VisOffset;
+      section["visLayer"]    = s.VisLayer;
     });
 
   // ── Fractional formatting ─────────────────────────────────────────────────
@@ -223,6 +241,20 @@ public sealed class vUzipCenter : Command
   }
 
   // ── Offset ────────────────────────────────────────────────────────────────
+
+  /// <summary>Offsets a curve both sides; returns up to 2 results.</summary>
+  private static List<Curve> OffsetBothSides(Curve curve, double distance, Vector3d normal, double tol)
+  {
+    var results = new List<Curve>();
+    var origin = curve.PointAtStart; // arbitrary origin on the plane
+    foreach (var sign in new[] { 1.0, -1.0 })
+    {
+      var off = curve.Offset(origin, normal, sign * distance, tol, CurveOffsetCornerStyle.Sharp);
+      if (off != null)
+        results.AddRange(off);
+    }
+    return results;
+  }
 
   private static Curve? OffsetCurveInward(
     Curve curve, double distance, Point3d centerPt, Vector3d normal, double tol)
@@ -517,6 +549,8 @@ public sealed class vUzipCenter : Command
     double offR   = settings.Right;
     double offB   = settings.Bottom;
     double radius = settings.Radius;
+    bool   glass  = settings.Glass;
+    bool   vis    = settings.Vis;
 
     // Harvest preselected curves (first 3 = U arms+bottom; optional 4th = boundary).
     var presel = doc.Objects.GetSelectedObjects(false, false)
@@ -555,6 +589,10 @@ public sealed class vUzipCenter : Command
         go.AddOption("Right",  FmtOpt(offR));
         go.AddOption("Bottom", FmtOpt(offB));
         go.AddOption("Radius", FmtOpt(radius));
+        var glassToggle1 = new OptionToggle(glass, "No", "Yes");
+        var visToggle1   = new OptionToggle(vis,   "No", "Yes");
+        go.AddOptionToggle("Glass", ref glassToggle1);
+        go.AddOptionToggle("Vis",   ref visToggle1);
 
         var res = go.GetMultiple(need, need);
 
@@ -563,6 +601,8 @@ public sealed class vUzipCenter : Command
 
         if (res == GetResult.Option)
         {
+          glass = glassToggle1.CurrentValue;
+          vis   = visToggle1.CurrentValue;
           var name = go.Option()?.EnglishName ?? string.Empty;
           if (name == "Left")
           {
@@ -588,6 +628,7 @@ public sealed class vUzipCenter : Command
             if (v == null) return Result.Cancel;
             radius = v.Value;
           }
+          // Glass/Vis are toggles; already read above.
           continue;
         }
 
@@ -654,6 +695,10 @@ public sealed class vUzipCenter : Command
         gp.AddOption("Right",  FmtOpt(offR));
         gp.AddOption("Bottom", FmtOpt(offB));
         gp.AddOption("Radius", FmtOpt(radius));
+        var glassToggle2 = new OptionToggle(glass, "No", "Yes");
+        var visToggle2   = new OptionToggle(vis,   "No", "Yes");
+        gp.AddOptionToggle("Glass", ref glassToggle2);
+        gp.AddOptionToggle("Vis",   ref visToggle2);
 
         var res = gp.Get();
 
@@ -677,6 +722,8 @@ public sealed class vUzipCenter : Command
 
         if (res == GetResult.Option)
         {
+          glass = glassToggle2.CurrentValue;
+          vis   = visToggle2.CurrentValue;
           var name = gp.Option()?.EnglishName ?? string.Empty;
           if (name == "Left")
           {
@@ -715,7 +762,33 @@ public sealed class vUzipCenter : Command
     if (displayCurve != null)
       doc.Objects.AddCurve(displayCurve);
 
-    SaveSettings(new UzipCenterSettings { Left = offL, Right = offR, Bottom = offB, Radius = radius });
+    // Glass / Vis side offsets
+    if (displayCurve != null && (glass || vis))
+    {
+      var normal = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
+      double tol = doc.ModelAbsoluteTolerance;
+
+      void AddOffsets(double offsetDist, string layerName)
+      {
+        var curves = OffsetBothSides(displayCurve, offsetDist, normal, tol);
+        var attr   = new ObjectAttributes();
+        var layerIdx = doc.Layers.FindByFullPath(layerName, RhinoMath.UnsetIntIndex);
+        if (layerIdx >= 0)
+          attr.LayerIndex = layerIdx;
+        foreach (var c in curves)
+          doc.Objects.AddCurve(c, attr);
+      }
+
+      if (glass) AddOffsets(settings.GlassOffset, settings.GlassLayer);
+      if (vis)   AddOffsets(settings.VisOffset,   settings.VisLayer);
+    }
+
+    SaveSettings(new UzipCenterSettings
+    {
+      Left = offL, Right = offR, Bottom = offB, Radius = radius,
+      Glass = glass, GlassOffset = settings.GlassOffset, GlassLayer = settings.GlassLayer,
+      Vis   = vis,   VisOffset   = settings.VisOffset,   VisLayer   = settings.VisLayer,
+    });
     doc.Views.Redraw();
     return Result.Success;
   }
