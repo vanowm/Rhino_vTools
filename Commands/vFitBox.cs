@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Rhino;
@@ -44,6 +43,7 @@ public sealed class vFitBox : Command
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
+    vDebug.Enable(EnglishName);
     LoadPersistedOptions();
 
     if (!TryPickObjectsWithOptions(doc, out var objectIds, out var angleStepDeg, out var rotate, out var fitMode))
@@ -86,7 +86,7 @@ public sealed class vFitBox : Command
         $"fitPlane origin=({bestFit.Plane.Origin.X:0.###},{bestFit.Plane.Origin.Y:0.###},{bestFit.Plane.Origin.Z:0.###})",
         $"bounds  X=[{bestFit.MinX:0.###},{bestFit.MaxX:0.###}]  Y=[{bestFit.MinY:0.###},{bestFit.MaxY:0.###}]  Z=[{bestFit.MinZ:0.###},{bestFit.MaxZ:0.###}]",
       };
-      DbgLog(doc, lines);
+      vDebug.Log(EnglishName, lines);
     }
 
     var fitId = AddFitGeometry(doc, bestFit);
@@ -103,7 +103,7 @@ public sealed class vFitBox : Command
       var sourcePlane = BuildRotationSourcePlane(bestFit, basePlane, doc.ModelAbsoluteTolerance);
       var sx = sourcePlane.XAxis; var sy = sourcePlane.YAxis;
       var bx = basePlane.XAxis;   var by = basePlane.YAxis;
-      DbgLog(doc, new[]
+      vDebug.Log(EnglishName, new[]
       {
         $"srcPlane  X=({sx.X:0.####},{sx.Y:0.####},{sx.Z:0.####})  Y=({sy.X:0.####},{sy.Y:0.####},{sy.Z:0.####})",
         $"basePlane X=({bx.X:0.####},{bx.Y:0.####},{bx.Z:0.####})  Y=({by.X:0.####},{by.Y:0.####},{by.Z:0.####})",
@@ -149,20 +149,6 @@ public sealed class vFitBox : Command
     SelectFitResultObjects(doc, outputObjectIds, fitId);
     doc.Views.Redraw();
     return Result.Success;
-  }
-
-  private static void DbgLog(RhinoDoc doc, IEnumerable<string> lines)
-  {
-    try
-    {
-      var scriptDir = Path.GetDirectoryName(
-        System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
-      var logsDir = Path.Combine(scriptDir, "logs");
-      Directory.CreateDirectory(logsDir);
-      var logPath = Path.Combine(logsDir, "vFitBox_debug.log");
-      File.AppendAllLines(logPath, lines);
-    }
-    catch { /* never crash command on debug I/O */ }
   }
 
   /// <summary>
