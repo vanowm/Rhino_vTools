@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Rhino;
 using Rhino.Commands;
+using Rhino.Display;
 using Rhino.DocObjects;
 using Rhino.Geometry;
 using Rhino.Input;
@@ -173,6 +174,33 @@ public sealed class vFitBox : Command
       });
   }
 
+  // -- Selection preview conduit --------------------------------------------
+
+  private sealed class SelectionPreviewConduit : DisplayConduit
+  {
+    public BoundingBox PreviewBBox = BoundingBox.Empty;
+
+    protected override void DrawOverlay(DrawEventArgs e)
+    {
+      if (!PreviewBBox.IsValid) return;
+      var box = new Box(Plane.WorldXY, new[] { PreviewBBox.Min, PreviewBBox.Max });
+      if (box.IsValid)
+        e.Display.DrawBox(box, System.Drawing.Color.Gray, 1);
+    }
+  }
+
+  private static BoundingBox ComputeSelectionBBox(RhinoDoc doc)
+  {
+    var bbox = BoundingBox.Empty;
+    foreach (var obj in doc.Objects.GetSelectedObjects(false, false))
+    {
+      if (obj?.Geometry == null) continue;
+      var b = obj.Geometry.GetBoundingBox(false);
+      if (b.IsValid) bbox.Union(b);
+    }
+    return bbox;
+  }
+
   /// <summary>
   /// Prompts for object selection and fit options.
   /// </summary>
@@ -189,7 +217,7 @@ public sealed class vFitBox : Command
     fitMode = NormalizeFitMode(_fitMode);
 
     var go = new GetObject();
-    go.SetCommandPrompt("Select objects to fit (minimum height)");
+    go.SetCommandPrompt("Select objects");
     go.AcceptNothing(true);
     go.AcceptNumber(true, false);
     go.EnablePreSelect(true, true);
@@ -204,7 +232,11 @@ public sealed class vFitBox : Command
     var rotateToggle = new OptionToggle(rotate, "No", "Yes");
     var fitToggle = new OptionToggle(string.Equals(fitMode, "area", StringComparison.OrdinalIgnoreCase), "Height", "Area");
     var preselectedWaitingForConfirmation = false;
+    var conduit = new SelectionPreviewConduit();
+    conduit.Enabled = true;
 
+    try
+    {
     while (true)
     {
       go.ClearCommandOptions();
@@ -213,6 +245,8 @@ public sealed class vFitBox : Command
       go.AddOptionToggle("Fit", ref fitToggle);
 
       var result = go.GetMultiple(1, 0);
+      conduit.PreviewBBox = ComputeSelectionBBox(doc);
+      doc.Views.Redraw();
       if (go.CommandResult() != Result.Success)
       {
         angleStepDeg = angleOption.CurrentValue;
@@ -259,6 +293,12 @@ public sealed class vFitBox : Command
       rotate = rotateToggle.CurrentValue;
       fitMode = fitToggle.CurrentValue ? "area" : "height";
       return false;
+    }
+    }
+    finally
+    {
+      conduit.Enabled = false;
+      doc.Views.Redraw();
     }
   }
 
