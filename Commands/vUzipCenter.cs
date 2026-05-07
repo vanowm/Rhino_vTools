@@ -529,12 +529,16 @@ public sealed class vUzipCenter : Command
 
   private sealed class PreviewConduit : DisplayConduit
   {
-    public Curve? Curve { get; set; }
+    public Curve?              Curve       { get; set; }
+    public Color               CenterColor { get; set; } = Color.Cyan;
+    public List<(Curve Crv, Color Col)> SideCurves { get; } = new();
 
     protected override void DrawOverlay(DrawEventArgs e)
     {
       if (Curve != null)
-        e.Display.DrawCurve(Curve, Color.Cyan, 3);
+        e.Display.DrawCurve(Curve, CenterColor, 2);
+      foreach (var (crv, col) in SideCurves)
+        e.Display.DrawCurve(crv, col, 1);
     }
   }
 
@@ -657,6 +661,14 @@ public sealed class vUzipCenter : Command
 
     Curve? displayCurve = null;
 
+    static Color Faded(Color c) =>
+      Color.FromArgb((c.R + 255) / 2, (c.G + 255) / 2, (c.B + 255) / 2);
+    Color FadedLayerColor(string name)
+    {
+      var idx = doc.Layers.FindByFullPath(name, RhinoMath.UnsetIntIndex);
+      return Faded(idx >= 0 ? doc.Layers[idx].Color : Color.Gray);
+    }
+
     try
     {
       while (true)
@@ -678,6 +690,16 @@ public sealed class vUzipCenter : Command
           if (clipped != null) displayCurve = clipped;
         }
 
+        conduit.SideCurves.Clear();
+        var pvNormal = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
+        double pvTol = doc.ModelAbsoluteTolerance;
+        conduit.CenterColor = Faded(doc.Layers[doc.Layers.CurrentLayerIndex].Color);
+        if (glass)
+          foreach (var c in OffsetBothSides(displayCurve, settings.GlassOffset, pvNormal, pvTol))
+            conduit.SideCurves.Add((c, FadedLayerColor(settings.GlassLayer)));
+        if (vis)
+          foreach (var c in OffsetBothSides(displayCurve, settings.VisOffset, pvNormal, pvTol))
+            conduit.SideCurves.Add((c, FadedLayerColor(settings.VisLayer)));
         conduit.Curve = displayCurve;
         doc.Objects.UnselectAll();
         doc.Views.Redraw();
