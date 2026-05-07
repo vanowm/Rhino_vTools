@@ -34,9 +34,11 @@ public sealed class vChamfer : Command
   private const string SectionName = "vChamfer";
   private const string LengthKey   = "length";
   private const string TrimKey     = "trim";
+  private const string JoinKey     = "join";
 
   private static double _length = 1.0;
   private static bool   _trim   = true;   // true = trim curves; false = add line only
+  private static bool   _join   = true;   // only used when _trim = true
 
   public override string EnglishName => "vChamfer";
 
@@ -49,6 +51,8 @@ public sealed class vChamfer : Command
         _length = l;
       if (vToolsOptionStore.TryGetBool(section, TrimKey, out var t))
         _trim = t;
+      if (vToolsOptionStore.TryGetBool(section, JoinKey, out var j))
+        _join = j;
       return 0;
     });
 
@@ -57,6 +61,7 @@ public sealed class vChamfer : Command
     {
       section[LengthKey] = _length;
       section[TrimKey]   = _trim;
+      section[JoinKey]   = _join;
     });
 
   // â”€â”€ Curve picking with options â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -74,6 +79,8 @@ public sealed class vChamfer : Command
       go.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
       var trimToggle = new OptionToggle(_trim, "No", "Yes");
       go.AddOptionToggle("Trim", ref trimToggle);
+      var joinTogglePick = new OptionToggle(_join, "No", "Yes");
+      if (_trim) go.AddOptionToggle("Join", ref joinTogglePick);
 
       var res = go.Get();
 
@@ -92,6 +99,7 @@ public sealed class vChamfer : Command
       if (res == GetResult.Option)
       {
         _trim = trimToggle.CurrentValue;
+        if (_trim) _join = joinTogglePick.CurrentValue;
         if (go.Option()?.EnglishName == "Length")
           HandleLengthSubprompt();
       }
@@ -366,6 +374,8 @@ public sealed class vChamfer : Command
         get.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
         var trimOpt = new OptionToggle(_trim, "No", "Yes");
         get.AddOptionToggle("Trim", ref trimOpt);
+        var joinOpt = new OptionToggle(_join, "No", "Yes");
+        if (_trim) get.AddOptionToggle("Join", ref joinOpt);
 
         var res = get.Get();
 
@@ -378,6 +388,7 @@ public sealed class vChamfer : Command
         if (res == GetResult.Option)
         {
           _trim = trimOpt.CurrentValue;
+          if (_trim) _join = joinOpt.CurrentValue;
 
           if (get.Option()?.EnglishName == "Length")
           {
@@ -407,7 +418,7 @@ public sealed class vChamfer : Command
     }
 
     // Apply.
-    doc.Objects.AddLine(ptA, ptB);
+    var chamferLineId = doc.Objects.AddLine(ptA, ptB);
 
     if (_trim)
     {
@@ -427,6 +438,21 @@ public sealed class vChamfer : Command
 
       doc.Objects.Replace(ref1.ObjectId, trimmedC1);
       doc.Objects.Replace(ref2.ObjectId, trimmedC2);
+
+      if (_join)
+      {
+        var tol = doc.ModelAbsoluteTolerance;
+        var chamferCrv = new LineCurve(ptA, ptB);
+        var joined = Curve.JoinCurves(new Curve[] { trimmedC1, chamferCrv, trimmedC2 }, tol);
+        if (joined != null && joined.Length == 1)
+        {
+          // Replace the chamfer line and both trimmed curves with the single joined result.
+          doc.Objects.Delete(chamferLineId, quiet: true);
+          doc.Objects.Replace(ref1.ObjectId, joined[0]);
+          doc.Objects.Delete(ref2.ObjectId, quiet: true);
+        }
+        // If join failed (not contiguous), leave the three separate objects.
+      }
     }
 
     SaveOptions();
