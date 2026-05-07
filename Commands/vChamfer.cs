@@ -285,18 +285,18 @@ public sealed class vChamfer : Command
   /// </summary>
   private static void UpdateConduit(
     ChamferPreviewConduit conduit,
-    Curve crv1, Curve work1, bool c1AtStart,
-    Curve crv2, Curve work2, bool c2AtStart,
+    Curve crv1, bool c1AtStart,
+    Curve crv2, bool c2AtStart,
+    Point3d corner,
     double tA, double tB, Point3d ptA, Point3d ptB)
   {
-    // Extension lines (gray): shown when a working copy was extended.
+    // Extension lines (gray): line from original corner endpoint to virtual corner,
+    // visible whenever the curves don't already reach the virtual corner.
     var ep1 = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
-    var wp1 = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
-    conduit.Ext1 = ep1.DistanceTo(wp1) > 1e-6 ? new Line(ep1, wp1) : (Line?)null;
+    conduit.Ext1 = ep1.DistanceTo(corner) > 1e-6 ? new Line(ep1, corner) : (Line?)null;
 
     var ep2 = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
-    var wp2 = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
-    conduit.Ext2 = ep2.DistanceTo(wp2) > 1e-6 ? new Line(ep2, wp2) : (Line?)null;
+    conduit.Ext2 = ep2.DistanceTo(corner) > 1e-6 ? new Line(ep2, corner) : (Line?)null;
 
     // Cut-off curve pieces (red when Trim=Yes): original curve corner end → chamfer point.
     // Use crv1/crv2 (not the extended work copies) so the extension segment is not
@@ -350,7 +350,7 @@ public sealed class vChamfer : Command
     }
 
     var conduit = new ChamferPreviewConduit();
-    UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
+    UpdateConduit(conduit, crv1, c1AtStart, crv2, c2AtStart, corner, tA, tB, ptA, ptB);
     conduit.Enabled = true;
     doc.Views.Redraw();
 
@@ -387,7 +387,7 @@ public sealed class vChamfer : Command
 
           if (ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length, cplane,
                 out ptA, out ptB, out tA, out tB))
-            UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
+            UpdateConduit(conduit, crv1, c1AtStart, crv2, c2AtStart, corner, tA, tB, ptA, ptB);
           else
           {
             conduit.ShowTrim = _trim;   // still reflect trim toggle even when invalid
