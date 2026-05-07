@@ -74,6 +74,13 @@ public sealed class vFitBox : Command
       return Result.Failure;
     }
 
+    // Debug: print fit result so mismatches between preview and result can be diagnosed.
+    {
+      var px = bestFit.Plane.XAxis; var py = bestFit.Plane.YAxis; var pz = bestFit.Plane.ZAxis;
+      RhinoApp.WriteLine($"[vFitBox dbg] angle={bestFit.AngleDeg:0.###}°  W={bestFit.Width:0.###}  D={bestFit.Depth:0.###}  H={bestFit.Height:0.###}");
+      RhinoApp.WriteLine($"[vFitBox dbg] fitPlane X=({px.X:0.###},{px.Y:0.###},{px.Z:0.###})  Y=({py.X:0.###},{py.Y:0.###},{py.Z:0.###})  Z=({pz.X:0.###},{pz.Y:0.###},{pz.Z:0.###})");
+    }
+
     var fitId = AddFitGeometry(doc, bestFit);
     if (fitId == Guid.Empty)
     {
@@ -86,6 +93,10 @@ public sealed class vFitBox : Command
     if (rotate)
     {
       var sourcePlane = BuildRotationSourcePlane(bestFit, basePlane, doc.ModelAbsoluteTolerance);
+      var sx = sourcePlane.XAxis; var sy = sourcePlane.YAxis;
+      var bx = basePlane.XAxis;   var by = basePlane.YAxis;
+      RhinoApp.WriteLine($"[vFitBox dbg] srcPlane X=({sx.X:0.###},{sx.Y:0.###},{sx.Z:0.###})  Y=({sy.X:0.###},{sy.Y:0.###},{sy.Z:0.###})");
+      RhinoApp.WriteLine($"[vFitBox dbg] basePlane X=({bx.X:0.###},{bx.Y:0.###},{bx.Z:0.###})  Y=({by.X:0.###},{by.Y:0.###},{by.Z:0.###})");
 
       var pivotPoint = FitCenterPoint(bestFit);
       var transform = PlaneToPlaneRotation(sourcePlane, basePlane, pivotPoint);
