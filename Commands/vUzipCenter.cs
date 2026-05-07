@@ -696,10 +696,10 @@ public sealed class vUzipCenter : Command
         conduit.CenterColor = Faded(doc.Layers[doc.Layers.CurrentLayerIndex].Color);
         if (glass)
           foreach (var c in OffsetBothSides(displayCurve, settings.GlassOffset, pvNormal, pvTol))
-            conduit.SideCurves.Add((c, FadedLayerColor(settings.GlassLayer)));
+            conduit.SideCurves.Add((boundaryCrv != null ? TrimExtendToCurve(c, boundaryCrv, pvTol) ?? c : c, FadedLayerColor(settings.GlassLayer)));
         if (vis)
           foreach (var c in OffsetBothSides(displayCurve, settings.VisOffset, pvNormal, pvTol))
-            conduit.SideCurves.Add((c, FadedLayerColor(settings.VisLayer)));
+            conduit.SideCurves.Add((boundaryCrv != null ? TrimExtendToCurve(c, boundaryCrv, pvTol) ?? c : c, FadedLayerColor(settings.VisLayer)));
         conduit.Curve = displayCurve;
         doc.Objects.UnselectAll();
         doc.Views.Redraw();
@@ -796,7 +796,10 @@ public sealed class vUzipCenter : Command
         if (layerIdx >= 0)
           attr.LayerIndex = layerIdx;
         foreach (var c in curves)
-          doc.Objects.AddCurve(c, attr);
+        {
+          var final = boundaryCrv != null ? TrimExtendToCurve(c, boundaryCrv, tol) ?? c : c;
+          doc.Objects.AddCurve(final, attr);
+        }
       }
 
       if (glass) AddOffsets(settings.GlassOffset, settings.GlassLayer);
