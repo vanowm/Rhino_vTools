@@ -298,13 +298,20 @@ public sealed class vChamfer : Command
     var wp2 = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
     conduit.Ext2 = ep2.DistanceTo(wp2) > 1e-6 ? new Line(ep2, wp2) : (Line?)null;
 
-    // Cut-off curve pieces (red when Trim=Yes): corner end to chamfer point.
-    conduit.CutOff1 = c1AtStart
-      ? work1.Trim(work1.Domain.Min, tA)
-      : work1.Trim(tA, work1.Domain.Max);
-    conduit.CutOff2 = c2AtStart
-      ? work2.Trim(work2.Domain.Min, tB)
-      : work2.Trim(tB, work2.Domain.Max);
+    // Cut-off curve pieces (red when Trim=Yes): original curve corner end → chamfer point.
+    // Use crv1/crv2 (not the extended work copies) so the extension segment is not
+    // included in the red preview — it is already shown separately as gray.
+    conduit.CutOff1 = null;
+    if (crv1.ClosestPoint(ptA, out var tAorig))
+      conduit.CutOff1 = c1AtStart
+        ? crv1.Trim(crv1.Domain.Min, tAorig)
+        : crv1.Trim(tAorig, crv1.Domain.Max);
+
+    conduit.CutOff2 = null;
+    if (crv2.ClosestPoint(ptB, out var tBorig))
+      conduit.CutOff2 = c2AtStart
+        ? crv2.Trim(crv2.Domain.Min, tBorig)
+        : crv2.Trim(tBorig, crv2.Domain.Max);
 
     conduit.ChamferLine = new Line(ptA, ptB);
     conduit.ShowTrim    = _trim;
