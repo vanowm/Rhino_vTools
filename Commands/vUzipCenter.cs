@@ -46,6 +46,7 @@ public sealed class vUzipCenter : Command
     public bool   Vis         { get; set; } = false;
     public double VisOffset   { get; set; } = 0.75;
     public string VisLayer    { get; set; } = "Vis-Line";
+    public string CenterLayer { get; set; } = "Reference";
   }
 
   private static UzipCenterSettings LoadSettings() =>
@@ -62,6 +63,7 @@ public sealed class vUzipCenter : Command
       if (vToolsOptionStore.TryGetBool  (section, "vis",         out var v))   s.Vis         = v;
       if (vToolsOptionStore.TryGetDouble(section, "visOffset",   out var vo))  s.VisOffset   = vo;
       if (vToolsOptionStore.TryGetString(section, "visLayer",    out var vl))  s.VisLayer    = vl;
+      if (vToolsOptionStore.TryGetString(section, "centerLayer", out var cl))  s.CenterLayer = cl;
       return s;
     });
 
@@ -78,6 +80,7 @@ public sealed class vUzipCenter : Command
       section["vis"]         = s.Vis;
       section["visOffset"]   = s.VisOffset;
       section["visLayer"]    = s.VisLayer;
+      section["centerLayer"] = s.CenterLayer;
     });
 
   // ── Fractional formatting ─────────────────────────────────────────────────
@@ -542,6 +545,167 @@ public sealed class vUzipCenter : Command
     }
   }
 
+  // ── Options dialog ────────────────────────────────────────────────────────
+
+  private sealed class OptionsDialog : Eto.Forms.Dialog<bool>
+  {
+    readonly Eto.Forms.DropDown _centerDrop;
+    readonly Eto.Forms.DropDown _glassDrop;
+    readonly Eto.Forms.TextBox  _glassOffBox;
+    readonly Eto.Forms.DropDown _visDrop;
+    readonly Eto.Forms.TextBox  _visOffBox;
+    readonly List<(string Name, System.Drawing.Color Col)> _docLayers;
+
+    public OptionsDialog(RhinoDoc doc, UzipCenterSettings s)
+    {
+      Title     = "vUzipCenter Options";
+      Resizable = false;
+      Result    = false;
+
+      _docLayers = doc.Layers
+        .Where(l => !l.IsDeleted)
+        .Select(l => (Name: l.FullPath, Col: l.Color))
+        .ToList();
+
+      Eto.Forms.DropDown MakeDrop(string current)
+      {
+        var d = new Eto.Forms.DropDown { Width = 220 };
+        bool found = false;
+        foreach (var (name, _) in _docLayers)
+        {
+          d.Items.Add(new Eto.Forms.ListItem { Text = name, Key = name });
+          if (string.Equals(name, current, StringComparison.OrdinalIgnoreCase)) found = true;
+        }
+        if (!found && !string.IsNullOrWhiteSpace(current))
+          d.Items.Insert(0, new Eto.Forms.ListItem { Text = current + " (not in doc)", Key = current });
+        d.SelectedKey = current;
+        if (d.SelectedIndex < 0) d.SelectedIndex = 0;
+        return d;
+      }
+
+      Eto.Forms.Drawable MakeSwatch(Eto.Forms.DropDown drop)
+      {
+        var sw = new Eto.Forms.Drawable { Size = new Eto.Drawing.Size(16, 16) };
+        sw.Paint += (_, pe) =>
+        {
+          var key = drop.SelectedKey ?? "";
+          var hit = _docLayers.FirstOrDefault(l =>
+            string.Equals(l.Name, key, StringComparison.OrdinalIgnoreCase));
+          var sc  = hit.Name != null ? hit.Col : System.Drawing.Color.Gray;
+          pe.Graphics.FillRectangle(
+            new Eto.Drawing.Color(sc.R / 255f, sc.G / 255f, sc.B / 255f),
+            new Eto.Drawing.RectangleF(0, 0, 16, 16));
+        };
+        drop.SelectedIndexChanged += (_, _) => sw.Invalidate();
+        return sw;
+      }
+
+      Eto.Forms.StackLayout SwatchRow(Eto.Forms.Drawable sw, Eto.Forms.DropDown dd) =>
+        new Eto.Forms.StackLayout
+        {
+          Orientation = Eto.Forms.Orientation.Horizontal,
+          Spacing = 4,
+          VerticalContentAlignment = Eto.Forms.VerticalAlignment.Center,
+          Items = { sw, new Eto.Forms.StackLayoutItem(dd, true) },
+        };
+
+      static Eto.Forms.Label Lbl(string t) =>
+        new Eto.Forms.Label { Text = t, VerticalAlignment = Eto.Forms.VerticalAlignment.Center };
+
+      _centerDrop  = MakeDrop(s.CenterLayer);
+      _glassDrop   = MakeDrop(s.GlassLayer);
+      _glassOffBox = new Eto.Forms.TextBox
+      {
+        Text  = s.GlassOffset.ToString(CultureInfo.InvariantCulture),
+        Width = 80,
+      };
+      _visDrop     = MakeDrop(s.VisLayer);
+      _visOffBox   = new Eto.Forms.TextBox
+      {
+        Text  = s.VisOffset.ToString(CultureInfo.InvariantCulture),
+        Width = 80,
+      };
+
+      var centerSwatch = MakeSwatch(_centerDrop);
+      var glassSwatch  = MakeSwatch(_glassDrop);
+      var visSwatch    = MakeSwatch(_visDrop);
+
+      var resetBtn  = new Eto.Forms.Button { Text = "Reset to Defaults" };
+      var okBtn     = new Eto.Forms.Button { Text = "OK",     Width = 80 };
+      var cancelBtn = new Eto.Forms.Button { Text = "Cancel", Width = 80 };
+      DefaultButton = okBtn;
+      AbortButton   = cancelBtn;
+
+      resetBtn.Click += (_, _) =>
+      {
+        var d = new UzipCenterSettings();
+        _centerDrop.SelectedKey  = d.CenterLayer;
+        _glassDrop.SelectedKey   = d.GlassLayer;
+        _glassOffBox.Text        = d.GlassOffset.ToString(CultureInfo.InvariantCulture);
+        _visDrop.SelectedKey     = d.VisLayer;
+        _visOffBox.Text          = d.VisOffset.ToString(CultureInfo.InvariantCulture);
+        centerSwatch.Invalidate();
+        glassSwatch.Invalidate();
+        visSwatch.Invalidate();
+      };
+      okBtn.Click     += (_, _) => Close(true);
+      cancelBtn.Click += (_, _) => Close(false);
+
+      var table = new Eto.Forms.TableLayout
+      {
+        Spacing = new Eto.Drawing.Size(8, 6),
+        Rows =
+        {
+          new Eto.Forms.TableRow(Lbl("Center layer:"),
+            new Eto.Forms.TableCell(SwatchRow(centerSwatch, _centerDrop), true)),
+          new Eto.Forms.TableRow(Lbl("Glass offset:"),
+            new Eto.Forms.TableCell(_glassOffBox)),
+          new Eto.Forms.TableRow(Lbl("Glass layer:"),
+            new Eto.Forms.TableCell(SwatchRow(glassSwatch, _glassDrop), true)),
+          new Eto.Forms.TableRow(Lbl("Vis offset:"),
+            new Eto.Forms.TableCell(_visOffBox)),
+          new Eto.Forms.TableRow(Lbl("Vis layer:"),
+            new Eto.Forms.TableCell(SwatchRow(visSwatch, _visDrop), true)),
+        },
+      };
+
+      var btnRow = new Eto.Forms.StackLayout
+      {
+        Orientation = Eto.Forms.Orientation.Horizontal,
+        Spacing = 6,
+        Items =
+        {
+          resetBtn,
+          new Eto.Forms.StackLayoutItem(new Eto.Forms.Panel(), true),
+          cancelBtn,
+          okBtn,
+        },
+      };
+
+      Content = new Eto.Forms.StackLayout
+      {
+        Padding = new Eto.Drawing.Padding(12),
+        Spacing = 10,
+        Items   =
+        {
+          new Eto.Forms.StackLayoutItem(table, true),
+          btnRow,
+        },
+      };
+    }
+
+    public void ApplyTo(UzipCenterSettings s)
+    {
+      if (!string.IsNullOrEmpty(_centerDrop.SelectedKey)) s.CenterLayer = _centerDrop.SelectedKey;
+      if (!string.IsNullOrEmpty(_glassDrop.SelectedKey))  s.GlassLayer  = _glassDrop.SelectedKey;
+      if (double.TryParse(_glassOffBox.Text, NumberStyles.Float,
+          CultureInfo.InvariantCulture, out var go) && go > 0) s.GlassOffset = go;
+      if (!string.IsNullOrEmpty(_visDrop.SelectedKey))    s.VisLayer    = _visDrop.SelectedKey;
+      if (double.TryParse(_visOffBox.Text, NumberStyles.Float,
+          CultureInfo.InvariantCulture, out var vo) && vo > 0) s.VisOffset   = vo;
+    }
+  }
+
   // ── RunCommand ────────────────────────────────────────────────────────────
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
@@ -572,6 +736,27 @@ public sealed class vUzipCenter : Command
                           .ToList();
     var prePts = preCurves.Select(c => CurveMidpoint(c)).ToList();
 
+    // Discard preselected curves that don't connect to any other preselected curve.
+    if (preCurves.Count > 1)
+    {
+      double jTol      = doc.ModelAbsoluteTolerance * 100.0;
+      var connected    = new bool[preCurves.Count];
+      for (int i = 0; i < preCurves.Count; i++)
+        for (int j = 0; j < preCurves.Count; j++)
+        {
+          if (i == j) continue;
+          if (preCurves[i].ClosestPoints(preCurves[j], out var pA, out var pB) &&
+              pA.DistanceTo(pB) <= jTol)
+          { connected[i] = true; break; }
+        }
+      var newCurves = new List<Curve>();
+      var newPts    = new List<Point3d>();
+      for (int i = 0; i < preCurves.Count; i++)
+        if (connected[i]) { newCurves.Add(preCurves[i]); newPts.Add(prePts[i]); }
+      preCurves = newCurves;
+      prePts    = newPts;
+    }
+
     int need = 3 - preCurves.Count;
 
     // ── Interactive selection (if needed) ────────────────────────────────────
@@ -595,6 +780,7 @@ public sealed class vUzipCenter : Command
         var visToggle1   = new OptionToggle(vis,   "No", "Yes");
         go.AddOptionToggle("Glass", ref glassToggle1);
         go.AddOptionToggle("Vis",   ref visToggle1);
+        go.AddOption("Options");
 
         var res = go.GetMultiple(need, need);
 
@@ -629,6 +815,12 @@ public sealed class vUzipCenter : Command
             var v = GetDistSubprompt("Fillet radius", radius);
             if (v == null) return Result.Cancel;
             radius = v.Value;
+          }
+          else if (name == "Options")
+          {
+            var dlg = new OptionsDialog(doc, settings);
+            dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow);
+            if (dlg.Result) dlg.ApplyTo(settings);
           }
           // Glass/Vis are toggles; already read above.
           continue;
@@ -693,7 +885,8 @@ public sealed class vUzipCenter : Command
         conduit.SideCurves.Clear();
         var pvNormal = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
         double pvTol = doc.ModelAbsoluteTolerance;
-        conduit.CenterColor = Faded(doc.Layers[doc.Layers.CurrentLayerIndex].Color);
+        var clIdx = doc.Layers.FindByFullPath(settings.CenterLayer, RhinoMath.UnsetIntIndex);
+        conduit.CenterColor = Faded(clIdx >= 0 ? doc.Layers[clIdx].Color : Color.Cyan);
         if (glass)
           foreach (var c in OffsetBothSides(displayCurve, settings.GlassOffset, pvNormal, pvTol))
             conduit.SideCurves.Add((boundaryCrv != null ? TrimExtendToCurve(c, boundaryCrv, pvTol) ?? c : c, FadedLayerColor(settings.GlassLayer)));
@@ -719,6 +912,7 @@ public sealed class vUzipCenter : Command
         var visToggle2   = new OptionToggle(vis,   "No", "Yes");
         gp.AddOptionToggle("Glass", ref glassToggle2);
         gp.AddOptionToggle("Vis",   ref visToggle2);
+        gp.AddOption("Options");
 
         var res = gp.Get();
 
@@ -769,6 +963,12 @@ public sealed class vUzipCenter : Command
             if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
             radius = v.Value;
           }
+          else if (name == "Options")
+          {
+            var dlg = new OptionsDialog(doc, settings);
+            dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow);
+            if (dlg.Result) dlg.ApplyTo(settings);
+          }
           continue;
         }
       }
@@ -780,7 +980,12 @@ public sealed class vUzipCenter : Command
 
     // ── Commit ────────────────────────────────────────────────────────────────
     if (displayCurve != null)
-      doc.Objects.AddCurve(displayCurve);
+    {
+      var centerAttr = new ObjectAttributes();
+      var clIdx = doc.Layers.FindByFullPath(settings.CenterLayer, RhinoMath.UnsetIntIndex);
+      if (clIdx >= 0) centerAttr.LayerIndex = clIdx;
+      doc.Objects.AddCurve(displayCurve, centerAttr);
+    }
 
     // Glass / Vis side offsets
     if (displayCurve != null && (glass || vis))
@@ -811,6 +1016,7 @@ public sealed class vUzipCenter : Command
       Left = offL, Right = offR, Bottom = offB, Radius = radius,
       Glass = glass, GlassOffset = settings.GlassOffset, GlassLayer = settings.GlassLayer,
       Vis   = vis,   VisOffset   = settings.VisOffset,   VisLayer   = settings.VisLayer,
+      CenterLayer = settings.CenterLayer,
     });
     doc.Views.Redraw();
     return Result.Success;
