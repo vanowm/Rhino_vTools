@@ -245,14 +245,12 @@ public sealed class vUzipCenter : Command
   /// <summary>Offsets a curve both sides; returns up to 2 results.</summary>
   private static List<Curve> OffsetBothSides(Curve curve, double distance, Vector3d normal, double tol)
   {
+    var plane = new Plane(curve.PointAtStart, normal);
+    var pos = curve.Offset(plane, +distance, tol, CurveOffsetCornerStyle.Sharp);
+    var neg = curve.Offset(plane, -distance, tol, CurveOffsetCornerStyle.Sharp);
     var results = new List<Curve>();
-    var origin = curve.PointAtStart; // arbitrary origin on the plane
-    foreach (var sign in new[] { 1.0, -1.0 })
-    {
-      var off = curve.Offset(origin, normal, sign * distance, tol, CurveOffsetCornerStyle.Sharp);
-      if (off != null)
-        results.AddRange(off);
-    }
+    if (pos != null) results.AddRange(pos);
+    if (neg != null) results.AddRange(neg);
     return results;
   }
 
