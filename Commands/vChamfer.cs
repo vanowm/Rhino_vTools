@@ -76,6 +76,7 @@ public sealed class vChamfer : Command
       go.SubObjectSelect             = false;
       go.EnablePreSelect(false, true);
       go.DeselectAllBeforePostSelect = false;
+      go.AcceptNumber(true, false);
       go.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
       var trimToggle = new OptionToggle(_trim, "No", "Yes");
       go.AddOptionToggle("Trim", ref trimToggle);
@@ -95,6 +96,13 @@ public sealed class vChamfer : Command
 
       if (res == GetResult.Cancel || go.CommandResult() != Result.Success)
         return (null, null);
+
+      if (res == GetResult.Number)
+      {
+        var v = go.Number();
+        if (v > 0) _length = v;
+        continue;
+      }
 
       if (res == GetResult.Option)
       {
@@ -297,22 +305,8 @@ public sealed class vChamfer : Command
     Curve crv2, Curve work2, bool c2AtStart,
     double tA, double tB, Point3d ptA, Point3d ptB)
   {
-    // Extension lines: only when extension happened, drawn from chamfer cut point
-    // to the virtual corner (ptA→work1End). This keeps Ext1/Ext2 non-overlapping
-    // with CutOff1/CutOff2 (red, crv1End→ptA) so the red piece is always visible.
-    var crv1End  = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
-    var work1End = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
-    conduit.Ext1 = crv1End.DistanceTo(work1End) > 1e-6 && ptA.DistanceTo(work1End) > 1e-6
-      ? new Line(ptA, work1End) : (Line?)null;
-
-    var crv2End  = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
-    var work2End = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
-    conduit.Ext2 = crv2End.DistanceTo(work2End) > 1e-6 && ptB.DistanceTo(work2End) > 1e-6
-      ? new Line(ptB, work2End) : (Line?)null;
-
     // Cut-off curve pieces (red when Trim=Yes): original curve corner end → chamfer point.
-    // Use crv1/crv2 (not the extended work copies) so the extension segment is not
-    // included in the red preview — it is already shown separately as gray.
+    // Computed first so extension-line gating can reference them.
     conduit.CutOff1 = null;
     if (crv1.ClosestPoint(ptA, out var tAorig))
       conduit.CutOff1 = c1AtStart
@@ -324,6 +318,20 @@ public sealed class vChamfer : Command
       conduit.CutOff2 = c2AtStart
         ? crv2.Trim(crv2.Domain.Min, tBorig)
         : crv2.Trim(tBorig, crv2.Domain.Max);
+
+    // Extension lines: crv1End → work1End, shown only when the curve was actually
+    // extended (distance > 1e-6) AND the chamfer cut lands in the original curve body
+    // (CutOff non-null). When ptA is inside the extension zone CutOff1 is null and
+    // drawing the segment would cross the chamfer cut point — so suppress it.
+    var crv1End  = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
+    var work1End = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
+    conduit.Ext1 = crv1End.DistanceTo(work1End) > 1e-6 && conduit.CutOff1 != null
+      ? new Line(crv1End, work1End) : (Line?)null;
+
+    var crv2End  = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
+    var work2End = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
+    conduit.Ext2 = crv2End.DistanceTo(work2End) > 1e-6 && conduit.CutOff2 != null
+      ? new Line(crv2End, work2End) : (Line?)null;
 
     conduit.ChamferLine = new Line(ptA, ptB);
     conduit.ShowTrim    = _trim;
@@ -373,6 +381,7 @@ public sealed class vChamfer : Command
         var get = new GetOption();
         get.SetCommandPrompt("Press Enter to apply chamfer");
         get.AcceptNothing(true);
+        get.AcceptNumber(true, false);
         get.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
         var trimOpt = new OptionToggle(_trim, "No", "Yes");
         get.AddOptionToggle("Trim", ref trimOpt);
@@ -387,7 +396,12 @@ public sealed class vChamfer : Command
         if (res == GetResult.Nothing)
           break;
 
-        if (res == GetResult.Option)
+        if (res == GetResult.Number)
+        {
+          var v = get.Number();
+          if (v > 0) _length = v;
+        }
+        else if (res == GetResult.Option)
         {
           _trim = trimOpt.CurrentValue;
           if (_trim) _join = joinOpt.CurrentValue;
@@ -399,7 +413,10 @@ public sealed class vChamfer : Command
             HandleLengthSubprompt();
             conduit.Enabled = true;
           }
+        }
 
+        if (res == GetResult.Number || res == GetResult.Option)
+        {
           if (ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length, cplane,
                 out ptA, out ptB, out tA, out tB))
             UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
