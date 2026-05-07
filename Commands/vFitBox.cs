@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Rhino;
@@ -74,11 +75,18 @@ public sealed class vFitBox : Command
       return Result.Failure;
     }
 
-    // Debug: print fit result so mismatches between preview and result can be diagnosed.
+    // Debug: log fit result to file so mismatches can be diagnosed.
     {
       var px = bestFit.Plane.XAxis; var py = bestFit.Plane.YAxis; var pz = bestFit.Plane.ZAxis;
-      RhinoApp.WriteLine($"[vFitBox dbg] angle={bestFit.AngleDeg:0.###}°  W={bestFit.Width:0.###}  D={bestFit.Depth:0.###}  H={bestFit.Height:0.###}");
-      RhinoApp.WriteLine($"[vFitBox dbg] fitPlane X=({px.X:0.###},{px.Y:0.###},{px.Z:0.###})  Y=({py.X:0.###},{py.Y:0.###},{py.Z:0.###})  Z=({pz.X:0.###},{pz.Y:0.###},{pz.Z:0.###})");
+      var lines = new[]
+      {
+        $"--- run {DateTime.Now:HH:mm:ss.fff}  rotate={rotate}  step={_angleStepDeg} ---",
+        $"fit: angle={bestFit.AngleDeg:0.###}  W={bestFit.Width:0.###}  D={bestFit.Depth:0.###}  H={bestFit.Height:0.###}  mode={bestFit.Mode}",
+        $"fitPlane X=({px.X:0.####},{px.Y:0.####},{px.Z:0.####})  Y=({py.X:0.####},{py.Y:0.####},{py.Z:0.####})  Z=({pz.X:0.####},{pz.Y:0.####},{pz.Z:0.####})",
+        $"fitPlane origin=({bestFit.Plane.Origin.X:0.###},{bestFit.Plane.Origin.Y:0.###},{bestFit.Plane.Origin.Z:0.###})",
+        $"bounds  X=[{bestFit.MinX:0.###},{bestFit.MaxX:0.###}]  Y=[{bestFit.MinY:0.###},{bestFit.MaxY:0.###}]  Z=[{bestFit.MinZ:0.###},{bestFit.MaxZ:0.###}]",
+      };
+      DbgLog(doc, lines);
     }
 
     var fitId = AddFitGeometry(doc, bestFit);
@@ -95,8 +103,11 @@ public sealed class vFitBox : Command
       var sourcePlane = BuildRotationSourcePlane(bestFit, basePlane, doc.ModelAbsoluteTolerance);
       var sx = sourcePlane.XAxis; var sy = sourcePlane.YAxis;
       var bx = basePlane.XAxis;   var by = basePlane.YAxis;
-      RhinoApp.WriteLine($"[vFitBox dbg] srcPlane X=({sx.X:0.###},{sx.Y:0.###},{sx.Z:0.###})  Y=({sy.X:0.###},{sy.Y:0.###},{sy.Z:0.###})");
-      RhinoApp.WriteLine($"[vFitBox dbg] basePlane X=({bx.X:0.###},{bx.Y:0.###},{bx.Z:0.###})  Y=({by.X:0.###},{by.Y:0.###},{by.Z:0.###})");
+      DbgLog(doc, new[]
+      {
+        $"srcPlane  X=({sx.X:0.####},{sx.Y:0.####},{sx.Z:0.####})  Y=({sy.X:0.####},{sy.Y:0.####},{sy.Z:0.####})",
+        $"basePlane X=({bx.X:0.####},{bx.Y:0.####},{bx.Z:0.####})  Y=({by.X:0.####},{by.Y:0.####},{by.Z:0.####})",
+      });
 
       var pivotPoint = FitCenterPoint(bestFit);
       var transform = PlaneToPlaneRotation(sourcePlane, basePlane, pivotPoint);
@@ -138,6 +149,20 @@ public sealed class vFitBox : Command
     SelectFitResultObjects(doc, outputObjectIds, fitId);
     doc.Views.Redraw();
     return Result.Success;
+  }
+
+  private static void DbgLog(RhinoDoc doc, IEnumerable<string> lines)
+  {
+    try
+    {
+      var scriptDir = Path.GetDirectoryName(
+        System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
+      var logsDir = Path.Combine(scriptDir, "logs");
+      Directory.CreateDirectory(logsDir);
+      var logPath = Path.Combine(logsDir, "vFitBox_debug.log");
+      File.AppendAllLines(logPath, lines);
+    }
+    catch { /* never crash command on debug I/O */ }
   }
 
   /// <summary>
