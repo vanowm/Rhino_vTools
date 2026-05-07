@@ -423,6 +423,7 @@ public sealed class vFitBox : Command
       planarBest.EffectiveStepDeg = requestedStepDeg;
       planarBest.Mode = "2d";
       planarBest.FitMode = normalizedFitMode;
+      CanonicalizeCandidate(planarBest);
       return planarBest;
     }
 
@@ -473,7 +474,27 @@ public sealed class vFitBox : Command
     best.EffectiveStepDeg = stableStepDeg;
     best.Mode = "3d";
     best.FitMode = normalizedFitMode;
+    CanonicalizeCandidate(best);
     return best;
+  }
+
+  /// <summary>
+  /// Ensures Width >= Depth by rotating the fit plane 90° around ZAxis when needed.
+  /// This makes the result canonical regardless of which of two equivalent solver
+  /// solutions (30° vs 120°) was returned, so rotation direction and reported
+  /// dimensions are always deterministic and a second run produces an identical result.
+  /// </summary>
+  private static void CanonicalizeCandidate(FitCandidate c)
+  {
+    if (c.Depth <= c.Width + 1e-10) return;  // already canonical
+
+    // Rotate plane 90° CCW around ZAxis: new.XAxis = old.YAxis, new.YAxis = -old.XAxis.
+    // Under this rotation point coordinates transform as: new_x = old_y, new_y = -old_x.
+    c.Plane = RotatePlane(c.Plane, Math.PI / 2.0);
+    var oldMinX = c.MinX; var oldMaxX = c.MaxX;
+    c.MinX = c.MinY;  c.MaxX = c.MaxY;
+    c.MinY = -oldMaxX; c.MaxY = -oldMinX;
+    (c.Width, c.Depth) = (c.Depth, c.Width);
   }
 
   /// <summary>
