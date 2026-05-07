@@ -239,6 +239,15 @@ public sealed class vFitBox : Command
     var conduit = new SelectionPreviewConduit();
     conduit.Enabled = true;
 
+    // Update preview whenever doc selection changes (fires during GetMultiple).
+    EventHandler<RhinoObjectSelectionEventArgs> onSelChanged = (_, _) =>
+    {
+      UpdatePreviewBox(doc, conduit, fitToggle.CurrentValue ? "area" : "height");
+      doc.Views.Redraw();
+    };
+    RhinoDoc.SelectObjects   += onSelChanged;
+    RhinoDoc.DeselectObjects += onSelChanged;
+
     try
     {
     while (true)
@@ -302,6 +311,8 @@ public sealed class vFitBox : Command
     }
     finally
     {
+      RhinoDoc.SelectObjects   -= onSelChanged;
+      RhinoDoc.DeselectObjects -= onSelChanged;
       conduit.Enabled = false;
       doc.Views.Redraw();
     }
