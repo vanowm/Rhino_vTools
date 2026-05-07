@@ -181,10 +181,10 @@ internal static class PointNormalToSurfaceWorkflow
     go.SetCommandPrompt("Select target surface or polysurface face");
     go.GeometryFilter = ObjectType.Surface | ObjectType.PolysrfFilter;
     go.SubObjectSelect = true;
-    go.EnablePreSelect(false, true);
+    go.EnablePreSelect(true, true);
 
     var result = go.Get();
-    if (result != GetResult.Object || go.ObjectCount < 1 || go.CommandResult() != Result.Success)
+    if (result != GetResult.Object || go.ObjectCount < 1)
       return false;
 
     var objRef = go.Object(0);
