@@ -74,6 +74,7 @@ public sealed class vFitBox : Command
       RhinoApp.WriteLine("vFitBox: failed to calculate a fit box.");
       return Result.Failure;
     }
+    RefineToAccurateBounds(bestFit, geometries);
 
     // Debug: log fit result to file so mismatches can be diagnosed.
     {
@@ -220,6 +221,7 @@ public sealed class vFitBox : Command
     // Use a coarse step for a fast preview; result is the same fitted box, just rough.
     var fit = FindBestFit(doc, geoms, basePlane, 5.0, fitMode);
     if (fit == null) { conduit.PreviewBox = Box.Unset; return; }
+    RefineToAccurateBounds(fit, geoms);
     conduit.PreviewBox = new Box(
       fit.Plane,
       new Interval(fit.MinX, fit.MaxX),
@@ -502,6 +504,56 @@ public sealed class vFitBox : Command
 
   /// <summary>
   /// Ensures Width >= Depth by rotating the fit plane 90° around ZAxis when needed.
+  /// Recomputes fit candidate bounds using accurate per-geometry transforms.
+  /// GetBoundingBox(Plane) uses control-point approximation for curves, which
+  /// overshoots the actual geometry. This fixes the placed box size.
+  /// </summary>
+  private static void RefineToAccurateBounds(FitCandidate c, IReadOnlyList<GeometryBase> geometries)
+  {
+    var toLocal = Transform.PlaneToPlane(c.Plane, Plane.WorldXY);
+    var first = true;
+    var minX = 0.0; var maxX = 0.0;
+    var minY = 0.0; var maxY = 0.0;
+    var minZ = 0.0; var maxZ = 0.0;
+
+    foreach (var g in geometries)
+    {
+      try
+      {
+        var copy = g.Duplicate();
+        if (copy == null || !copy.Transform(toLocal)) continue;
+        var bb = copy.GetBoundingBox(true);
+        if (!bb.IsValid) continue;
+
+        if (first)
+        {
+          minX = bb.Min.X; maxX = bb.Max.X;
+          minY = bb.Min.Y; maxY = bb.Max.Y;
+          minZ = bb.Min.Z; maxZ = bb.Max.Z;
+          first = false;
+        }
+        else
+        {
+          minX = Math.Min(minX, bb.Min.X); maxX = Math.Max(maxX, bb.Max.X);
+          minY = Math.Min(minY, bb.Min.Y); maxY = Math.Max(maxY, bb.Max.Y);
+          minZ = Math.Min(minZ, bb.Min.Z); maxZ = Math.Max(maxZ, bb.Max.Z);
+        }
+      }
+      catch { }
+    }
+
+    if (first) return;
+    c.MinX = minX; c.MaxX = maxX;
+    c.MinY = minY; c.MaxY = maxY;
+    c.MinZ = minZ; c.MaxZ = maxZ;
+    c.Width  = Math.Max(0.0, maxX - minX);
+    c.Depth  = Math.Max(0.0, maxY - minY);
+    c.Height = Math.Max(0.0, maxZ - minZ);
+    c.Area   = c.Width * c.Depth;
+    c.Volume = c.Area * c.Height;
+  }
+
+  /// <summary>
   /// This makes the result canonical regardless of which of two equivalent solver
   /// solutions (30° vs 120°) was returned, so rotation direction and reported
   /// dimensions are always deterministic and a second run produces an identical result.
