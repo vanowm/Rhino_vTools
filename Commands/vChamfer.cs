@@ -297,16 +297,18 @@ public sealed class vChamfer : Command
     Curve crv2, Curve work2, bool c2AtStart,
     double tA, double tB, Point3d ptA, Point3d ptB)
   {
-    // Extension lines: original endpoint → chamfer cut point on that curve,
-    // shown only when ptA/ptB lies beyond the original curve end (extension was needed).
+    // Extension lines: shown only when the working copy was actually extended past
+    // the original corner endpoint. Drawn from original endpoint to extended endpoint.
     // Cyan — same colour as the chamfer line.
     var crv1End  = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
-    conduit.Ext1 = crv1End.DistanceTo(ptA) > 1e-6
-      ? new Line(crv1End, ptA) : (Line?)null;
+    var work1End = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
+    conduit.Ext1 = crv1End.DistanceTo(work1End) > 1e-6
+      ? new Line(crv1End, work1End) : (Line?)null;
 
     var crv2End  = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
-    conduit.Ext2 = crv2End.DistanceTo(ptB) > 1e-6
-      ? new Line(crv2End, ptB) : (Line?)null;
+    var work2End = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
+    conduit.Ext2 = crv2End.DistanceTo(work2End) > 1e-6
+      ? new Line(crv2End, work2End) : (Line?)null;
 
     // Cut-off curve pieces (red when Trim=Yes): original curve corner end → chamfer point.
     // Use crv1/crv2 (not the extended work copies) so the extension segment is not
