@@ -6,6 +6,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 
 - Rhino plug-in entry point: vToolsPlugIn
 - Native commands:
+  - [vChamfer](#vchamfer-flow) *(26.05.07.0723)* — cuts a corner formed by two curves with a straight line perpendicular to the angle bisector at a specified cut length
   - [vCurveToSpline](#vcurvetospline-flow) *(26.04.24.0934)* — converts selected curves to interpolated splines with join modes
   - [vFitBox](#vfitbox-flow) *(26.04.24.0934)* — finds the minimum bounding box for selected objects by optimizing rotation angle
   - [vLine](#vline-flow) *(26.04.27.2125)* — draws lines with chain modes, angle lock, length constraint, and perp/tangent endpoint solving
@@ -68,10 +69,20 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow).
+Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
+
+### vChamfer flow
+
+1. Pick **curve 1** — near the corner to cut.
+1. Pick **curve 2** — near the same corner.
+1. Adjust options while previewing the cyan cut line:
+
+    - `Length`: the cut line length. The cut is always perpendicular to the angle bisector of the two curves at the corner.
+
+1. Press Enter to apply: both curves are trimmed to the cut endpoints and a new line is added.
 
 ### vCurveToSpline flow
 
