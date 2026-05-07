@@ -1126,13 +1126,21 @@ public sealed class vFitBox : Command
     if (geometry == null || !plane.IsValid)
       return false;
 
+    // Transform a duplicate to plane-local space and measure accurately.
+    // GetBoundingBox(Plane) uses control-point hulls for curves, which overshoots
+    // and causes the solver to minimize a different objective than the real area.
     try
     {
-      var direct = geometry.GetBoundingBox(plane);
-      if (direct.IsValid)
+      var toLocal = Transform.PlaneToPlane(plane, Plane.WorldXY);
+      var copy = geometry.Duplicate();
+      if (copy != null && copy.Transform(toLocal))
       {
-        bbox = direct;
-        return true;
+        var bb = copy.GetBoundingBox(true);
+        if (bb.IsValid)
+        {
+          bbox = bb;
+          return true;
+        }
       }
     }
     catch
