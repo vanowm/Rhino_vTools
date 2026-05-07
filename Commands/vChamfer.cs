@@ -6,29 +6,34 @@ using Rhino.Commands;
 using Rhino.Display;
 using Rhino.DocObjects;
 using Rhino.Geometry;
+using Rhino.Geometry.Intersect;
 using Rhino.Input;
 using Rhino.Input.Custom;
 
 namespace vTools.Commands;
 
 /// <summary>
-/// Cuts a corner formed by two curves with a straight line.
-/// The cut line length is user-specified; its orientation is always
-/// perpendicular to the angle bisector of the two curves at their corner.
+/// Cuts a corner formed by two curves with a straight line perpendicular to the
+/// angle bisector at a specified cut length. The virtual corner is the intersection
+/// of the tangent extensions from each curve's nearest endpoint — works even when
+/// the curves were previously chamfered and no longer share a common endpoint.
 /// Both curves are trimmed to the cut endpoints and a new line is added.
+/// Optionally adds a closed offcut polyline representing the removed corner region.
 ///
 /// Workflow:
 ///   Pick curve 1 — near the corner to chamfer.
 ///   Pick curve 2 — near the same corner.
-///   Adjust Length option.
+///   Length and Offcut options are available at every prompt.
 ///   Press Enter to apply.
 /// </summary>
 public sealed class vChamfer : Command
 {
   private const string SectionName = "vChamfer";
   private const string LengthKey   = "length";
+  private const string OffcutKey   = "offcut";
 
   private static double _length = 1.0;
+  private static bool   _offcut;
 
   public override string EnglishName => "vChamfer";
 
@@ -39,6 +44,8 @@ public sealed class vChamfer : Command
     {
       if (vToolsOptionStore.TryGetDouble(section, LengthKey, out var l) && l > 0)
         _length = l;
+      if (vToolsOptionStore.TryGetBool(section, OffcutKey, out var o))
+        _offcut = o;
       return 0;
     });
 
@@ -46,58 +53,101 @@ public sealed class vChamfer : Command
     vToolsOptionStore.Update(SectionName, section =>
     {
       section[LengthKey] = _length;
+      section[OffcutKey] = _offcut;
     });
 
-  // ── Curve picking ──────────────────────────────────────────────────────────
+  // ── Curve picking with options ─────────────────────────────────────────────
 
-  private static (ObjRef? Ref, Curve? Crv) PickCurve(string prompt)
+  /// <summary>
+  /// Picks a curve; Length and Offcut options are available during the pick.
+  /// </summary>
+  private static (ObjRef? Ref, Curve? Crv) PickCurveWithOptions(string prompt)
   {
-    var go = new GetObject();
-    go.SetCommandPrompt(prompt);
-    go.GeometryFilter             = ObjectType.Curve;
-    go.SubObjectSelect            = false;
-    go.EnablePreSelect(false, true);
-    go.DeselectAllBeforePostSelect = false;
+    while (true)
+    {
+      var go = new GetObject();
+      go.SetCommandPrompt(prompt);
+      go.GeometryFilter              = ObjectType.Curve;
+      go.SubObjectSelect             = false;
+      go.EnablePreSelect(false, true);
+      go.DeselectAllBeforePostSelect = false;
+      go.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
+      var offcutToggle = new OptionToggle(_offcut, "No", "Yes");
+      go.AddOptionToggle("Offcut", ref offcutToggle);
 
-    if (go.Get() != GetResult.Object || go.ObjectCount < 1) return (null, null);
+      var res = go.Get();
 
-    var objRef = go.Object(0);
-    if (objRef == null) return (null, null);
+      if (res == GetResult.Object && go.ObjectCount >= 1)
+      {
+        var objRef = go.Object(0);
+        if (objRef == null) return (null, null);
+        var crv = objRef.Curve() ?? objRef.Geometry() as Curve;
+        if (crv == null) return (null, null);
+        return (objRef, crv.DuplicateCurve());
+      }
 
-    var crv = objRef.Curve() ?? objRef.Geometry() as Curve;
-    if (crv == null) return (null, null);
+      if (res == GetResult.Cancel || go.CommandResult() != Result.Success)
+        return (null, null);
 
-    return (objRef, crv.DuplicateCurve());
+      if (res == GetResult.Option)
+      {
+        _offcut = offcutToggle.CurrentValue;
+        if (go.Option()?.EnglishName == "Length")
+          HandleLengthSubprompt();
+      }
+    }
+  }
+
+  private static void HandleLengthSubprompt()
+  {
+    var gs = new GetString();
+    gs.SetCommandPrompt($"Chamfer cut length ({_length:0.##})");
+    gs.AcceptNothing(true);
+    if (gs.Get() == GetResult.String)
+    {
+      var raw = gs.StringResult().Trim();
+      if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0)
+        _length = v;
+    }
   }
 
   // ── Corner detection ───────────────────────────────────────────────────────
 
   /// <summary>
-  /// Returns which endpoint of each curve is the shared corner (closest pair).
+  /// Finds the closest endpoint pair and computes a virtual corner as the
+  /// intersection of the tangent extensions — correct even when curves do not
+  /// share an endpoint (e.g. previously chamfered).
   /// </summary>
-  private static (bool C1AtStart, bool C2AtStart, Point3d Corner) FindCorner(
+  private static (bool C1AtStart, bool C2AtStart, Point3d VirtualCorner) FindCorner(
     Curve c1, Curve c2)
   {
     bool bestC1s = true, bestC2s = true;
     double best = double.MaxValue;
-    Point3d bestCorner = Point3d.Unset;
 
     foreach (bool c1s in new[] { true, false })
     foreach (bool c2s in new[] { true, false })
     {
-      var p1 = c1s ? c1.PointAtStart : c1.PointAtEnd;
-      var p2 = c2s ? c2.PointAtStart : c2.PointAtEnd;
-      double d = p1.DistanceTo(p2);
-      if (d < best)
-      {
-        best      = d;
-        bestC1s   = c1s;
-        bestC2s   = c2s;
-        bestCorner = (p1 + p2) * 0.5;
-      }
+      double d = (c1s ? c1.PointAtStart : c1.PointAtEnd)
+                 .DistanceTo(c2s ? c2.PointAtStart : c2.PointAtEnd);
+      if (d < best) { best = d; bestC1s = c1s; bestC2s = c2s; }
     }
 
-    return (bestC1s, bestC2s, bestCorner);
+    var ep1 = bestC1s ? c1.PointAtStart : c1.PointAtEnd;
+    var ep2 = bestC2s ? c2.PointAtStart : c2.PointAtEnd;
+
+    // Tangents pointing TOWARD the virtual corner (extension past endpoint).
+    var t1 = bestC1s ? -c1.TangentAtStart : c1.TangentAtEnd;
+    var t2 = bestC2s ? -c2.TangentAtStart : c2.TangentAtEnd;
+    t1.Unitize(); t2.Unitize();
+
+    var lineA = new Line(ep1, ep1 + t1 * 1e4);
+    var lineB = new Line(ep2, ep2 + t2 * 1e4);
+
+    if (Intersection.LineLine(lineA, lineB, out double a, out double b, 1e-6, false))
+      return (bestC1s, bestC2s, (lineA.PointAt(a) + lineB.PointAt(b)) * 0.5);
+
+    // Parallel tangents — fall back to endpoint midpoint.
+    return (bestC1s, bestC2s, (ep1 + ep2) * 0.5);
   }
 
   // ── Chamfer computation ────────────────────────────────────────────────────
@@ -187,13 +237,35 @@ public sealed class vChamfer : Command
 
   private sealed class ChamferPreviewConduit : DisplayConduit
   {
-    public Line? ChamferLine { get; set; }
+    public Line?     ChamferLine  { get; set; }
+    public Polyline? OffcutPoly   { get; set; }
 
     protected override void DrawOverlay(DrawEventArgs e)
     {
       if (ChamferLine is { } line)
         e.Display.DrawLine(line, Color.Cyan, 2);
+      if (OffcutPoly is { } poly)
+        e.Display.DrawPolyline(poly, Color.FromArgb(255, 160, 0), 1);
     }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  private static void UpdateOffcutPreview(
+    ChamferPreviewConduit conduit,
+    Point3d ptA, Point3d ptB,
+    Point3d c1CornerPt, Point3d c2CornerPt)
+  {
+    if (!_offcut)
+    {
+      conduit.OffcutPoly = null;
+      return;
+    }
+
+    var pts = c1CornerPt.DistanceTo(c2CornerPt) < 1e-6
+      ? new[] { ptA, c1CornerPt, ptB, ptA }
+      : new[] { ptA, c1CornerPt, c2CornerPt, ptB, ptA };
+    conduit.OffcutPoly = new Polyline(pts);
   }
 
   // ── Command ────────────────────────────────────────────────────────────────
@@ -202,12 +274,10 @@ public sealed class vChamfer : Command
   {
     LoadOptions();
 
-    // Step 1 — pick first curve.
-    var (ref1, crv1) = PickCurve("Select first curve at corner");
+    var (ref1, crv1) = PickCurveWithOptions("Select first curve at corner");
     if (ref1 == null || crv1 == null) return Result.Cancel;
 
-    // Step 2 — pick second curve.
-    var (ref2, crv2) = PickCurve("Select second curve at corner");
+    var (ref2, crv2) = PickCurveWithOptions("Select second curve at corner");
     if (ref2 == null || crv2 == null) return Result.Cancel;
 
     if (ref1.ObjectId == ref2.ObjectId)
@@ -219,6 +289,10 @@ public sealed class vChamfer : Command
     var (c1AtStart, c2AtStart, corner) = FindCorner(crv1, crv2);
     var cplane = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
 
+    // Corner endpoints on original curves (for offcut polyline).
+    var c1CornerPt = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
+    var c2CornerPt = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
+
     if (!ComputeChamfer(crv1, c1AtStart, crv2, c2AtStart, corner, _length, cplane,
           out var ptA, out var ptB, out var tA, out var tB))
     {
@@ -228,6 +302,7 @@ public sealed class vChamfer : Command
 
     // Interactive preview loop.
     var conduit = new ChamferPreviewConduit { ChamferLine = new Line(ptA, ptB) };
+    UpdateOffcutPreview(conduit, ptA, ptB, c1CornerPt, c2CornerPt);
     conduit.Enabled = true;
     doc.Views.Redraw();
 
@@ -239,6 +314,8 @@ public sealed class vChamfer : Command
         get.SetCommandPrompt("Press Enter to apply chamfer");
         get.AcceptNothing(true);
         get.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
+        var offcutOpt = new OptionToggle(_offcut, "No", "Yes");
+        get.AddOptionToggle("Offcut", ref offcutOpt);
 
         var res = get.Get();
 
@@ -248,28 +325,24 @@ public sealed class vChamfer : Command
         if (res == GetResult.Nothing)
           break; // Enter → apply
 
-        if (res == GetResult.Option && get.Option()?.EnglishName == "Length")
+        if (res == GetResult.Option)
         {
-          conduit.Enabled = false;
-          doc.Views.Redraw();
+          var opt = get.Option();
+          _offcut = offcutOpt.CurrentValue;
 
-          var gs = new GetString();
-          gs.SetCommandPrompt($"Chamfer cut length ({_length:0.##})");
-          gs.AcceptNothing(true);
-
-          if (gs.Get() == GetResult.String)
+          if (opt?.EnglishName == "Length")
           {
-            var raw = gs.StringResult().Trim();
-            if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0)
-              _length = v;
+            conduit.Enabled = false;
+            doc.Views.Redraw();
+            HandleLengthSubprompt();
+            conduit.Enabled = true;
           }
-
-          conduit.Enabled = true;
 
           if (ComputeChamfer(crv1, c1AtStart, crv2, c2AtStart, corner, _length, cplane,
                 out ptA, out ptB, out tA, out tB))
           {
             conduit.ChamferLine = new Line(ptA, ptB);
+            UpdateOffcutPreview(conduit, ptA, ptB, c1CornerPt, c2CornerPt);
           }
           else
           {
@@ -304,6 +377,15 @@ public sealed class vChamfer : Command
     doc.Objects.Replace(ref1.ObjectId, trimmedC1);
     doc.Objects.Replace(ref2.ObjectId, trimmedC2);
     doc.Objects.AddLine(ptA, ptB);
+
+    // Offcut: closed polyline of the corner piece that was removed.
+    if (_offcut)
+    {
+      var pts = c1CornerPt.DistanceTo(c2CornerPt) < doc.ModelAbsoluteTolerance
+        ? new[] { ptA, c1CornerPt, ptB, ptA }
+        : new[] { ptA, c1CornerPt, c2CornerPt, ptB, ptA };
+      doc.Objects.AddPolyline(pts);
+    }
 
     SaveOptions();
     doc.Views.Redraw();
