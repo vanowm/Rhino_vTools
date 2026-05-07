@@ -9,10 +9,10 @@
     <Title>vTools</Title>
     <RootNamespace>vTools</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>26.5.7.1347</Version>
-    <InformationalVersion>26.5.7.1347</InformationalVersion>
-    <AssemblyVersion>26.5.7.1347</AssemblyVersion>
-    <FileVersion>26.5.7.1347</FileVersion>
+    <Version>26.5.7.1349</Version>
+    <InformationalVersion>26.5.7.1349</InformationalVersion>
+    <AssemblyVersion>26.5.7.1349</AssemblyVersion>
+    <FileVersion>26.5.7.1349</FileVersion>
     <!-- Fail fast when output files are locked (no retry loop). -->
     <CopyRetryCount>0</CopyRetryCount>
     <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>
@@ -25,6 +25,14 @@
 
     <Reference Include="RhinoCommon">
       <HintPath>$(ProgramFiles)\Rhino 8\System\RhinoCommon.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Eto">
+      <HintPath>$(ProgramFiles)\Rhino 8\System\Eto.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Rhino.UI">
+      <HintPath>$(ProgramFiles)\Rhino 8\System\Rhino.UI.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
