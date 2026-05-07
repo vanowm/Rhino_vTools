@@ -102,7 +102,7 @@ public sealed class vUzipCenter : Command
       return ZipperValue;
     if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out double plain))
       return plain;
-    var m = Regex.Match(s, @"^(\d+)[\s\-]+(\d+)/(\d+)$");
+    var m = Regex.Match(s, @"^(\d+)[\s\-\+]+(\d+)/(\d+)$");
     if (m.Success)
     {
       int den = int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
