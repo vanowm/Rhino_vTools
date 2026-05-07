@@ -319,19 +319,28 @@ public sealed class vChamfer : Command
         ? crv2.Trim(crv2.Domain.Min, tBorig)
         : crv2.Trim(tBorig, crv2.Domain.Max);
 
-    // Extension lines: crv1End → work1End, shown only when the curve was actually
-    // extended (distance > 1e-6) AND the chamfer cut lands in the original curve body
-    // (CutOff non-null). When ptA is inside the extension zone CutOff1 is null and
-    // drawing the segment would cross the chamfer cut point — so suppress it.
+    // Extension lines: drawn from original corner tip toward the virtual corner,
+    // clipped at the chamfer cut point when ptA lands in the extension zone.
+    //   ptA in extension zone (CutOff null):  Line(crv1End, ptA)      — stops at cut, not past it
+    //   ptA in original body  (CutOff non-null): Line(crv1End, work1End) — full extension; CutOff
+    //     goes the opposite direction from crv1End so there is no cyan-over-red overlap.
     var crv1End  = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
     var work1End = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
-    conduit.Ext1 = crv1End.DistanceTo(work1End) > 1e-6 && conduit.CutOff1 != null
-      ? new Line(crv1End, work1End) : (Line?)null;
+    if (crv1End.DistanceTo(work1End) > 1e-6)
+    {
+      var extPt1 = conduit.CutOff1 != null ? work1End : ptA;
+      conduit.Ext1 = crv1End.DistanceTo(extPt1) > 1e-6 ? new Line(crv1End, extPt1) : (Line?)null;
+    }
+    else conduit.Ext1 = null;
 
     var crv2End  = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
     var work2End = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
-    conduit.Ext2 = crv2End.DistanceTo(work2End) > 1e-6 && conduit.CutOff2 != null
-      ? new Line(crv2End, work2End) : (Line?)null;
+    if (crv2End.DistanceTo(work2End) > 1e-6)
+    {
+      var extPt2 = conduit.CutOff2 != null ? work2End : ptB;
+      conduit.Ext2 = crv2End.DistanceTo(extPt2) > 1e-6 ? new Line(crv2End, extPt2) : (Line?)null;
+    }
+    else conduit.Ext2 = null;
 
     conduit.ChamferLine = new Line(ptA, ptB);
     conduit.ShowTrim    = _trim;
