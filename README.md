@@ -25,7 +25,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vTextFlip](#vtextflip-flow) *(26.04.27.2125)* — flips or rotates annotation text around its object plane
   - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.04.24.1712)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
   - [vTrim](#vtrim-flow) *(26.04.24.1633)* — trims and extends curves with auto-cutter detection and join
-  - [vUzip](#vuzip-flow) *(26.04.24.0934)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
+  - [vUzipParts](#vuzipparts-flow) *(26.04.24.0934)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
   - [vUzipCenter](#vuzipcenter-flow) *(26.05.01.2200)* — offsets a U-shape's three curves inward, fillets the inside corners, and produces a single joined open curve
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
@@ -69,7 +69,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow).
+Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzipParts](#vuzipparts-flow), [vUzipCenter](#vuzipcenter-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -282,7 +282,7 @@ Hidden keywords while editing:
     - Trim removal preview: red.
     - Extend addition preview: green.
 
-### vUzip flow
+### vUzipParts flow
 
 1. Select the center curve.
 1. Adjust runtime options in the command prompt.
@@ -343,7 +343,7 @@ Example:
 
 ```json
 {
-  "vUzip": {
+  "vUzipParts": {
     "label": "",
     "tail": 0.75,
     "layers": {
