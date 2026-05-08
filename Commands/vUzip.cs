@@ -1910,15 +1910,32 @@ public sealed class vUzip : Command
       return Faded(idx >= 0 ? doc.Layers[idx].Color : Color.Gray);
     }
 
-    // Recompute trim caps from partsSelectionIds (called on every loop iteration)
+    // Recompute trim caps from partsSelectionIds (called on every loop iteration).
+    // Finds the two crossing curves whose intersections sit at the extreme ends of
+    // the center curve's parameter domain (outermost = closest to each endpoint).
     List<Curve> GetPartsTrimCaps(Curve center)
     {
       if (!parts || partsSelectionIds.Count == 0) return new List<Curve>();
       var pvItems    = CollectPreselected(doc, Guid.Empty, center, partsSelectionIds, false);
       var pvTouching = pvItems.Where(i => CurvesIntersect(center, i.Curve, tol)).ToList();
-      var pvPlane    = GetCurvePlane(center);
-      var (pvEnds, _) = BuildEndCurves(doc, pvTouching, center, pvPlane, currentTail);
-      return pvEnds;
+      if (pvTouching.Count == 0) return new List<Curve>();
+      var domain = center.Domain;
+      var span   = domain.T1 - domain.T0;
+      CurveItem? startCap = null; var startNorm = double.MaxValue;
+      CurveItem? endCap   = null; var endNorm   = double.MinValue;
+      foreach (var item in pvTouching)
+      {
+        foreach (var p in IntersectionParams(doc, center, item.Curve))
+        {
+          var norm = span > RhinoMath.ZeroTolerance ? (p - domain.T0) / span : 0.5;
+          if (norm < startNorm) { startNorm = norm; startCap = item; }
+          if (norm > endNorm)   { endNorm   = norm; endCap   = item; }
+        }
+      }
+      var caps = new List<Curve>();
+      if (startCap != null) caps.Add(startCap.Curve);
+      if (endCap   != null && !ReferenceEquals(endCap, startCap)) caps.Add(endCap.Curve);
+      return caps;
     }
 
     var conduit = new PreviewConduit { Enabled = true };
@@ -1975,7 +1992,7 @@ public sealed class vUzip : Command
           gm.AddOption("Label", string.IsNullOrEmpty(currentLabel) ? "none" : currentLabel);
           gm.AddOption("Tail",  FmtOpt(currentTail));
           gm.AddOption("Options");
-          var resM = gm.GetMultiple(0, 0);
+          var resM = gm.Get();
           if (resM == GetResult.Nothing) break;
           if (resM == GetResult.Option)
           {
