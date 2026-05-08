@@ -1746,15 +1746,17 @@ public sealed class vUzip : Command
   private static Curve TrimToBothCaps(Curve source, IReadOnlyList<Curve> caps, double tol)
   {
     if (caps.Count == 0) return source;
-    // Build the extended base once so all caps trim against the same backbone
     var nurbs = source.ToNurbsCurve();
     if (nurbs == null) return source;
     var extended = nurbs.Extend(CurveEnd.Both, 1000.0, CurveExtensionStyle.Line) ?? (Curve)nurbs;
     if (!extended.ClosestPoint(source.PointAtStart, out var tOrigS)) return source;
     if (!extended.ClosestPoint(source.PointAtEnd,   out var tOrigE)) return source;
     if (tOrigS > tOrigE) (tOrigS, tOrigE) = (tOrigE, tOrigS);
-    double tS = tOrigS, tE = tOrigE;
     double midT = (tOrigS + tOrigE) * 0.5;
+    // Outermost cap on each side: drive tS as far toward the start as possible,
+    // tE as far toward the end as possible — this handles both trim AND extension.
+    double tS = double.MaxValue;
+    double tE = double.MinValue;
     foreach (var cap in caps)
     {
       var ev = Intersection.CurveCurve(extended, cap, tol, tol);
@@ -1763,19 +1765,22 @@ public sealed class vUzip : Command
         foreach (var e in ev)
         {
           var t = e.ParameterA;
-          if (t <= midT && t > tS) tS = t;
-          if (t >= midT && t < tE) tE = t;
+          if (t <= midT) tS = Math.Min(tS, t);
+          if (t >= midT) tE = Math.Max(tE, t);
         }
       }
       else
       {
-        // No intersection: project cap midpoint onto extended curve to find trim position
+        // No intersection: project cap midpoint onto the extended backbone
         if (!extended.ClosestPoint(CurveMidpoint(cap), out var tc)) continue;
-        if (tc <= midT && tc > tS) tS = tc;
-        if (tc >= midT && tc < tE) tE = tc;
+        if (tc <= midT) tS = Math.Min(tS, tc);
+        if (tc >= midT) tE = Math.Max(tE, tc);
       }
     }
-    if (Math.Abs(tS - tE) < tol) return source;
+    // Fall back to original endpoints for any side that had no cap
+    if (tS > midT) tS = tOrigS;
+    if (tE < midT) tE = tOrigE;
+    if (tS >= tE || Math.Abs(tS - tE) < tol) return source;
     return extended.Trim(tS, tE) ?? source;
   }
 
@@ -2041,7 +2046,8 @@ public sealed class vUzip : Command
               if (partsSelectionIds.Contains(id)) partsSelectionIds.Remove(id);
               else partsSelectionIds.Add(id);
             }
-            continue;
+            // Selection gesture = accept; no second prompt.
+            break;
           }
           continue;
         }
