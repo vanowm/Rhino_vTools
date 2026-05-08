@@ -1746,15 +1746,17 @@ public sealed class vUzip : Command
     ApplyLayerRuntime(lr);
     EnsureCommandLayers(doc, lr);
 
-    double offL   = s.Left;
-    double offR   = s.Right;
-    double offB   = s.Bottom;
-    double radius = s.Radius;
-    bool   glass  = s.Glass;
-    bool   vis    = s.Vis;
-    bool   parts  = s.Parts;
+    double offL         = s.Left;
+    double offR         = s.Right;
+    double offB         = s.Bottom;
+    double radius       = s.Radius;
+    bool   glass        = s.Glass;
+    bool   vis          = s.Vis;
+    bool   parts        = s.Parts;
+    var    currentLabel = s.Label;
+    var    currentTail  = s.Tail;
 
-    // Snapshot preselected IDs (for parts pipeline later)
+    // Snapshot all preselected IDs before clearing selection
     var preselectedIds = doc.Objects.GetSelectedObjects(false, false)
       .Where(o => o != null)
       .Select(o => o.Id)
@@ -1762,15 +1764,16 @@ public sealed class vUzip : Command
     doc.Objects.UnselectAll();
 
     // ── Phase 1: collect 3 U-arm curves ──────────────────────────────────────
-    var preCurves = new List<Curve>();
-    var prePts    = new List<Point3d>();
-    var jTol      = doc.ModelAbsoluteTolerance * 100.0;
+    // preCurveIds tracks the source object ID for each entry in preCurves (parallel list)
+    var preCurves   = new List<Curve>();
+    var prePts      = new List<Point3d>();
+    var preCurveIds = new List<Guid>();
+    var jTol        = doc.ModelAbsoluteTolerance * 100.0;
 
-    // Try to use preselected curves
     foreach (var id in preselectedIds.Take(3))
     {
       var c = CurveFromId(doc, id);
-      if (c != null) { preCurves.Add(c.DuplicateCurve()); prePts.Add(CurveMidpoint(c)); }
+      if (c != null) { preCurves.Add(c.DuplicateCurve()); prePts.Add(CurveMidpoint(c)); preCurveIds.Add(id); }
     }
     if (preCurves.Count > 1)
     {
@@ -1782,10 +1785,10 @@ public sealed class vUzip : Command
           if (preCurves[i].ClosestPoints(preCurves[j], out var pA, out var pB) && pA.DistanceTo(pB) <= jTol)
           { connected[i] = true; break; }
         }
-      var nc = new List<Curve>(); var np = new List<Point3d>();
+      var nc = new List<Curve>(); var np = new List<Point3d>(); var ni = new List<Guid>();
       for (int i = 0; i < preCurves.Count; i++)
-        if (connected[i]) { nc.Add(preCurves[i]); np.Add(prePts[i]); }
-      preCurves = nc; prePts = np;
+        if (connected[i]) { nc.Add(preCurves[i]); np.Add(prePts[i]); ni.Add(preCurveIds[i]); }
+      preCurves = nc; prePts = np; preCurveIds = ni;
     }
 
     int need = 3 - preCurves.Count;
@@ -1833,18 +1836,25 @@ public sealed class vUzip : Command
           preCurves.Add(crv);
           var sp = rf.SelectionPoint();
           prePts.Add(sp.IsValid ? sp : CurveMidpoint(crv));
+          preCurveIds.Add(rf.ObjectId);
           if (!preselectedIds.Contains(rf.ObjectId)) preselectedIds.Add(rf.ObjectId);
         }
         break;
       }
     }
     if (preCurves.Count < 3) return Result.Failure;
+
     var rawCurves = preCurves.Take(3).ToArray();
     var clickPts  = prePts.Take(3).ToArray();
 
-    // ── Phase 2: preview + boundary/cap selection ─────────────────────────────
-    var conduit  = new PreviewConduit { Enabled = true };
-    var capCurves = new List<Curve>(); // accumulated boundary / end-cap curves
+    // IDs that were consumed as the 3 U-arm curves — exclude from parts pipeline
+    var uArmIds = new HashSet<Guid>(preCurveIds.Take(3));
+
+    // Curves available for the parts pipeline = everything preselected except the 3 U-arms
+    var partsSelectionIds = preselectedIds.Where(id => !uArmIds.Contains(id)).ToList();
+
+    // ── Phase 2: preview + curve-selection (parts) or boundary (no parts) ─────
+    var capCurves    = new List<Curve>(); // boundary curve used in parts=off mode
     Curve? displayCurve = null;
     var tol = doc.ModelAbsoluteTolerance;
     static Color Faded(Color c) => Color.FromArgb((c.R + 255) / 2, (c.G + 255) / 2, (c.B + 255) / 2);
@@ -1853,6 +1863,8 @@ public sealed class vUzip : Command
       var idx = doc.Layers.FindByFullPath(name, RhinoMath.UnsetIntIndex);
       return Faded(idx >= 0 ? doc.Layers[idx].Color : Color.Gray);
     }
+
+    var conduit = new PreviewConduit { Enabled = true };
     try
     {
       while (true)
@@ -1864,10 +1876,25 @@ public sealed class vUzip : Command
           conduit.Enabled = false; doc.Views.Redraw(); return Result.Failure;
         }
         displayCurve = finalCurve;
-        foreach (var cap in capCurves) { var cl = TrimExtendToCurve(displayCurve, cap, tol); if (cl != null) displayCurve = cl; }
+
+        // Derive trim caps: auto from partsSelection (parts=on) or explicit capCurves (parts=off)
+        List<Curve> trimCaps;
+        if (parts && partsSelectionIds.Count > 0)
+        {
+          var pvItems    = CollectPreselected(doc, Guid.Empty, finalCurve, partsSelectionIds, false);
+          var pvTouching = pvItems.Where(i => CurvesIntersect(finalCurve, i.Curve, tol)).ToList();
+          var pvPlane    = GetCurvePlane(finalCurve);
+          var (pvEnds, _) = BuildEndCurves(doc, pvTouching, finalCurve, pvPlane, currentTail);
+          trimCaps = pvEnds;
+        }
+        else
+          trimCaps = capCurves;
+
+        foreach (var cap in trimCaps) { var cl = TrimExtendToCurve(displayCurve, cap, tol); if (cl != null) displayCurve = cl; }
+
         conduit.SideCurves.Clear();
         var pvNormal = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
-        var clIdx = doc.Layers.FindByFullPath(s.CenterLayer, RhinoMath.UnsetIntIndex);
+        var clIdx    = doc.Layers.FindByFullPath(s.CenterLayer, RhinoMath.UnsetIntIndex);
         conduit.CenterColor = Faded(clIdx >= 0 ? doc.Layers[clIdx].Color : Color.Cyan);
         conduit.Curve = displayCurve;
         if (glass) foreach (var c in OffsetBothSides(displayCurve, s.GlassOffset, pvNormal, tol)) conduit.SideCurves.Add((c, FadedLayerColor(s.GlassLayer)));
@@ -1875,7 +1902,9 @@ public sealed class vUzip : Command
         doc.Objects.UnselectAll(); doc.Views.Redraw();
 
         var gp2 = new GetObject();
-        gp2.SetCommandPrompt(parts ? "Enter to accept; click curves to set end caps" : "Enter to accept; click curve to trim/extend ends");
+        gp2.SetCommandPrompt(parts
+          ? $"Click curves to include in parts, Enter to accept ({partsSelectionIds.Count} selected)"
+          : "Enter to accept; click curve to trim/extend ends");
         gp2.GeometryFilter = ObjectType.Curve; gp2.SubObjectSelect = false;
         gp2.EnablePreSelect(false, true); gp2.DeselectAllBeforePostSelect = true;
         gp2.AcceptNothing(true);
@@ -1889,20 +1918,28 @@ public sealed class vUzip : Command
         gp2.AddOptionToggle("Glass", ref glassT2);
         gp2.AddOptionToggle("Vis",   ref visT2);
         gp2.AddOptionToggle("Parts", ref partsT2);
+        if (parts)
+        {
+          gp2.AddOption("Label", string.IsNullOrEmpty(currentLabel) ? "none" : currentLabel);
+          gp2.AddOption("Tail",  FmtOpt(currentTail));
+        }
         gp2.AddOption("Options");
+
         var res2 = gp2.Get();
         if (res2 == GetResult.Nothing) break;
         if (res2 == GetResult.Object)
         {
-          var cap = gp2.Object(0).Curve()?.DuplicateCurve();
-          if (cap != null)
+          if (parts)
           {
-            if (parts)
-            {
-              var ex = capCurves.FindIndex(c => CurvesNearlySame(doc, c, cap));
-              if (ex >= 0) capCurves.RemoveAt(ex); else capCurves.Add(cap);
-            }
-            else capCurves = new List<Curve> { cap };
+            // Toggle clicked curve in/out of parts selection by object ID
+            var clickedId = gp2.Object(0).ObjectId;
+            if (partsSelectionIds.Contains(clickedId)) partsSelectionIds.Remove(clickedId);
+            else partsSelectionIds.Add(clickedId);
+          }
+          else
+          {
+            var cap = gp2.Object(0).Curve()?.DuplicateCurve();
+            if (cap != null) capCurves = new List<Curve> { cap };
           }
           doc.Objects.UnselectAll(); continue;
         }
@@ -1915,6 +1952,8 @@ public sealed class vUzip : Command
           else if (opt2 == "Right")   { var v = GetDistSubprompt("Right arm offset", offR); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
           else if (opt2 == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
           else if (opt2 == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
+          else if (opt2 == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
+          else if (opt2 == "Tail")    { var nt = currentTail;  if (RhinoGet.GetNumber("Tail length", true, ref nt) == Result.Success && nt >= 0.0) currentTail = nt; }
           else if (opt2 == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
           continue;
         }
@@ -1924,9 +1963,22 @@ public sealed class vUzip : Command
 
     if (displayCurve == null) return Result.Failure;
 
+    // ── Derive final end curves for commit (glass/vis trim + parts) ───────────
+    List<Curve> finalEndCurves;
+    if (parts && partsSelectionIds.Count > 0)
+    {
+      var feItems    = CollectPreselected(doc, Guid.Empty, displayCurve, partsSelectionIds, false);
+      var feTouching = feItems.Where(i => CurvesIntersect(displayCurve, i.Curve, tol)).ToList();
+      var fePlane    = GetCurvePlane(displayCurve);
+      var (feEnds, _) = BuildEndCurves(doc, feTouching, displayCurve, fePlane, currentTail);
+      finalEndCurves = feEnds;
+    }
+    else
+      finalEndCurves = capCurves;
+
     // ── Commit: center curve ──────────────────────────────────────────────────
-    var centerId2    = AddCurve(doc, displayCurve, s.CenterLayer);
-    var centerItem   = new CurveItem(displayCurve.DuplicateCurve(), s.CenterLayer, centerId2 == Guid.Empty ? (Guid?)null : centerId2);
+    var centerId2  = AddCurve(doc, displayCurve, s.CenterLayer);
+    var centerItem = new CurveItem(displayCurve.DuplicateCurve(), s.CenterLayer, centerId2 == Guid.Empty ? (Guid?)null : centerId2);
 
     // Glass / Vis
     if (glass || vis)
@@ -1937,7 +1989,7 @@ public sealed class vUzip : Command
         foreach (var c in OffsetBothSides(displayCurve, offsetDist, normal, tol))
         {
           var final = c;
-          foreach (var cap in capCurves) { var cl = TrimExtendToCurve(final, cap, tol); if (cl != null) final = cl; }
+          foreach (var cap in finalEndCurves) { var cl = TrimExtendToCurve(final, cap, tol); if (cl != null) final = cl; }
           AddCurve(doc, final, layerName);
         }
       }
@@ -1948,29 +2000,30 @@ public sealed class vUzip : Command
     // Parts pipeline
     if (parts)
     {
-      var allPreItems    = CollectPreselected(doc, centerId2, displayCurve, preselectedIds, requireTouch: false);
-      var touchingItems  = CollectPreselected(doc, centerId2, displayCurve, preselectedIds, requireTouch: true);
-      var touchingIds    = touchingItems.Where(i => i.ObjectId.HasValue).Select(i => i.ObjectId!.Value).ToHashSet();
-      var plane          = GetCurvePlane(displayCurve);
-      var insideSign     = SolveInsideSign(doc, displayCurve, plane);
-      var specs          = ResolvePartSpecs(s.CenterLayer, section.Parts, lr);
+      var plane      = GetCurvePlane(displayCurve);
+      var insideSign = SolveInsideSign(doc, displayCurve, plane);
+      var specs      = ResolvePartSpecs(s.CenterLayer, section.Parts, lr);
       if (specs.Count == 0) { RhinoApp.WriteLine("vUzip: no part specs found in config."); return Result.Success; }
 
-      List<Curve> endCurves;
-      if (capCurves.Count > 0)
-        endCurves = capCurves;
-      else
+      // Use partsSelectionIds (U-arm curves excluded); center curve itself is filtered by centerId2
+      var originalAllPre   = CollectPreselected(doc, centerId2, displayCurve, partsSelectionIds, false);
+      var originalTouching = CollectPreselected(doc, centerId2, displayCurve, partsSelectionIds, true);
+      var (initEndCurves, initEndParentIds) = BuildEndCurves(doc, originalTouching, displayCurve, plane, currentTail);
+
+      var allPreItems   = originalAllPre;
+      var touchingItems = originalTouching;
+      if (Math.Abs(currentTail) <= RhinoMath.ZeroTolerance && initEndParentIds.Count > 0)
       {
-        var (autoEnds, _) = BuildEndCurves(doc, touchingItems, displayCurve, plane, s.Tail);
-        endCurves = autoEnds;
+        allPreItems   = originalAllPre.Where(i => !i.ObjectId.HasValue || !initEndParentIds.Contains(i.ObjectId.Value)).ToList();
+        touchingItems = originalTouching.Where(i => !i.ObjectId.HasValue || !initEndParentIds.Contains(i.ObjectId.Value)).ToList();
       }
+      var touchingIds = touchingItems.Where(t => t.ObjectId.HasValue).Select(t => t.ObjectId!.Value).ToHashSet();
 
       var stamp            = DateTime.Now.ToString("yyMMddHHmmss", CultureInfo.InvariantCulture);
       var allPartObjectIds = new List<List<Guid>>();
       var createdGroups    = new List<string>();
-      var currentLabel     = s.Label;
-      var currentTail      = s.Tail;
-      BuildAllParts(doc, stamp, currentLabel, centerItem, allPreItems, touchingIds, displayCurve, plane, insideSign, endCurves, specs, allPartObjectIds, createdGroups);
+      BuildAllParts(doc, stamp, currentLabel, centerItem, allPreItems, touchingIds, displayCurve, plane, insideSign, initEndCurves, specs, allPartObjectIds, createdGroups);
+
       while (true)
       {
         var anchor = createdGroups.Count > 0 ? createdGroups[0] : null;
@@ -1979,8 +2032,20 @@ public sealed class vUzip : Command
         DeleteCreatedGroupsAndMembers(doc, createdGroups);
         allPartObjectIds.Clear(); createdGroups.Clear();
         currentLabel = newLabel; currentTail = newTail;
-        BuildAllParts(doc, stamp, currentLabel, centerItem, allPreItems, touchingIds, displayCurve, plane, insideSign, endCurves, specs, allPartObjectIds, createdGroups);
+
+        // Re-derive end curves with updated tail
+        var rebuildAllPre   = CollectPreselected(doc, centerId2, displayCurve, partsSelectionIds, false);
+        var rebuildTouching = CollectPreselected(doc, centerId2, displayCurve, partsSelectionIds, true);
+        var (rebuildEndCrvs, rebuildEndParentIds) = BuildEndCurves(doc, rebuildTouching, displayCurve, plane, currentTail);
+        if (Math.Abs(currentTail) <= RhinoMath.ZeroTolerance && rebuildEndParentIds.Count > 0)
+        {
+          rebuildAllPre   = rebuildAllPre.Where(i => !i.ObjectId.HasValue || !rebuildEndParentIds.Contains(i.ObjectId.Value)).ToList();
+          rebuildTouching = rebuildTouching.Where(i => !i.ObjectId.HasValue || !rebuildEndParentIds.Contains(i.ObjectId.Value)).ToList();
+        }
+        var rebuildTouchingIds = rebuildTouching.Where(t => t.ObjectId.HasValue).Select(t => t.ObjectId!.Value).ToHashSet();
+        BuildAllParts(doc, stamp, currentLabel, centerItem, rebuildAllPre, rebuildTouchingIds, displayCurve, plane, insideSign, rebuildEndCrvs, specs, allPartObjectIds, createdGroups);
       }
+
       s.Label = currentLabel ?? DefaultLabel;
       s.Tail  = Math.Max(0.0, currentTail);
       section.Parts = specs;
