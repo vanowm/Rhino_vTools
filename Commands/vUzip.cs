@@ -1734,6 +1734,46 @@ public sealed class vUzip : Command
     }
   }
 
+  // ── Helpers: trim curve against multiple caps simultaneously ──────────────
+
+  // Applies TrimExtendToCurve for each cap against the *original* full curve
+  // (not chained), then keeps whichever trimmed result best reduces both ends.
+  private static Curve TrimToBothCaps(Curve source, IReadOnlyList<Curve> caps, double tol)
+  {
+    if (caps.Count == 0) return source;
+    // Build the extended base once so all caps trim against the same backbone
+    var nurbs = source.ToNurbsCurve();
+    if (nurbs == null) return source;
+    var extended = nurbs.Extend(CurveEnd.Both, 1000.0, CurveExtensionStyle.Line) ?? (Curve)nurbs;
+    if (!extended.ClosestPoint(source.PointAtStart, out var tOrigS)) return source;
+    if (!extended.ClosestPoint(source.PointAtEnd,   out var tOrigE)) return source;
+    if (tOrigS > tOrigE) (tOrigS, tOrigE) = (tOrigE, tOrigS);
+    double tS = tOrigS, tE = tOrigE;
+    double midT = (tOrigS + tOrigE) * 0.5;
+    foreach (var cap in caps)
+    {
+      var ev = Intersection.CurveCurve(extended, cap, tol, tol);
+      if (ev != null && ev.Count > 0)
+      {
+        foreach (var e in ev)
+        {
+          var t = e.ParameterA;
+          if (t <= midT && t > tS) tS = t;
+          if (t >= midT && t < tE) tE = t;
+        }
+      }
+      else
+      {
+        // No intersection: project cap midpoint onto extended curve to find trim position
+        if (!extended.ClosestPoint(CurveMidpoint(cap), out var tc)) continue;
+        if (tc <= midT && tc > tS) tS = tc;
+        if (tc >= midT && tc < tE) tE = tc;
+      }
+    }
+    if (Math.Abs(tS - tE) < tol) return source;
+    return extended.Trim(tS, tE) ?? source;
+  }
+
   // ── RunCommand ────────────────────────────────────────────────────────────
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
@@ -1764,7 +1804,6 @@ public sealed class vUzip : Command
     doc.Objects.UnselectAll();
 
     // ── Phase 1: collect 3 U-arm curves ──────────────────────────────────────
-    // preCurveIds tracks the source object ID for each entry in preCurves (parallel list)
     var preCurves   = new List<Curve>();
     var prePts      = new List<Point3d>();
     var preCurveIds = new List<Guid>();
@@ -1813,6 +1852,11 @@ public sealed class vUzip : Command
         go.AddOptionToggle("Glass", ref glassT);
         go.AddOptionToggle("Vis",   ref visT);
         go.AddOptionToggle("Parts", ref partsT);
+        if (parts)
+        {
+          go.AddOption("Label", string.IsNullOrEmpty(currentLabel) ? "none" : currentLabel);
+          go.AddOption("Tail",  FmtOpt(currentTail));
+        }
         go.AddOption("Options");
         var res = go.GetMultiple(need, need);
         if (res == GetResult.Cancel || go.CommandResult() != Result.Success) return Result.Cancel;
@@ -1824,6 +1868,8 @@ public sealed class vUzip : Command
           else if (opt == "Right")   { var v = GetDistSubprompt("Right arm offset", offR); if (v == null) return Result.Cancel; offR = v.Value; }
           else if (opt == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB); if (v == null) return Result.Cancel; offB = v.Value; }
           else if (opt == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius); if (v == null) return Result.Cancel; radius = v.Value; }
+          else if (opt == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
+          else if (opt == "Tail")    { var nt = currentTail;  if (RhinoGet.GetNumber("Tail length", true, ref nt) == Result.Success && nt >= 0.0) currentTail = nt; }
           else if (opt == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); offL = s.Left; offR = s.Right; offB = s.Bottom; radius = s.Radius; glass = s.Glass; vis = s.Vis; } }
           continue;
         }
@@ -1847,14 +1893,14 @@ public sealed class vUzip : Command
     var rawCurves = preCurves.Take(3).ToArray();
     var clickPts  = prePts.Take(3).ToArray();
 
-    // IDs that were consumed as the 3 U-arm curves — exclude from parts pipeline
+    // IDs consumed as the 3 U-arm curves — always excluded from parts pipeline
     var uArmIds = new HashSet<Guid>(preCurveIds.Take(3));
 
-    // Curves available for the parts pipeline = everything preselected except the 3 U-arms
+    // Parts-pipeline curve set: everything preselected except U-arms
     var partsSelectionIds = preselectedIds.Where(id => !uArmIds.Contains(id)).ToList();
 
     // ── Phase 2: preview + curve-selection (parts) or boundary (no parts) ─────
-    var capCurves    = new List<Curve>(); // boundary curve used in parts=off mode
+    var capCurves   = new List<Curve>(); // single-cap used in parts=off mode
     Curve? displayCurve = null;
     var tol = doc.ModelAbsoluteTolerance;
     static Color Faded(Color c) => Color.FromArgb((c.R + 255) / 2, (c.G + 255) / 2, (c.B + 255) / 2);
@@ -1862,6 +1908,17 @@ public sealed class vUzip : Command
     {
       var idx = doc.Layers.FindByFullPath(name, RhinoMath.UnsetIntIndex);
       return Faded(idx >= 0 ? doc.Layers[idx].Color : Color.Gray);
+    }
+
+    // Recompute trim caps from partsSelectionIds (called on every loop iteration)
+    List<Curve> GetPartsTrimCaps(Curve center)
+    {
+      if (!parts || partsSelectionIds.Count == 0) return new List<Curve>();
+      var pvItems    = CollectPreselected(doc, Guid.Empty, center, partsSelectionIds, false);
+      var pvTouching = pvItems.Where(i => CurvesIntersect(center, i.Curve, tol)).ToList();
+      var pvPlane    = GetCurvePlane(center);
+      var (pvEnds, _) = BuildEndCurves(doc, pvTouching, center, pvPlane, currentTail);
+      return pvEnds;
     }
 
     var conduit = new PreviewConduit { Enabled = true };
@@ -1875,91 +1932,122 @@ public sealed class vUzip : Command
           RhinoApp.WriteLine("vUzip: failed to compute center curve.");
           conduit.Enabled = false; doc.Views.Redraw(); return Result.Failure;
         }
-        displayCurve = finalCurve;
 
-        // Derive trim caps: auto from partsSelection (parts=on) or explicit capCurves (parts=off)
-        List<Curve> trimCaps;
-        if (parts && partsSelectionIds.Count > 0)
-        {
-          var pvItems    = CollectPreselected(doc, Guid.Empty, finalCurve, partsSelectionIds, false);
-          var pvTouching = pvItems.Where(i => CurvesIntersect(finalCurve, i.Curve, tol)).ToList();
-          var pvPlane    = GetCurvePlane(finalCurve);
-          var (pvEnds, _) = BuildEndCurves(doc, pvTouching, finalCurve, pvPlane, currentTail);
-          trimCaps = pvEnds;
-        }
-        else
-          trimCaps = capCurves;
-
-        foreach (var cap in trimCaps) { var cl = TrimExtendToCurve(displayCurve, cap, tol); if (cl != null) displayCurve = cl; }
+        // Determine trim caps and apply all simultaneously
+        var trimCaps = parts ? GetPartsTrimCaps(finalCurve) : capCurves;
+        displayCurve = TrimToBothCaps(finalCurve, trimCaps, tol);
 
         conduit.SideCurves.Clear();
         var pvNormal = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
         var clIdx    = doc.Layers.FindByFullPath(s.CenterLayer, RhinoMath.UnsetIntIndex);
         conduit.CenterColor = Faded(clIdx >= 0 ? doc.Layers[clIdx].Color : Color.Cyan);
         conduit.Curve = displayCurve;
-        if (glass) foreach (var c in OffsetBothSides(displayCurve, s.GlassOffset, pvNormal, tol)) conduit.SideCurves.Add((c, FadedLayerColor(s.GlassLayer)));
-        if (vis)   foreach (var c in OffsetBothSides(displayCurve, s.VisOffset,   pvNormal, tol)) conduit.SideCurves.Add((c, FadedLayerColor(s.VisLayer)));
-        doc.Objects.UnselectAll(); doc.Views.Redraw();
+        if (glass) foreach (var c in OffsetBothSides(displayCurve, s.GlassOffset, pvNormal, tol))
+          conduit.SideCurves.Add((TrimToBothCaps(c, trimCaps, tol), FadedLayerColor(s.GlassLayer)));
+        if (vis) foreach (var c in OffsetBothSides(displayCurve, s.VisOffset, pvNormal, tol))
+          conduit.SideCurves.Add((TrimToBothCaps(c, trimCaps, tol), FadedLayerColor(s.VisLayer)));
 
-        var gp2 = new GetObject();
-        gp2.SetCommandPrompt(parts
-          ? $"Click curves to include in parts, Enter to accept ({partsSelectionIds.Count} selected)"
-          : "Enter to accept; click curve to trim/extend ends");
-        gp2.GeometryFilter = ObjectType.Curve; gp2.SubObjectSelect = false;
-        gp2.EnablePreSelect(false, true); gp2.DeselectAllBeforePostSelect = true;
-        gp2.AcceptNothing(true);
-        gp2.AddOption("Left",   FmtOpt(offL));
-        gp2.AddOption("Right",  FmtOpt(offR));
-        gp2.AddOption("Bottom", FmtOpt(offB));
-        gp2.AddOption("Radius", FmtOpt(radius));
-        var glassT2 = new OptionToggle(glass, "No", "Yes");
-        var visT2   = new OptionToggle(vis,   "No", "Yes");
-        var partsT2 = new OptionToggle(parts, "No", "Yes");
-        gp2.AddOptionToggle("Glass", ref glassT2);
-        gp2.AddOptionToggle("Vis",   ref visT2);
-        gp2.AddOptionToggle("Parts", ref partsT2);
+        // Highlight currently selected parts-selection curves
+        doc.Objects.UnselectAll();
+        if (parts) foreach (var id in partsSelectionIds) doc.Objects.Select(id);
+        doc.Views.Redraw();
+
         if (parts)
         {
-          gp2.AddOption("Label", string.IsNullOrEmpty(currentLabel) ? "none" : currentLabel);
-          gp2.AddOption("Tail",  FmtOpt(currentTail));
-        }
-        gp2.AddOption("Options");
-
-        var res2 = gp2.Get();
-        if (res2 == GetResult.Nothing) break;
-        if (res2 == GetResult.Object)
-        {
-          if (parts)
+          // Multi-select GetObject: window select supported, selected objects highlighted
+          var gm = new GetObject();
+          gm.SetCommandPrompt($"Click/window to toggle curves for parts ({partsSelectionIds.Count} selected), Enter to accept");
+          gm.GeometryFilter = ObjectType.Curve;
+          gm.SubObjectSelect = false;
+          gm.EnablePreSelect(false, true);
+          gm.DeselectAllBeforePostSelect = false;
+          gm.AcceptNothing(true);
+          gm.AddOption("Left",   FmtOpt(offL));
+          gm.AddOption("Right",  FmtOpt(offR));
+          gm.AddOption("Bottom", FmtOpt(offB));
+          gm.AddOption("Radius", FmtOpt(radius));
+          var glassT2p = new OptionToggle(glass, "No", "Yes");
+          var visT2p   = new OptionToggle(vis,   "No", "Yes");
+          var partsT2p = new OptionToggle(parts, "No", "Yes");
+          gm.AddOptionToggle("Glass", ref glassT2p);
+          gm.AddOptionToggle("Vis",   ref visT2p);
+          gm.AddOptionToggle("Parts", ref partsT2p);
+          gm.AddOption("Label", string.IsNullOrEmpty(currentLabel) ? "none" : currentLabel);
+          gm.AddOption("Tail",  FmtOpt(currentTail));
+          gm.AddOption("Options");
+          var resM = gm.GetMultiple(0, 0);
+          if (resM == GetResult.Nothing) break;
+          if (resM == GetResult.Option)
           {
-            // Toggle clicked curve in/out of parts selection by object ID
-            var clickedId = gp2.Object(0).ObjectId;
-            if (partsSelectionIds.Contains(clickedId)) partsSelectionIds.Remove(clickedId);
-            else partsSelectionIds.Add(clickedId);
+            glass = glassT2p.CurrentValue; vis = visT2p.CurrentValue; parts = partsT2p.CurrentValue;
+            var optM = gm.Option()?.EnglishName ?? "";
+            if      (optM == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
+            else if (optM == "Right")   { var v = GetDistSubprompt("Right arm offset", offR); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
+            else if (optM == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
+            else if (optM == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
+            else if (optM == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
+            else if (optM == "Tail")    { var nt = currentTail;  if (RhinoGet.GetNumber("Tail length", true, ref nt) == Result.Success && nt >= 0.0) currentTail = nt; }
+            else if (optM == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
+            continue;
           }
-          else
+          if (gm.CommandResult() != Result.Success) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
+          if (resM == GetResult.Object)
+          {
+            // Toggle all returned objects: if all are already selected, deselect them; otherwise add them
+            var returnedIds = Enumerable.Range(0, gm.ObjectCount).Select(i => gm.Object(i).ObjectId).ToList();
+            bool allAlreadyIn = returnedIds.All(id => partsSelectionIds.Contains(id));
+            foreach (var id in returnedIds)
+            {
+              if (allAlreadyIn) partsSelectionIds.Remove(id);
+              else if (!partsSelectionIds.Contains(id)) partsSelectionIds.Add(id);
+            }
+            continue;
+          }
+          continue;
+        }
+        else
+        {
+          // parts=off: single curve click = boundary trim/extend
+          var gp2 = new GetObject();
+          gp2.SetCommandPrompt("Enter to accept; click curve to trim/extend ends");
+          gp2.GeometryFilter = ObjectType.Curve; gp2.SubObjectSelect = false;
+          gp2.EnablePreSelect(false, true); gp2.DeselectAllBeforePostSelect = true;
+          gp2.AcceptNothing(true);
+          gp2.AddOption("Left",   FmtOpt(offL));
+          gp2.AddOption("Right",  FmtOpt(offR));
+          gp2.AddOption("Bottom", FmtOpt(offB));
+          gp2.AddOption("Radius", FmtOpt(radius));
+          var glassT2 = new OptionToggle(glass, "No", "Yes");
+          var visT2   = new OptionToggle(vis,   "No", "Yes");
+          var partsT2 = new OptionToggle(parts, "No", "Yes");
+          gp2.AddOptionToggle("Glass", ref glassT2);
+          gp2.AddOptionToggle("Vis",   ref visT2);
+          gp2.AddOptionToggle("Parts", ref partsT2);
+          gp2.AddOption("Options");
+          var res2 = gp2.Get();
+          if (res2 == GetResult.Nothing) break;
+          if (res2 == GetResult.Object)
           {
             var cap = gp2.Object(0).Curve()?.DuplicateCurve();
             if (cap != null) capCurves = new List<Curve> { cap };
+            doc.Objects.UnselectAll(); continue;
           }
-          doc.Objects.UnselectAll(); continue;
-        }
-        if (gp2.CommandResult() != Result.Success) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
-        if (res2 == GetResult.Option)
-        {
-          glass = glassT2.CurrentValue; vis = visT2.CurrentValue; parts = partsT2.CurrentValue;
-          var opt2 = gp2.Option()?.EnglishName ?? "";
-          if      (opt2 == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
-          else if (opt2 == "Right")   { var v = GetDistSubprompt("Right arm offset", offR); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
-          else if (opt2 == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
-          else if (opt2 == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
-          else if (opt2 == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
-          else if (opt2 == "Tail")    { var nt = currentTail;  if (RhinoGet.GetNumber("Tail length", true, ref nt) == Result.Success && nt >= 0.0) currentTail = nt; }
-          else if (opt2 == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
-          continue;
+          if (gp2.CommandResult() != Result.Success) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
+          if (res2 == GetResult.Option)
+          {
+            glass = glassT2.CurrentValue; vis = visT2.CurrentValue; parts = partsT2.CurrentValue;
+            var opt2 = gp2.Option()?.EnglishName ?? "";
+            if      (opt2 == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
+            else if (opt2 == "Right")   { var v = GetDistSubprompt("Right arm offset", offR); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
+            else if (opt2 == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
+            else if (opt2 == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
+            else if (opt2 == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
+            continue;
+          }
         }
       }
     }
-    finally { conduit.Enabled = false; }
+    finally { conduit.Enabled = false; doc.Objects.UnselectAll(); }
 
     if (displayCurve == null) return Result.Failure;
 
