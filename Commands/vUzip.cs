@@ -1625,11 +1625,16 @@ public sealed class vUzip : Command
     public Curve? Curve { get; set; }
     public Color  CenterColor { get; set; } = Color.Cyan;
     public List<(Curve Crv, Color Col)> SideCurves { get; } = new();
+    // Parts-selection highlight: curves drawn in bright yellow so they are visible
+    // without relying on doc.Objects.Select (which blocks re-clicking selected objects)
+    public List<Curve> PartsHighlight { get; } = new();
+    private static readonly Color PartsHighlightColor = Color.FromArgb(255, 215, 0);
 
     protected override void DrawOverlay(DrawEventArgs e)
     {
       if (Curve != null) e.Display.DrawCurve(Curve, CenterColor, 2);
       foreach (var (crv, col) in SideCurves) e.Display.DrawCurve(crv, col, 1);
+      foreach (var crv in PartsHighlight) e.Display.DrawCurve(crv, PartsHighlightColor, 2);
     }
   }
 
@@ -1910,26 +1915,40 @@ public sealed class vUzip : Command
       return Faded(idx >= 0 ? doc.Layers[idx].Color : Color.Gray);
     }
 
-    // Recompute trim caps from partsSelectionIds (called on every loop iteration).
-    // Finds the two crossing curves whose intersections sit at the extreme ends of
-    // the center curve's parameter domain (outermost = closest to each endpoint).
+    // Recompute trim caps from partsSelectionIds.
+    // Scans ALL selected curves (not just intersecting ones): uses actual intersection
+    // params when available, otherwise projects the cap's midpoint onto the center curve.
+    // Returns the two curves whose position on the center curve is closest to each end.
     List<Curve> GetPartsTrimCaps(Curve center)
     {
       if (!parts || partsSelectionIds.Count == 0) return new List<Curve>();
-      var pvItems    = CollectPreselected(doc, Guid.Empty, center, partsSelectionIds, false);
-      var pvTouching = pvItems.Where(i => CurvesIntersect(center, i.Curve, tol)).ToList();
-      if (pvTouching.Count == 0) return new List<Curve>();
+      var pvItems = CollectPreselected(doc, Guid.Empty, center, partsSelectionIds, false);
+      if (pvItems.Count == 0) return new List<Curve>();
       var domain = center.Domain;
       var span   = domain.T1 - domain.T0;
       CurveItem? startCap = null; var startNorm = double.MaxValue;
       CurveItem? endCap   = null; var endNorm   = double.MinValue;
-      foreach (var item in pvTouching)
+      foreach (var item in pvItems)
       {
-        foreach (var p in IntersectionParams(doc, center, item.Curve))
+        var intParams = IntersectionParams(doc, center, item.Curve);
+        if (intParams.Count > 0)
         {
-          var norm = span > RhinoMath.ZeroTolerance ? (p - domain.T0) / span : 0.5;
-          if (norm < startNorm) { startNorm = norm; startCap = item; }
-          if (norm > endNorm)   { endNorm   = norm; endCap   = item; }
+          foreach (var p in intParams)
+          {
+            var norm = span > RhinoMath.ZeroTolerance ? (p - domain.T0) / span : 0.5;
+            if (norm < startNorm) { startNorm = norm; startCap = item; }
+            if (norm > endNorm)   { endNorm   = norm; endCap   = item; }
+          }
+        }
+        else
+        {
+          // Non-intersecting cap: project its midpoint onto the center curve
+          if (center.ClosestPoint(CurveMidpoint(item.Curve), out var tc))
+          {
+            var norm = span > RhinoMath.ZeroTolerance ? (tc - domain.T0) / span : 0.5;
+            if (norm < startNorm) { startNorm = norm; startCap = item; }
+            if (norm > endNorm)   { endNorm   = norm; endCap   = item; }
+          }
         }
       }
       var caps = new List<Curve>();
@@ -1964,20 +1983,25 @@ public sealed class vUzip : Command
         if (vis) foreach (var c in OffsetBothSides(displayCurve, s.VisOffset, pvNormal, tol))
           conduit.SideCurves.Add((TrimToBothCaps(c, trimCaps, tol), FadedLayerColor(s.VisLayer)));
 
-        // Highlight currently selected parts-selection curves
+        // Update conduit highlight for parts-selected curves (gold colour).
+        // Do NOT use doc.Objects.Select() — pre-selected objects block re-clicking in GetMultiple.
+        conduit.PartsHighlight.Clear();
+        if (parts)
+          foreach (var id in partsSelectionIds)
+          { var hc = CurveFromId(doc, id); if (hc != null) conduit.PartsHighlight.Add(hc); }
         doc.Objects.UnselectAll();
-        if (parts) foreach (var id in partsSelectionIds) doc.Objects.Select(id);
         doc.Views.Redraw();
 
         if (parts)
         {
-          // Multi-select GetObject: window select supported, selected objects highlighted
+          // GetMultiple(0,0): supports window-box select; each click/window+Enter toggles curves.
+          // DeselectAllBeforePostSelect=true ensures no stale selection state interferes.
           var gm = new GetObject();
-          gm.SetCommandPrompt($"Click/window to toggle curves for parts ({partsSelectionIds.Count} selected), Enter to accept");
+          gm.SetCommandPrompt($"Click/window curves for parts ({partsSelectionIds.Count} selected, gold), Enter to accept");
           gm.GeometryFilter = ObjectType.Curve;
           gm.SubObjectSelect = false;
           gm.EnablePreSelect(false, true);
-          gm.DeselectAllBeforePostSelect = false;
+          gm.DeselectAllBeforePostSelect = true;
           gm.AcceptNothing(true);
           gm.AddOption("Left",   FmtOpt(offL));
           gm.AddOption("Right",  FmtOpt(offR));
@@ -1992,7 +2016,7 @@ public sealed class vUzip : Command
           gm.AddOption("Label", string.IsNullOrEmpty(currentLabel) ? "none" : currentLabel);
           gm.AddOption("Tail",  FmtOpt(currentTail));
           gm.AddOption("Options");
-          var resM = gm.Get();
+          var resM = gm.GetMultiple(0, 0);
           if (resM == GetResult.Nothing) break;
           if (resM == GetResult.Option)
           {
@@ -2010,13 +2034,12 @@ public sealed class vUzip : Command
           if (gm.CommandResult() != Result.Success) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
           if (resM == GetResult.Object)
           {
-            // Toggle all returned objects: if all are already selected, deselect them; otherwise add them
-            var returnedIds = Enumerable.Range(0, gm.ObjectCount).Select(i => gm.Object(i).ObjectId).ToList();
-            bool allAlreadyIn = returnedIds.All(id => partsSelectionIds.Contains(id));
-            foreach (var id in returnedIds)
+            // Per-ID toggle: clicking/windowing already-gold curves removes them; others are added.
+            for (int gi = 0; gi < gm.ObjectCount; gi++)
             {
-              if (allAlreadyIn) partsSelectionIds.Remove(id);
-              else if (!partsSelectionIds.Contains(id)) partsSelectionIds.Add(id);
+              var id = gm.Object(gi).ObjectId;
+              if (partsSelectionIds.Contains(id)) partsSelectionIds.Remove(id);
+              else partsSelectionIds.Add(id);
             }
             continue;
           }
