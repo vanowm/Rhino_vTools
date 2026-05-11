@@ -1933,8 +1933,6 @@ public sealed class vUzip : Command
           }
           need = 3 - preCurves.Count;
           if (need == 0) { glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue; break; }
-          // Re-select saved curves so they appear highlighted on the next GetMultiple iteration.
-          foreach (var id in preCurveIds) doc.Objects.Select(id);
           glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue;
           var opt = go.Option()?.EnglishName ?? "";
           if      (opt == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL, DefaultLeft);    if (v == null) return Result.Cancel; offL = v.Value; }
@@ -1944,6 +1942,8 @@ public sealed class vUzip : Command
           else if (opt == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
           else if (opt == "Tail")    { var nt = currentTail;  if (RhinoGet.GetNumber("Tail length", true, ref nt) == Result.Success && nt >= 0.0) currentTail = nt; }
           else if (opt == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); offL = s.Left; offR = s.Right; offB = s.Bottom; radius = s.Radius; glass = s.Glass; vis = s.Vis; } }
+          // Re-select after the sub-prompt; any getter (GetString/GetNumber) deselects objects.
+          foreach (var id in preCurveIds) doc.Objects.Select(id);
           continue;
         }
         if (res != GetResult.Object) return Result.Cancel;
