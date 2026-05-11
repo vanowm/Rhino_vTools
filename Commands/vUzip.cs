@@ -552,12 +552,13 @@ public sealed class vUzip : Command
     if (offLeft == null || offRight == null || offBottom == null) { Dbg.Write($"  → null: offLeft={offLeft != null} offRight={offRight != null} offBottom={offBottom != null}"); return null; }
     Dbg.Write($"  offsets: left.len={offLeft.GetLength():F3} mid={CurveDomainMidpoint(offLeft)} right.len={offRight.GetLength():F3} mid={CurveDomainMidpoint(offRight)} bottom.len={offBottom.GetLength():F3} mid={CurveDomainMidpoint(offBottom)}");
     double extAmt  = 3.0 * radius + Math.Max(offL, Math.Max(offR, offB));
+    // Compute open-tip hints BEFORE extension: FarEndPt on the original offset is always the un-extended end.
+    var hintLOpen  = FarEndPt(offLeft,  juncLeft.Value);
+    var hintROpen  = FarEndPt(offRight, juncRight.Value);
     var extLeft    = ExtendAtNearEnd(offLeft,  juncLeft.Value,  extAmt);
     var extRight   = ExtendAtNearEnd(offRight, juncRight.Value, extAmt);
     var extBottom  = ExtendBothEnds(offBottom, extAmt);
     Dbg.Write($"  extended: left.len={extLeft.GetLength():F3} right.len={extRight.GetLength():F3} bottom.len={extBottom.GetLength():F3} extAmt={extAmt:F3}");
-    var hintLOpen  = NearEndPt(extLeft,  juncLeft.Value);
-    var hintROpen  = NearEndPt(extRight, juncRight.Value);
     var resL = FindNearestIntersection(extLeft,  extBottom, juncLeft.Value,  tol);
     var resR = FindNearestIntersection(extRight, extBottom, juncRight.Value, tol);
     if (resL == null || resR == null) { Dbg.Write($"  → null: resL={resL.HasValue} resR={resR.HasValue} (no arm-bottom intersection)"); return null; }
