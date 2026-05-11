@@ -1884,7 +1884,6 @@ public sealed class vUzip : Command
     if (need > 0)
     {
       var go = new GetObject();
-      go.SetCommandPrompt($"Select {need} U-shape curve{(need == 1 ? "" : "s")}");
       go.GeometryFilter  = ObjectType.Curve;
       go.SubObjectSelect = false;
       go.EnablePreSelect(false, true);
@@ -1892,6 +1891,7 @@ public sealed class vUzip : Command
       while (true)
       {
         go.ClearCommandOptions();
+        go.SetCommandPrompt($"Select {need} U-shape curve{(need == 1 ? "" : "s")}");
         go.AddOption("Left",   FmtOpt(offL));
         go.AddOption("Right",  FmtOpt(offR));
         go.AddOption("Bottom", FmtOpt(offB));
@@ -1912,6 +1912,27 @@ public sealed class vUzip : Command
         if (res == GetResult.Cancel || go.CommandResult() != Result.Success) return Result.Cancel;
         if (res == GetResult.Option)
         {
+          // ClearCommandOptions() (called at the top of this loop) resets the GetObject's
+          // accumulated object list, losing any curves the user picked before clicking an option.
+          // Save partial picks now so they survive the continue.
+          for (int i = 0; i < go.ObjectCount; i++)
+          {
+            var rf = go.Object(i);
+            if (!preCurveIds.Contains(rf.ObjectId))
+            {
+              var crv = rf.Curve()?.DuplicateCurve();
+              if (crv != null)
+              {
+                preCurves.Add(crv);
+                var sp = rf.SelectionPoint();
+                prePts.Add(sp.IsValid ? sp : CurveMidpoint(crv));
+                preCurveIds.Add(rf.ObjectId);
+                if (!preselectedIds.Contains(rf.ObjectId)) preselectedIds.Add(rf.ObjectId);
+              }
+            }
+          }
+          need = 3 - preCurves.Count;
+          if (need == 0) { glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue; break; }
           glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue;
           var opt = go.Option()?.EnglishName ?? "";
           if      (opt == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL, DefaultLeft);    if (v == null) return Result.Cancel; offL = v.Value; }
