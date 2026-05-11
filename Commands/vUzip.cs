@@ -453,11 +453,12 @@ public sealed class vUzip : Command
 
   private static Curve? TrimKeepSide(Curve curve, Point3d splitPt, Point3d keepPt)
   {
-    if (!curve.ClosestPoint(splitPt, out double t)) return null;
-    var segs = curve.Split(t);
-    if (segs == null || segs.Length == 0) return null;
-    if (segs.Length == 1) return segs[0];
-    return segs.OrderBy(seg => Math.Min(seg.PointAtStart.DistanceTo(keepPt), seg.PointAtEnd.DistanceTo(keepPt))).First();
+    if (!curve.ClosestPoint(splitPt, out double tSplit)) return null;
+    if (!curve.ClosestPoint(keepPt,  out double tKeep))  return null;
+    double tLo = Math.Min(tSplit, tKeep);
+    double tHi = Math.Max(tSplit, tKeep);
+    if (tHi - tLo < RhinoMath.ZeroTolerance) return null;
+    return curve.Trim(tLo, tHi);
   }
 
   private static Curve? TrimBetween(Curve curve, Point3d ptA, Point3d ptB)
