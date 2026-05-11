@@ -534,12 +534,15 @@ public sealed class vUzip : Command
       insidePt = new Point3d((juncLeft.Value.X+juncRight.Value.X)*0.5 + inwardTan.X*step, (juncLeft.Value.Y+juncRight.Value.Y)*0.5 + inwardTan.Y*step, (juncLeft.Value.Z+juncRight.Value.Z)*0.5 + inwardTan.Z*step);
     }
     Dbg.Write($"  insidePt={insidePt} cplaneNormal={cplaneNormal}");
+    Dbg.Write($"  leftCrv: start={leftCrv.PointAtStart} end={leftCrv.PointAtEnd} mid={CurveDomainMidpoint(leftCrv)}");
+    Dbg.Write($"  rightCrv: start={rightCrv.PointAtStart} end={rightCrv.PointAtEnd} mid={CurveDomainMidpoint(rightCrv)}");
+    Dbg.Write($"  btmCrv: start={btmCrv.PointAtStart} end={btmCrv.PointAtEnd} mid={CurveDomainMidpoint(btmCrv)}");
     double tol     = doc.ModelAbsoluteTolerance;
     var offLeft    = OffsetCurveInward(leftCrv,  offL, insidePt, cplaneNormal, tol);
     var offRight   = OffsetCurveInward(rightCrv, offR, insidePt, cplaneNormal, tol);
     var offBottom  = OffsetCurveInward(btmCrv,   offB, insidePt, cplaneNormal, tol);
     if (offLeft == null || offRight == null || offBottom == null) { Dbg.Write($"  → null: offLeft={offLeft != null} offRight={offRight != null} offBottom={offBottom != null}"); return null; }
-    Dbg.Write($"  offsets: left.len={offLeft.GetLength():F3} right.len={offRight.GetLength():F3} bottom.len={offBottom.GetLength():F3}");
+    Dbg.Write($"  offsets: left.len={offLeft.GetLength():F3} mid={CurveDomainMidpoint(offLeft)} right.len={offRight.GetLength():F3} mid={CurveDomainMidpoint(offRight)} bottom.len={offBottom.GetLength():F3} mid={CurveDomainMidpoint(offBottom)}");
     double extAmt  = 3.0 * radius + Math.Max(offL, Math.Max(offR, offB));
     var extLeft    = ExtendAtNearEnd(offLeft,  juncLeft.Value,  extAmt);
     var extRight   = ExtendAtNearEnd(offRight, juncRight.Value, extAmt);
