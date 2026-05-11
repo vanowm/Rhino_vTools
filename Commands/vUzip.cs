@@ -569,7 +569,7 @@ public sealed class vUzip : Command
     var pieces = new Curve[] { trimmedLeft, arcL, trimmedBottom, arcR, trimmedRight };
     var joined = Curve.JoinCurves(pieces, tol);
     if (joined == null || joined.Length == 0) { Dbg.Write("  → null: JoinCurves failed"); return null; }
-    Dbg.Write($"  → joined[0].len={joined[0].GetLength():F3}");
+    Dbg.Write($"  → joined[0].len={joined[0].GetLength():F3} start={joined[0].PointAtStart} end={joined[0].PointAtEnd} domain=[{joined[0].Domain.T0:F6},{joined[0].Domain.T1:F6}]");
     return joined[0];
   }
 
@@ -2007,6 +2007,7 @@ public sealed class vUzip : Command
       var pvItems = CollectPreselected(doc, Guid.Empty, center, ids, false);
       if (pvItems.Count == 0) return new List<Curve>();
       var domain = center.Domain; var span = domain.T1 - domain.T0;
+      Dbg.Write($"ComputeCapCurvesForIds: center.len={center.GetLength():F3} domain=[{domain.T0:F6},{domain.T1:F6}] span={span:F6} start={center.PointAtStart} end={center.PointAtEnd} items={pvItems.Count}");
       CurveItem? startCap = null; var sNorm = double.MaxValue;
       CurveItem? endCap   = null; var eNorm = double.MinValue;
       foreach (var item in pvItems)
@@ -2014,14 +2015,21 @@ public sealed class vUzip : Command
         var ip = IntersectionParams(doc, center, item.Curve);
         if (ip.Count > 0)
         {
-          foreach (var p in ip) { var n = span > RhinoMath.ZeroTolerance ? (p - domain.T0) / span : 0.5; if (n < sNorm) { sNorm = n; startCap = item; } if (n > eNorm) { eNorm = n; endCap = item; } }
+          Dbg.Write($"  item len={item.Curve.GetLength():F3} mid={CurveMidpoint(item.Curve)} intCount={ip.Count}");
+          foreach (var p in ip) { var n = span > RhinoMath.ZeroTolerance ? (p - domain.T0) / span : 0.5; Dbg.Write($"    intP={p:F6} n={n:F6}"); if (n < sNorm) { sNorm = n; startCap = item; } if (n > eNorm) { eNorm = n; endCap = item; } }
         }
         else if (center.ClosestPoint(CurveMidpoint(item.Curve), out var tc))
         {
           var n = span > RhinoMath.ZeroTolerance ? (tc - domain.T0) / span : 0.5;
+          Dbg.Write($"  item len={item.Curve.GetLength():F3} mid={CurveMidpoint(item.Curve)} no-int proj tc={tc:F6} n={n:F6}");
           if (n < sNorm) { sNorm = n; startCap = item; } if (n > eNorm) { eNorm = n; endCap = item; }
         }
+        else
+        {
+          Dbg.Write($"  item len={item.Curve.GetLength():F3} mid={CurveMidpoint(item.Curve)} no-int no-proj");
+        }
       }
+      Dbg.Write($"  → startCap.n={sNorm:F4} endCap.n={eNorm:F4}");
       var caps = new List<Curve>();
       if (startCap != null) caps.Add(startCap.Curve);
       if (endCap   != null && !ReferenceEquals(endCap, startCap)) caps.Add(endCap.Curve);
