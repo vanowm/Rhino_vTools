@@ -2044,7 +2044,7 @@ public sealed class vUzip : Command
           // pre-selected curves highlighted and lets the user add or Shift-remove freely.
           // A single Enter accepts whatever is currently selected — no second prompt needed.
           var gm = new GetObject();
-          gm.SetCommandPrompt($"Select boundary curves for parts ({partsSelectionIds.Count} active). Enter to accept");
+          gm.SetCommandPrompt($"Select boundary curves for parts ({partsSelectionIds.Count} selected)");
           gm.GeometryFilter = ObjectType.Curve;
           gm.SubObjectSelect = false;
           gm.EnablePreSelect(true, true);
@@ -2075,6 +2075,25 @@ public sealed class vUzip : Command
           {
             partsSelectionIds = newIds;
             Dbg.Write($"  accepted: {partsSelectionIds.Count} boundary curves");
+            // Recompute displayCurve with the final cap selection before breaking.
+            // Without this, displayCurve is the uncapped pre-stage-2 value and the commit
+            // phase (center curve, glass/vis, parts BuildEndCurves) will all be wrong.
+            var fcFinal = ComputeResult(rawCurves, clickPts, offL, offR, offB, radius, doc);
+            if (fcFinal != null)
+            {
+              var finalCaps2 = GetPartsTrimCaps(fcFinal);
+              displayCurve = TrimToBothCaps(fcFinal, finalCaps2, tol);
+              // Update conduit so the user sees the correct result before placement
+              conduit.Curve = displayCurve;
+              conduit.SideCurves.Clear();
+              var fnNormal = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
+              if (glass) foreach (var c in OffsetBothSides(displayCurve, s.GlassOffset, fnNormal, tol))
+                conduit.SideCurves.Add((TrimToBothCaps(c, finalCaps2, tol), FadedLayerColor(s.GlassLayer)));
+              if (vis) foreach (var c in OffsetBothSides(displayCurve, s.VisOffset, fnNormal, tol))
+                conduit.SideCurves.Add((TrimToBothCaps(c, finalCaps2, tol), FadedLayerColor(s.VisLayer)));
+              doc.Views.Redraw();
+              Dbg.Write($"  displayCurve.len={displayCurve.GetLength():F3} caps={finalCaps2.Count}");
+            }
             break;
           }
           if (resM == GetResult.Option)
@@ -2164,11 +2183,7 @@ public sealed class vUzip : Command
       void AddOffsets(double offsetDist, string layerName)
       {
         foreach (var c in OffsetBothSides(displayCurve, offsetDist, normal, tol))
-        {
-          var final = c;
-          foreach (var cap in finalEndCurves) { var cl = TrimExtendToCurve(final, cap, tol); if (cl != null) final = cl; }
-          AddCurve(doc, final, layerName);
-        }
+          AddCurve(doc, TrimToBothCaps(c, finalEndCurves, tol), layerName);
       }
       if (glass) AddOffsets(s.GlassOffset, s.GlassLayer);
       if (vis)   AddOffsets(s.VisOffset,   s.VisLayer);
