@@ -2031,25 +2031,24 @@ public sealed class vUzip : Command
         if (vis) foreach (var c in OffsetBothSides(displayCurve, s.VisOffset, pvNormal, tol))
           conduit.SideCurves.Add((TrimToBothCaps(c, trimCaps, tol), FadedLayerColor(s.VisLayer)));
 
-        // Update conduit highlight for parts-selected curves (gold colour).
-        // Do NOT use doc.Objects.Select() — pre-selected objects block re-clicking in GetMultiple.
+        // Pre-select current parts set so Rhino shows them highlighted natively.
+        // This enables natural add (click/window) and remove (Shift+click/Shift+window).
         conduit.PartsHighlight.Clear();
-        if (parts)
-          foreach (var id in partsSelectionIds)
-          { var hc = CurveFromId(doc, id); if (hc != null) conduit.PartsHighlight.Add(hc); }
         doc.Objects.UnselectAll();
+        if (parts) foreach (var id in partsSelectionIds) doc.Objects.Select(id);
         doc.Views.Redraw();
 
         if (parts)
         {
-          // GetMultiple(0,0): supports window-box select; each click/window+Enter toggles curves.
-          // DeselectAllBeforePostSelect=true ensures no stale selection state interferes.
+          // EnablePreSelect(true,true) + DeselectAllBeforePostSelect=false: Rhino shows the
+          // pre-selected curves highlighted and lets the user add or Shift-remove freely.
+          // A single Enter accepts whatever is currently selected — no second prompt needed.
           var gm = new GetObject();
-          gm.SetCommandPrompt($"Click/window to toggle parts curves ({partsSelectionIds.Count} selected). Enter to accept");
+          gm.SetCommandPrompt($"Select boundary curves for parts ({partsSelectionIds.Count} active). Enter to accept");
           gm.GeometryFilter = ObjectType.Curve;
           gm.SubObjectSelect = false;
-          gm.EnablePreSelect(false, true);
-          gm.DeselectAllBeforePostSelect = true;
+          gm.EnablePreSelect(true, true);
+          gm.DeselectAllBeforePostSelect = false;
           gm.AcceptNothing(true);
           gm.AddOption("Left",   FmtOpt(offL));
           gm.AddOption("Right",  FmtOpt(offR));
@@ -2065,9 +2064,22 @@ public sealed class vUzip : Command
           gm.AddOption("Tail",  FmtOpt(currentTail));
           gm.AddOption("Options");
           var resM = gm.GetMultiple(0, 0);
-          if (resM == GetResult.Nothing) break;
+          // Read the actual Rhino selection state (pre-selected ± user changes).
+          var newIds = doc.Objects.GetSelectedObjects(false, false)
+            .Where(o => o?.Geometry is Curve && !uArmIds.Contains(o.Id))
+            .Select(o => o.Id)
+            .ToList();
+          doc.Objects.UnselectAll();
+          Dbg.Write($"Stage2 resM={resM} rawSelected={newIds.Count}");
+          if (resM == GetResult.Nothing || resM == GetResult.Object)
+          {
+            partsSelectionIds = newIds;
+            Dbg.Write($"  accepted: {partsSelectionIds.Count} boundary curves");
+            break;
+          }
           if (resM == GetResult.Option)
           {
+            partsSelectionIds = newIds; // preserve any mid-session selection changes
             glass = glassT2p.CurrentValue; vis = visT2p.CurrentValue; parts = partsT2p.CurrentValue;
             var optM = gm.Option()?.EnglishName ?? "";
             if      (optM == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
@@ -2080,18 +2092,6 @@ public sealed class vUzip : Command
             continue;
           }
           if (gm.CommandResult() != Result.Success) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
-          if (resM == GetResult.Object)
-          {
-            // Per-ID toggle: selected curves are added if new, removed if already in set.
-            Dbg.Write($"GetMultiple returned Object: objectCount={gm.ObjectCount}");
-            for (int gi = 0; gi < gm.ObjectCount; gi++)
-            {
-              var id = gm.Object(gi).ObjectId;
-              if (partsSelectionIds.Contains(id)) { partsSelectionIds.Remove(id); Dbg.Write($"  removed {id}"); }
-              else { partsSelectionIds.Add(id); Dbg.Write($"  added {id}"); }
-            }
-            continue; // loop back to update preview and show prompt again
-          }
           continue;
         }
         else
