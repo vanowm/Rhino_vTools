@@ -301,6 +301,13 @@ public sealed class vUzip : Command
     return dEnd >= dStart ? c.PointAtEnd : c.PointAtStart;
   }
 
+  private static Point3d NearEndPt(Curve c, Point3d refPt)
+  {
+    double dStart = c.PointAtStart.DistanceTo(refPt);
+    double dEnd   = c.PointAtEnd.DistanceTo(refPt);
+    return dStart <= dEnd ? c.PointAtStart : c.PointAtEnd;
+  }
+
   private static Curve? TrimArmToOpenSide(Curve crv, Point3d splitPt, Point3d clickPt)
   {
     if (!crv.ClosestPoint(splitPt, out double t)) return null;
@@ -548,8 +555,8 @@ public sealed class vUzip : Command
     var extRight   = ExtendAtNearEnd(offRight, juncRight.Value, extAmt);
     var extBottom  = ExtendBothEnds(offBottom, extAmt);
     Dbg.Write($"  extended: left.len={extLeft.GetLength():F3} right.len={extRight.GetLength():F3} bottom.len={extBottom.GetLength():F3} extAmt={extAmt:F3}");
-    var hintLOpen  = FarEndPt(extLeft,  juncLeft.Value);
-    var hintROpen  = FarEndPt(extRight, juncRight.Value);
+    var hintLOpen  = NearEndPt(extLeft,  juncLeft.Value);
+    var hintROpen  = NearEndPt(extRight, juncRight.Value);
     var resL = FindNearestIntersection(extLeft,  extBottom, juncLeft.Value,  tol);
     var resR = FindNearestIntersection(extRight, extBottom, juncRight.Value, tol);
     if (resL == null || resR == null) { Dbg.Write($"  → null: resL={resL.HasValue} resR={resR.HasValue} (no arm-bottom intersection)"); return null; }
