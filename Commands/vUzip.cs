@@ -1618,6 +1618,34 @@ public sealed class vUzip : Command
     }
   }
 
+  // ── Debug log ──────────────────────────────────────────────────────────────
+
+  private static class Dbg
+  {
+    private static string _path = string.Empty;
+
+    public static void Init(string pluginDir)
+    {
+      try
+      {
+        var logsDir = Path.Combine(pluginDir, "logs");
+        Directory.CreateDirectory(logsDir);
+        _path = Path.Combine(logsDir, "vUzip-debug.log");
+      }
+      catch { _path = string.Empty; }
+    }
+
+    public static void Run()
+      => Write($"\n=== vUzip run {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
+
+    public static void Write(string msg)
+    {
+      if (string.IsNullOrEmpty(_path)) return;
+      try { File.AppendAllText(_path, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); }
+      catch { }
+    }
+  }
+
   // ── Preview conduit ───────────────────────────────────────────────────────
 
   private sealed class PreviewConduit : DisplayConduit
@@ -1748,40 +1776,46 @@ public sealed class vUzip : Command
     if (caps.Count == 0) return source;
     var nurbs = source.ToNurbsCurve();
     if (nurbs == null) return source;
+    Dbg.Write($"TrimToBothCaps: source.len={source.GetLength():F3} caps={caps.Count} tol={tol}");
     var extended = nurbs.Extend(CurveEnd.Both, 1000.0, CurveExtensionStyle.Line) ?? (Curve)nurbs;
-    if (!extended.ClosestPoint(source.PointAtStart, out var tOrigS)) return source;
-    if (!extended.ClosestPoint(source.PointAtEnd,   out var tOrigE)) return source;
+    if (!extended.ClosestPoint(source.PointAtStart, out var tOrigS)) { Dbg.Write("  FAIL: no tOrigS"); return source; }
+    if (!extended.ClosestPoint(source.PointAtEnd,   out var tOrigE)) { Dbg.Write("  FAIL: no tOrigE"); return source; }
     if (tOrigS > tOrigE) (tOrigS, tOrigE) = (tOrigE, tOrigS);
     double midT = (tOrigS + tOrigE) * 0.5;
-    // Outermost cap on each side: drive tS as far toward the start as possible,
-    // tE as far toward the end as possible — this handles both trim AND extension.
+    Dbg.Write($"  tOrigS={tOrigS:F6} tOrigE={tOrigE:F6} midT={midT:F6} extDomain=[{extended.Domain.T0:F6},{extended.Domain.T1:F6}]");
     double tS = double.MaxValue;
     double tE = double.MinValue;
-    foreach (var cap in caps)
+    for (int ci = 0; ci < caps.Count; ci++)
     {
+      var cap = caps[ci];
       var ev = Intersection.CurveCurve(extended, cap, tol, tol);
       if (ev != null && ev.Count > 0)
       {
+        Dbg.Write($"  cap[{ci}] len={cap.GetLength():F3} → {ev.Count} intersections:");
         foreach (var e in ev)
         {
           var t = e.ParameterA;
+          Dbg.Write($"    t={t:F6} side={(t <= midT ? "start" : "end")}");
           if (t <= midT) tS = Math.Min(tS, t);
           if (t >= midT) tE = Math.Max(tE, t);
         }
       }
       else
       {
-        // No intersection: project cap midpoint onto the extended backbone
-        if (!extended.ClosestPoint(CurveMidpoint(cap), out var tc)) continue;
+        if (!extended.ClosestPoint(CurveMidpoint(cap), out var tc))
+          { Dbg.Write($"  cap[{ci}] len={cap.GetLength():F3} → no int, proj FAILED"); continue; }
+        Dbg.Write($"  cap[{ci}] len={cap.GetLength():F3} → no int, proj tc={tc:F6} side={(tc <= midT ? "start" : "end")}");
         if (tc <= midT) tS = Math.Min(tS, tc);
         if (tc >= midT) tE = Math.Max(tE, tc);
       }
     }
-    // Fall back to original endpoints for any side that had no cap
-    if (tS > midT) tS = tOrigS;
-    if (tE < midT) tE = tOrigE;
-    if (tS >= tE || Math.Abs(tS - tE) < tol) return source;
-    return extended.Trim(tS, tE) ?? source;
+    if (tS > midT) { Dbg.Write("  tS not set, using tOrigS"); tS = tOrigS; }
+    if (tE < midT) { Dbg.Write("  tE not set, using tOrigE"); tE = tOrigE; }
+    Dbg.Write($"  final tS={tS:F6} tE={tE:F6}");
+    if (tS >= tE || Math.Abs(tS - tE) < tol) { Dbg.Write("  DEGENERATE → returning source"); return source; }
+    var result = extended.Trim(tS, tE) ?? source;
+    Dbg.Write($"  result.len={result.GetLength():F3}");
+    return result;
   }
 
   // ── RunCommand ────────────────────────────────────────────────────────────
@@ -1795,6 +1829,8 @@ public sealed class vUzip : Command
     var lr         = NormalizeLayerRuntime(section.Layers);
     ApplyLayerRuntime(lr);
     EnsureCommandLayers(doc, lr);
+    Dbg.Init(GetPluginDataDirectory());
+    Dbg.Run();
 
     double offL         = s.Left;
     double offR         = s.Right;
@@ -1921,44 +1957,51 @@ public sealed class vUzip : Command
     }
 
     // Recompute trim caps from partsSelectionIds.
-    // Scans ALL selected curves (not just intersecting ones): uses actual intersection
-    // params when available, otherwise projects the cap's midpoint onto the center curve.
-    // Returns the two curves whose position on the center curve is closest to each end.
+    // Scans ALL selected curves: uses intersection params where available,
+    // falls back to projecting the cap midpoint onto the center curve.
+    // Returns the two extreme-position curves (one per end of the center curve).
     List<Curve> GetPartsTrimCaps(Curve center)
     {
-      if (!parts || partsSelectionIds.Count == 0) return new List<Curve>();
+      Dbg.Write($"GetPartsTrimCaps: parts={parts} ids={partsSelectionIds.Count} center.len={center.GetLength():F3}");
+      if (!parts || partsSelectionIds.Count == 0) { Dbg.Write("  → empty (off or no ids)"); return new List<Curve>(); }
       var pvItems = CollectPreselected(doc, Guid.Empty, center, partsSelectionIds, false);
-      if (pvItems.Count == 0) return new List<Curve>();
+      Dbg.Write($"  CollectPreselected → {pvItems.Count} items");
+      if (pvItems.Count == 0) { Dbg.Write("  → empty (CollectPreselected returned 0)"); return new List<Curve>(); }
       var domain = center.Domain;
       var span   = domain.T1 - domain.T0;
+      Dbg.Write($"  center.Domain=[{domain.T0:F4},{domain.T1:F4}] span={span:F4}");
       CurveItem? startCap = null; var startNorm = double.MaxValue;
       CurveItem? endCap   = null; var endNorm   = double.MinValue;
       foreach (var item in pvItems)
       {
         var intParams = IntersectionParams(doc, center, item.Curve);
+        Dbg.Write($"  item layer={item.LayerName} len={item.Curve.GetLength():F3} intParams={intParams.Count}");
         if (intParams.Count > 0)
         {
           foreach (var p in intParams)
           {
             var norm = span > RhinoMath.ZeroTolerance ? (p - domain.T0) / span : 0.5;
+            Dbg.Write($"    intParam={p:F6} norm={norm:F4}");
             if (norm < startNorm) { startNorm = norm; startCap = item; }
             if (norm > endNorm)   { endNorm   = norm; endCap   = item; }
           }
         }
         else
         {
-          // Non-intersecting cap: project its midpoint onto the center curve
           if (center.ClosestPoint(CurveMidpoint(item.Curve), out var tc))
           {
             var norm = span > RhinoMath.ZeroTolerance ? (tc - domain.T0) / span : 0.5;
+            Dbg.Write($"    fallback proj t={tc:F6} norm={norm:F4}");
             if (norm < startNorm) { startNorm = norm; startCap = item; }
             if (norm > endNorm)   { endNorm   = norm; endCap   = item; }
           }
+          else Dbg.Write("    fallback proj FAILED");
         }
       }
       var caps = new List<Curve>();
-      if (startCap != null) caps.Add(startCap.Curve);
-      if (endCap   != null && !ReferenceEquals(endCap, startCap)) caps.Add(endCap.Curve);
+      if (startCap != null) { caps.Add(startCap.Curve); Dbg.Write($"  startCap layer={startCap.LayerName} norm={startNorm:F4}"); }
+      if (endCap   != null && !ReferenceEquals(endCap, startCap)) { caps.Add(endCap.Curve); Dbg.Write($"  endCap   layer={endCap.LayerName} norm={endNorm:F4}"); }
+      Dbg.Write($"  → {caps.Count} caps");
       return caps;
     }
 
@@ -2002,7 +2045,7 @@ public sealed class vUzip : Command
           // GetMultiple(0,0): supports window-box select; each click/window+Enter toggles curves.
           // DeselectAllBeforePostSelect=true ensures no stale selection state interferes.
           var gm = new GetObject();
-          gm.SetCommandPrompt($"Click/window curves for parts ({partsSelectionIds.Count} selected, gold), Enter to accept");
+          gm.SetCommandPrompt($"Click/window to toggle parts curves ({partsSelectionIds.Count} selected). Enter to accept");
           gm.GeometryFilter = ObjectType.Curve;
           gm.SubObjectSelect = false;
           gm.EnablePreSelect(false, true);
@@ -2039,15 +2082,15 @@ public sealed class vUzip : Command
           if (gm.CommandResult() != Result.Success) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
           if (resM == GetResult.Object)
           {
-            // Per-ID toggle: clicking/windowing already-gold curves removes them; others are added.
+            // Per-ID toggle: selected curves are added if new, removed if already in set.
+            Dbg.Write($"GetMultiple returned Object: objectCount={gm.ObjectCount}");
             for (int gi = 0; gi < gm.ObjectCount; gi++)
             {
               var id = gm.Object(gi).ObjectId;
-              if (partsSelectionIds.Contains(id)) partsSelectionIds.Remove(id);
-              else partsSelectionIds.Add(id);
+              if (partsSelectionIds.Contains(id)) { partsSelectionIds.Remove(id); Dbg.Write($"  removed {id}"); }
+              else { partsSelectionIds.Add(id); Dbg.Write($"  added {id}"); }
             }
-            // Selection gesture = accept; no second prompt.
-            break;
+            continue; // loop back to update preview and show prompt again
           }
           continue;
         }
