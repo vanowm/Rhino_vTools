@@ -1956,56 +1956,69 @@ public sealed class vUzip : Command
       return Faded(idx >= 0 ? doc.Layers[idx].Color : Color.Gray);
     }
 
-    // Recompute trim caps from partsSelectionIds.
-    // Scans ALL selected curves: uses intersection params where available,
-    // falls back to projecting the cap midpoint onto the center curve.
-    // Returns the two extreme-position curves (one per end of the center curve).
-    List<Curve> GetPartsTrimCaps(Curve center)
+    // Core cap computation — shared by GetPartsTrimCaps and the live selection event handler.
+    List<Curve> ComputeCapCurvesForIds(Curve center, List<Guid> ids)
     {
-      Dbg.Write($"GetPartsTrimCaps: parts={parts} ids={partsSelectionIds.Count} center.len={center.GetLength():F3}");
-      if (!parts || partsSelectionIds.Count == 0) { Dbg.Write("  → empty (off or no ids)"); return new List<Curve>(); }
-      var pvItems = CollectPreselected(doc, Guid.Empty, center, partsSelectionIds, false);
-      Dbg.Write($"  CollectPreselected → {pvItems.Count} items");
-      if (pvItems.Count == 0) { Dbg.Write("  → empty (CollectPreselected returned 0)"); return new List<Curve>(); }
-      var domain = center.Domain;
-      var span   = domain.T1 - domain.T0;
-      Dbg.Write($"  center.Domain=[{domain.T0:F4},{domain.T1:F4}] span={span:F4}");
-      CurveItem? startCap = null; var startNorm = double.MaxValue;
-      CurveItem? endCap   = null; var endNorm   = double.MinValue;
+      if (ids.Count == 0) return new List<Curve>();
+      var pvItems = CollectPreselected(doc, Guid.Empty, center, ids, false);
+      if (pvItems.Count == 0) return new List<Curve>();
+      var domain = center.Domain; var span = domain.T1 - domain.T0;
+      CurveItem? startCap = null; var sNorm = double.MaxValue;
+      CurveItem? endCap   = null; var eNorm = double.MinValue;
       foreach (var item in pvItems)
       {
-        var intParams = IntersectionParams(doc, center, item.Curve);
-        Dbg.Write($"  item layer={item.LayerName} len={item.Curve.GetLength():F3} intParams={intParams.Count}");
-        if (intParams.Count > 0)
+        var ip = IntersectionParams(doc, center, item.Curve);
+        if (ip.Count > 0)
         {
-          foreach (var p in intParams)
-          {
-            var norm = span > RhinoMath.ZeroTolerance ? (p - domain.T0) / span : 0.5;
-            Dbg.Write($"    intParam={p:F6} norm={norm:F4}");
-            if (norm < startNorm) { startNorm = norm; startCap = item; }
-            if (norm > endNorm)   { endNorm   = norm; endCap   = item; }
-          }
+          foreach (var p in ip) { var n = span > RhinoMath.ZeroTolerance ? (p - domain.T0) / span : 0.5; if (n < sNorm) { sNorm = n; startCap = item; } if (n > eNorm) { eNorm = n; endCap = item; } }
         }
-        else
+        else if (center.ClosestPoint(CurveMidpoint(item.Curve), out var tc))
         {
-          if (center.ClosestPoint(CurveMidpoint(item.Curve), out var tc))
-          {
-            var norm = span > RhinoMath.ZeroTolerance ? (tc - domain.T0) / span : 0.5;
-            Dbg.Write($"    fallback proj t={tc:F6} norm={norm:F4}");
-            if (norm < startNorm) { startNorm = norm; startCap = item; }
-            if (norm > endNorm)   { endNorm   = norm; endCap   = item; }
-          }
-          else Dbg.Write("    fallback proj FAILED");
+          var n = span > RhinoMath.ZeroTolerance ? (tc - domain.T0) / span : 0.5;
+          if (n < sNorm) { sNorm = n; startCap = item; } if (n > eNorm) { eNorm = n; endCap = item; }
         }
       }
       var caps = new List<Curve>();
-      if (startCap != null) { caps.Add(startCap.Curve); Dbg.Write($"  startCap layer={startCap.LayerName} norm={startNorm:F4}"); }
-      if (endCap   != null && !ReferenceEquals(endCap, startCap)) { caps.Add(endCap.Curve); Dbg.Write($"  endCap   layer={endCap.LayerName} norm={endNorm:F4}"); }
-      Dbg.Write($"  → {caps.Count} caps");
+      if (startCap != null) caps.Add(startCap.Curve);
+      if (endCap   != null && !ReferenceEquals(endCap, startCap)) caps.Add(endCap.Curve);
       return caps;
     }
 
+    List<Curve> GetPartsTrimCaps(Curve center)
+    {
+      Dbg.Write($"GetPartsTrimCaps: ids={partsSelectionIds.Count} center.len={center.GetLength():F3}");
+      var result = ComputeCapCurvesForIds(center, partsSelectionIds);
+      Dbg.Write($"  → {result.Count} caps");
+      return result;
+    }
+
+    // caps stored at break time — used for glass/vis commit (no tail shift)
+    List<Curve> commitCaps = new List<Curve>();
+    // base uncapped curve from current loop iteration — needed by live event handler
+    Curve? loopFinalCurve = null;
+
     var conduit = new PreviewConduit { Enabled = true };
+
+    // Live conduit update: fires on each Rhino SelectObjects/DeselectObjects event during GetMultiple.
+    // Reads the live Rhino selection to recompute caps and update the preview in real-time.
+    void RefreshConduitFromLiveSel()
+    {
+      if (loopFinalCurve == null) return;
+      var liveIds = doc.Objects.GetSelectedObjects(false, false)
+        .Where(o => o?.Geometry is Curve && !uArmIds.Contains(o.Id))
+        .Select(o => o.Id).ToList();
+      var liveCaps = ComputeCapCurvesForIds(loopFinalCurve, liveIds);
+      var liveDc   = TrimToBothCaps(loopFinalCurve, liveCaps, tol);
+      conduit.Curve = liveDc;
+      conduit.SideCurves.Clear();
+      var ln = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
+      if (glass) foreach (var c in OffsetBothSides(liveDc, s.GlassOffset, ln, tol))
+        conduit.SideCurves.Add((TrimToBothCaps(c, liveCaps, tol), FadedLayerColor(s.GlassLayer)));
+      if (vis) foreach (var c in OffsetBothSides(liveDc, s.VisOffset, ln, tol))
+        conduit.SideCurves.Add((TrimToBothCaps(c, liveCaps, tol), FadedLayerColor(s.VisLayer)));
+      doc.Views.Redraw();
+    }
+    void OnSelChanged(object? _, RhinoObjectSelectionEventArgs e) { if (e.Document == doc) RefreshConduitFromLiveSel(); }
     try
     {
       while (true)
@@ -2018,6 +2031,7 @@ public sealed class vUzip : Command
         }
 
         // Determine trim caps and apply all simultaneously
+        loopFinalCurve = finalCurve;
         var trimCaps = parts ? GetPartsTrimCaps(finalCurve) : capCurves;
         displayCurve = TrimToBothCaps(finalCurve, trimCaps, tol);
 
@@ -2063,7 +2077,13 @@ public sealed class vUzip : Command
           gm.AddOption("Label", string.IsNullOrEmpty(currentLabel) ? "none" : currentLabel);
           gm.AddOption("Tail",  FmtOpt(currentTail));
           gm.AddOption("Options");
+          // Subscribe to selection events so the conduit updates in real-time as the user clicks.
+          // Subscription is AFTER the pre-select calls so those don't trigger RefreshConduitFromLiveSel.
+          RhinoDoc.SelectObjects   += OnSelChanged;
+          RhinoDoc.DeselectObjects += OnSelChanged;
           var resM = gm.GetMultiple(0, 0);
+          RhinoDoc.SelectObjects   -= OnSelChanged;
+          RhinoDoc.DeselectObjects -= OnSelChanged;
           // Read the actual Rhino selection state (pre-selected ± user changes).
           var newIds = doc.Objects.GetSelectedObjects(false, false)
             .Where(o => o?.Geometry is Curve && !uArmIds.Contains(o.Id))
@@ -2082,8 +2102,8 @@ public sealed class vUzip : Command
             if (fcFinal != null)
             {
               var finalCaps2 = GetPartsTrimCaps(fcFinal);
+              commitCaps = finalCaps2; // saved for glass/vis commit (no tail shift)
               displayCurve = TrimToBothCaps(fcFinal, finalCaps2, tol);
-              // Update conduit so the user sees the correct result before placement
               conduit.Curve = displayCurve;
               conduit.SideCurves.Clear();
               var fnNormal = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
@@ -2159,18 +2179,9 @@ public sealed class vUzip : Command
 
     if (displayCurve == null) return Result.Failure;
 
-    // ── Derive final end curves for commit (glass/vis trim + parts) ───────────
-    List<Curve> finalEndCurves;
-    if (parts && partsSelectionIds.Count > 0)
-    {
-      var feItems    = CollectPreselected(doc, Guid.Empty, displayCurve, partsSelectionIds, false);
-      var feTouching = feItems.Where(i => CurvesIntersect(displayCurve, i.Curve, tol)).ToList();
-      var fePlane    = GetCurvePlane(displayCurve);
-      var (feEnds, _) = BuildEndCurves(doc, feTouching, displayCurve, fePlane, currentTail);
-      finalEndCurves = feEnds;
-    }
-    else
-      finalEndCurves = capCurves;
+    // Glass/vis use commitCaps (raw selected boundary curves, no tail offset).
+    // The parts pipeline does its own BuildEndCurves with currentTail internally.
+    var glassVisCaps = parts ? commitCaps : capCurves;
 
     // ── Commit: center curve ──────────────────────────────────────────────────
     var centerId2  = AddCurve(doc, displayCurve, s.CenterLayer);
@@ -2183,7 +2194,7 @@ public sealed class vUzip : Command
       void AddOffsets(double offsetDist, string layerName)
       {
         foreach (var c in OffsetBothSides(displayCurve, offsetDist, normal, tol))
-          AddCurve(doc, TrimToBothCaps(c, finalEndCurves, tol), layerName);
+          AddCurve(doc, TrimToBothCaps(c, glassVisCaps, tol), layerName);
       }
       if (glass) AddOffsets(s.GlassOffset, s.GlassLayer);
       if (vis)   AddOffsets(s.VisOffset,   s.VisLayer);
