@@ -1933,6 +1933,8 @@ public sealed class vUzip : Command
           }
           need = 3 - preCurves.Count;
           if (need == 0) { glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue; break; }
+          // Re-select saved curves so they appear highlighted on the next GetMultiple iteration.
+          foreach (var id in preCurveIds) doc.Objects.Select(id);
           glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue;
           var opt = go.Option()?.EnglishName ?? "";
           if      (opt == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL, DefaultLeft);    if (v == null) return Result.Cancel; offL = v.Value; }
