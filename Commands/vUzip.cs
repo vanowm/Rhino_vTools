@@ -242,7 +242,7 @@ public sealed class vUzip : Command
     return null;
   }
 
-  private static double? GetDistSubprompt(string prompt, double current)
+  private static double? GetDistSubprompt(string prompt, double current, double defaultValue)
   {
     var gs = new GetString();
     gs.SetCommandPrompt($"{prompt} ({FmtDist(current)})");
@@ -251,7 +251,11 @@ public sealed class vUzip : Command
     if (res == GetResult.Nothing) return current;
     if (res == GetResult.String)
     {
-      var v = ParseDist(gs.StringResult());
+      var raw = gs.StringResult().Trim();
+      if (raw.Equals("d", StringComparison.OrdinalIgnoreCase) ||
+          raw.Equals("r", StringComparison.OrdinalIgnoreCase))
+        return defaultValue;
+      var v = ParseDist(raw);
       if (v.HasValue && v.Value > 0.0) return v.Value;
       return current;
     }
@@ -1910,10 +1914,10 @@ public sealed class vUzip : Command
         {
           glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue;
           var opt = go.Option()?.EnglishName ?? "";
-          if      (opt == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL); if (v == null) return Result.Cancel; offL = v.Value; }
-          else if (opt == "Right")   { var v = GetDistSubprompt("Right arm offset", offR); if (v == null) return Result.Cancel; offR = v.Value; }
-          else if (opt == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB); if (v == null) return Result.Cancel; offB = v.Value; }
-          else if (opt == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius); if (v == null) return Result.Cancel; radius = v.Value; }
+          if      (opt == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL, DefaultLeft);    if (v == null) return Result.Cancel; offL = v.Value; }
+          else if (opt == "Right")   { var v = GetDistSubprompt("Right arm offset", offR, DefaultRight);   if (v == null) return Result.Cancel; offR = v.Value; }
+          else if (opt == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB, DefaultBottom);  if (v == null) return Result.Cancel; offB = v.Value; }
+          else if (opt == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius, DefaultRadius); if (v == null) return Result.Cancel; radius = v.Value; }
           else if (opt == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
           else if (opt == "Tail")    { var nt = currentTail;  if (RhinoGet.GetNumber("Tail length", true, ref nt) == Result.Success && nt >= 0.0) currentTail = nt; }
           else if (opt == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); offL = s.Left; offR = s.Right; offB = s.Bottom; radius = s.Radius; glass = s.Glass; vis = s.Vis; } }
@@ -2118,13 +2122,20 @@ public sealed class vUzip : Command
           }
           if (resM == GetResult.Option)
           {
-            partsSelectionIds = newIds; // preserve any mid-session selection changes
+            // newIds is empty when an option is clicked because Rhino fires DeselectObjects
+            // before returning GetResult.Option.  Read from gm.Objects() instead — it retains
+            // the pre-selected + user-added objects through the option event.
+            var gmIds = Enumerable.Range(0, gm.ObjectCount)
+              .Select(i => gm.Object(i).ObjectId)
+              .Where(id => !uArmIds.Contains(id))
+              .ToList();
+            if (gmIds.Count > 0) partsSelectionIds = gmIds;
             glass = glassT2p.CurrentValue; vis = visT2p.CurrentValue; parts = partsT2p.CurrentValue;
             var optM = gm.Option()?.EnglishName ?? "";
-            if      (optM == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
-            else if (optM == "Right")   { var v = GetDistSubprompt("Right arm offset", offR); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
-            else if (optM == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
-            else if (optM == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
+            if      (optM == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL, DefaultLeft);    if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
+            else if (optM == "Right")   { var v = GetDistSubprompt("Right arm offset", offR, DefaultRight);   if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
+            else if (optM == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB, DefaultBottom);  if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
+            else if (optM == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius, DefaultRadius); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
             else if (optM == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
             else if (optM == "Tail")    { var nt = currentTail;  if (RhinoGet.GetNumber("Tail length", true, ref nt) == Result.Success && nt >= 0.0) currentTail = nt; }
             else if (optM == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
@@ -2165,10 +2176,10 @@ public sealed class vUzip : Command
           {
             glass = glassT2.CurrentValue; vis = visT2.CurrentValue; parts = partsT2.CurrentValue;
             var opt2 = gp2.Option()?.EnglishName ?? "";
-            if      (opt2 == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
-            else if (opt2 == "Right")   { var v = GetDistSubprompt("Right arm offset", offR); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
-            else if (opt2 == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
-            else if (opt2 == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
+            if      (opt2 == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL, DefaultLeft);    if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
+            else if (opt2 == "Right")   { var v = GetDistSubprompt("Right arm offset", offR, DefaultRight);   if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
+            else if (opt2 == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB, DefaultBottom);  if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
+            else if (opt2 == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius, DefaultRadius);  if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
             else if (opt2 == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
             continue;
           }
