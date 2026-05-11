@@ -453,12 +453,14 @@ public sealed class vUzip : Command
 
   private static Curve? TrimKeepSide(Curve curve, Point3d splitPt, Point3d keepPt)
   {
-    if (!curve.ClosestPoint(splitPt, out double tSplit)) return null;
-    if (!curve.ClosestPoint(keepPt,  out double tKeep))  return null;
+    if (!curve.ClosestPoint(splitPt, out double tSplit)) { Dbg.Write($"  TrimKeepSide: ClosestPoint failed for splitPt={splitPt}"); return null; }
+    if (!curve.ClosestPoint(keepPt,  out double tKeep))  { Dbg.Write($"  TrimKeepSide: ClosestPoint failed for keepPt={keepPt}");  return null; }
     double tLo = Math.Min(tSplit, tKeep);
     double tHi = Math.Max(tSplit, tKeep);
-    if (tHi - tLo < RhinoMath.ZeroTolerance) return null;
-    return curve.Trim(tLo, tHi);
+    if (tHi - tLo < RhinoMath.ZeroTolerance) { Dbg.Write($"  TrimKeepSide: degenerate tSplit={tSplit:F6} tKeep={tKeep:F6} diff={tHi-tLo}"); return null; }
+    var result = curve.Trim(tLo, tHi);
+    if (result == null) Dbg.Write($"  TrimKeepSide: Trim({tLo:F6},{tHi:F6}) returned null domain=[{curve.Domain.T0:F6},{curve.Domain.T1:F6}]");
+    return result;
   }
 
   private static Curve? TrimBetween(Curve curve, Point3d ptA, Point3d ptB)
@@ -573,6 +575,7 @@ public sealed class vUzip : Command
     var arcR = FilletArcOnly(extRight, hintArmR, extBottom, hintBtmR, radius, tol, angleTol); if (arcR == null) { Dbg.Write("  → null: arcR fillet failed"); return null; }
     var (tanLArm, tanLBtm) = ArcTangentPts(arcL, extLeft,  extBottom);
     var (tanRArm, tanRBtm) = ArcTangentPts(arcR, extRight, extBottom);
+    Dbg.Write($"  tanPts: tanLArm={tanLArm} hintLOpen={hintLOpen} tanRArm={tanRArm} hintROpen={hintROpen}");
     var trimmedLeft   = TrimKeepSide(extLeft,   tanLArm, hintLOpen);
     var trimmedRight  = TrimKeepSide(extRight,  tanRArm, hintROpen);
     var trimmedBottom = TrimBetween(extBottom, tanLBtm, tanRBtm);
