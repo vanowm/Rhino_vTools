@@ -323,6 +323,7 @@ public sealed class vUzip : Command
       if (!curves[a].ClosestPoints(curves[btm], out var ptArmA, out var ptBtmA)) continue;
       if (!curves[b].ClosestPoints(curves[btm], out var ptArmB, out var ptBtmB)) continue;
       double score = ptArmA.DistanceTo(ptBtmA) + ptArmB.DistanceTo(ptBtmB);
+      Dbg.Write($"  IdentifyU candidate btm={btm} a={a} b={b} score={score:F4} (armA-btm={ptArmA.DistanceTo(ptBtmA):F4} armB-btm={ptArmB.DistanceTo(ptBtmB):F4})");
       if (score < bestScore) { bestScore = score; bottomIdx = btm; armA = a; armB = b; }
     }
     var bottom = curves[bottomIdx];
@@ -332,7 +333,11 @@ public sealed class vUzip : Command
     var cplaneZ   = view?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
     var refA      = (clickPts != null && clickPts.Length == 3) ? clickPts[armA] : CurveDomainMidpoint(curves[armA]);
     var cross     = Vector3d.CrossProduct(bottom.TangentAt(tMid), refA - midBtm);
-    if (Vector3d.Multiply(cross, cplaneZ) >= 0) return (bottomIdx, armA, armB);
+    double dot    = Vector3d.Multiply(cross, cplaneZ);
+    Dbg.Write($"  IdentifyU: bottomIdx={bottomIdx} (len={curves[bottomIdx].GetLength():F3}) bestScore={bestScore:F4}");
+    Dbg.Write($"    armA={armA}(len={curves[armA].GetLength():F3}) armB={armB}(len={curves[armB].GetLength():F3}) cross·cplaneZ={dot:F6}");
+    if (dot >= 0) { Dbg.Write($"    → left={armA} right={armB}"); return (bottomIdx, armA, armB); }
+    Dbg.Write($"    → left={armB} right={armA}");
     return (bottomIdx, armB, armA);
   }
 
@@ -495,6 +500,9 @@ public sealed class vUzip : Command
 
   private static Curve? ComputeResult(Curve[] rawCurves, Point3d[]? clickPts, double offL, double offR, double offB, double radius, RhinoDoc doc)
   {
+    Dbg.Write($"ComputeResult: offL={offL:F3} offR={offR:F3} offB={offB:F3} radius={radius:F3} curves={rawCurves.Length}");
+    for (int i = 0; i < rawCurves.Length; i++)
+      Dbg.Write($"  raw[{i}] len={rawCurves[i].GetLength():F3} domain={rawCurves[i].Domain}");
     var (bottomIdx, leftIdx, rightIdx) = IdentifyUComponents(rawCurves, clickPts, doc);
     var btmCrv   = rawCurves[bottomIdx];
     var leftCrv  = rawCurves[leftIdx];
@@ -503,11 +511,13 @@ public sealed class vUzip : Command
     var cplaneNormal = view?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
     var juncLeft  = JunctionPtOnBottom(leftCrv,  btmCrv);
     var juncRight = JunctionPtOnBottom(rightCrv, btmCrv);
-    if (juncLeft == null || juncRight == null) return null;
+    if (juncLeft == null || juncRight == null) { Dbg.Write($"  → null: juncLeft={juncLeft.HasValue} juncRight={juncRight.HasValue}"); return null; }
+    Dbg.Write($"  juncLeft={juncLeft.Value} juncRight={juncRight.Value}");
     var clickL = (clickPts != null && clickPts.Length == 3) ? clickPts[leftIdx]  : CurveDomainMidpoint(leftCrv);
     var clickR = (clickPts != null && clickPts.Length == 3) ? clickPts[rightIdx] : CurveDomainMidpoint(rightCrv);
     if (leftCrv.ClosestPoints(btmCrv,  out var armPtL, out _)) { var seg = TrimArmToOpenSide(leftCrv,  armPtL, clickL); if (seg != null) leftCrv  = seg; }
     if (rightCrv.ClosestPoints(btmCrv, out var armPtR, out _)) { var seg = TrimArmToOpenSide(rightCrv, armPtR, clickR); if (seg != null) rightCrv = seg; }
+    Dbg.Write($"  trimmedArms: left.len={leftCrv.GetLength():F3} right.len={rightCrv.GetLength():F3}");
     Point3d insidePt;
     if (clickPts != null && clickPts.Length == 3)
     {
@@ -523,37 +533,44 @@ public sealed class vUzip : Command
       var inwardTan  = ArmInwardTangent(leftCrv, juncLeft.Value);
       insidePt = new Point3d((juncLeft.Value.X+juncRight.Value.X)*0.5 + inwardTan.X*step, (juncLeft.Value.Y+juncRight.Value.Y)*0.5 + inwardTan.Y*step, (juncLeft.Value.Z+juncRight.Value.Z)*0.5 + inwardTan.Z*step);
     }
+    Dbg.Write($"  insidePt={insidePt} cplaneNormal={cplaneNormal}");
     double tol     = doc.ModelAbsoluteTolerance;
     var offLeft    = OffsetCurveInward(leftCrv,  offL, insidePt, cplaneNormal, tol);
     var offRight   = OffsetCurveInward(rightCrv, offR, insidePt, cplaneNormal, tol);
     var offBottom  = OffsetCurveInward(btmCrv,   offB, insidePt, cplaneNormal, tol);
-    if (offLeft == null || offRight == null || offBottom == null) return null;
+    if (offLeft == null || offRight == null || offBottom == null) { Dbg.Write($"  → null: offLeft={offLeft != null} offRight={offRight != null} offBottom={offBottom != null}"); return null; }
+    Dbg.Write($"  offsets: left.len={offLeft.GetLength():F3} right.len={offRight.GetLength():F3} bottom.len={offBottom.GetLength():F3}");
     double extAmt  = 3.0 * radius + Math.Max(offL, Math.Max(offR, offB));
     var extLeft    = ExtendAtNearEnd(offLeft,  juncLeft.Value,  extAmt);
     var extRight   = ExtendAtNearEnd(offRight, juncRight.Value, extAmt);
     var extBottom  = ExtendBothEnds(offBottom, extAmt);
+    Dbg.Write($"  extended: left.len={extLeft.GetLength():F3} right.len={extRight.GetLength():F3} bottom.len={extBottom.GetLength():F3} extAmt={extAmt:F3}");
     var hintLOpen  = FarEndPt(extLeft,  juncLeft.Value);
     var hintROpen  = FarEndPt(extRight, juncRight.Value);
     var resL = FindNearestIntersection(extLeft,  extBottom, juncLeft.Value,  tol);
     var resR = FindNearestIntersection(extRight, extBottom, juncRight.Value, tol);
-    if (resL == null || resR == null) return null;
+    if (resL == null || resR == null) { Dbg.Write($"  → null: resL={resL.HasValue} resR={resR.HasValue} (no arm-bottom intersection)"); return null; }
     var (isectL, _, _) = resL.Value; var (isectR, _, _) = resR.Value;
+    Dbg.Write($"  intersections: isectL={isectL} isectR={isectR}");
     var hintArmL = WalkAlongCurve(extLeft,   isectL, radius, hintLOpen);
     var hintBtmL = WalkAlongCurve(extBottom, isectL, radius, isectR);
     var hintArmR = WalkAlongCurve(extRight,  isectR, radius, hintROpen);
     var hintBtmR = WalkAlongCurve(extBottom, isectR, radius, isectL);
     double angleTol = doc.ModelAngleToleranceRadians;
-    var arcL = FilletArcOnly(extLeft,  hintArmL, extBottom, hintBtmL, radius, tol, angleTol); if (arcL == null) return null;
-    var arcR = FilletArcOnly(extRight, hintArmR, extBottom, hintBtmR, radius, tol, angleTol); if (arcR == null) return null;
+    var arcL = FilletArcOnly(extLeft,  hintArmL, extBottom, hintBtmL, radius, tol, angleTol); if (arcL == null) { Dbg.Write("  → null: arcL fillet failed"); return null; }
+    var arcR = FilletArcOnly(extRight, hintArmR, extBottom, hintBtmR, radius, tol, angleTol); if (arcR == null) { Dbg.Write("  → null: arcR fillet failed"); return null; }
     var (tanLArm, tanLBtm) = ArcTangentPts(arcL, extLeft,  extBottom);
     var (tanRArm, tanRBtm) = ArcTangentPts(arcR, extRight, extBottom);
     var trimmedLeft   = TrimKeepSide(extLeft,   tanLArm, hintLOpen);
     var trimmedRight  = TrimKeepSide(extRight,  tanRArm, hintROpen);
     var trimmedBottom = TrimBetween(extBottom, tanLBtm, tanRBtm);
-    if (trimmedLeft == null || trimmedRight == null || trimmedBottom == null) return null;
+    if (trimmedLeft == null || trimmedRight == null || trimmedBottom == null) { Dbg.Write($"  → null: trimmedLeft={trimmedLeft != null} trimmedRight={trimmedRight != null} trimmedBottom={trimmedBottom != null}"); return null; }
+    Dbg.Write($"  trimmed: left.len={trimmedLeft.GetLength():F3} right.len={trimmedRight.GetLength():F3} bottom.len={trimmedBottom.GetLength():F3}");
     var pieces = new Curve[] { trimmedLeft, arcL, trimmedBottom, arcR, trimmedRight };
     var joined = Curve.JoinCurves(pieces, tol);
-    return joined != null && joined.Length > 0 ? joined[0] : null;
+    if (joined == null || joined.Length == 0) { Dbg.Write("  → null: JoinCurves failed"); return null; }
+    Dbg.Write($"  → joined[0].len={joined[0].GetLength():F3}");
+    return joined[0];
   }
 
   // ── Parts config helpers ──────────────────────────────────────────────────
