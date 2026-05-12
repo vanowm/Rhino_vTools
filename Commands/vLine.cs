@@ -659,7 +659,7 @@ public sealed class vLine : Command
 
       e.Display.DrawPoint(ep, Rhino.Display.PointStyle.RoundSimple, 2, previewColor);
       if (parallelSnapping)
-        e.Display.DrawPoint(ep, Rhino.Display.PointStyle.RoundSimple, 6, Color.White);
+        e.Display.DrawPoint(ep, Rhino.Display.PointStyle.X, 10, Color.Yellow);
     };
 
     getPoint.DynamicDraw += drawPreview;
