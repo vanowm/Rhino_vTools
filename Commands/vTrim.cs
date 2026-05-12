@@ -62,11 +62,9 @@ public sealed class vTrim : Command
     doc.Objects.UnselectAll();
     doc.Views.Redraw();
 
-    var allowDoneInTargetPrompt = false;
-
     while (true)
     {
-      var pick = PickTarget(doc, cutters.AutoMode, cutters.CutterIds, _extendAsLine, _joinAfterTrim, allowDoneInTargetPrompt);
+      var pick = PickTarget(doc, cutters.AutoMode, cutters.CutterIds, _extendAsLine, _joinAfterTrim, allowDone: true);
       if (pick.State == PickerState.Cancel)
       {
         SavePersistedOptions();
@@ -81,8 +79,6 @@ public sealed class vTrim : Command
 
       if (pick.State == PickerState.Undo)
       {
-        allowDoneInTargetPrompt = true;
-
         if (!TryUndo(doc, history))
           RhinoApp.WriteLine("vTrim: nothing to undo.");
 
@@ -92,16 +88,12 @@ public sealed class vTrim : Command
 
       if (pick.State == PickerState.Redo)
       {
-        allowDoneInTargetPrompt = true;
-
         if (!TryRedo(doc, history))
           RhinoApp.WriteLine("vTrim: nothing to redo.");
 
         doc.Views.Redraw();
         continue;
       }
-
-      allowDoneInTargetPrompt = true;
 
       _extendAsLine = pick.ExtendAsLine;
       _joinAfterTrim = pick.JoinAfterTrim;
