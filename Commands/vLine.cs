@@ -392,6 +392,7 @@ public sealed class vLine : Command
     var idxPerpNear = getPoint.AddOption("PerpNear");
     var idxTanNear = getPoint.AddOption("TanNear");
     var idxAuto = getPoint.AddOption("Auto");
+    var idxParallel = getPoint.AddOption("Parallel");
     var idxPriority = getPoint.AddOptionList("Priority", PriorityValues, priorityIndex);
     getPoint.AddOptionToggle("PersistConstraint", ref persistConstraint);
     var idxLength = getPoint.AddOptionDouble("Length", ref lengthOption);
@@ -400,6 +401,7 @@ public sealed class vLine : Command
     getPoint.AddOptionToggle("AngleRef", ref angleRelative);
 
     var mode = initialMode;
+    Vector3d? parallelDir = null;
 
     var cacheState = new CurveCacheState(CollectCurveCache(doc), DateTime.UtcNow.AddMilliseconds(500));
     string? lastAutoChoice = null;
@@ -417,6 +419,8 @@ public sealed class vLine : Command
         getPoint.SetCommandPrompt("End point of line (TanNear mode: solves against nearest curve)");
       else if (mode == "auto")
         getPoint.SetCommandPrompt("End point of line (Auto mode: priority chooses Perp/Tangent)");
+      else if (mode == "parallel")
+        getPoint.SetCommandPrompt("End point of line (Parallel)");
       else
         getPoint.SetCommandPrompt("End point of line");
     }
@@ -483,10 +487,21 @@ public sealed class vLine : Command
 
     Point3d? EndpointForMode(string? modeName, Point3d cursorPoint, bool preview)
     {
+      if (string.IsNullOrWhiteSpace(modeName))
+        return null;
+
+      if (modeName == "parallel")
+      {
+        if (!parallelDir.HasValue)
+          return null;
+        var proj = Vector3d.Multiply(cursorPoint - startPoint, parallelDir.Value);
+        return startPoint + (parallelDir.Value * proj);
+      }
+
       MaybeRefreshCurveCache(false);
       var curveCache = cacheState.CurveCache;
 
-      if (curveCache.Count == 0 || string.IsNullOrWhiteSpace(modeName))
+      if (curveCache.Count == 0)
         return null;
 
       var curve = NearestCurveToPoint(cursorPoint, curveCache);
@@ -696,6 +711,31 @@ public sealed class vLine : Command
           if (option.Index == idxAuto)
           {
             mode = "auto";
+            ApplyModePrompt();
+            continue;
+          }
+
+          if (option.Index == idxParallel)
+          {
+            var gDir1 = new GetPoint();
+            gDir1.SetCommandPrompt("Direction start point");
+            gDir1.AcceptNothing(true);
+            if (gDir1.Get() != GetResult.Point) continue;
+            var dirPt1 = gDir1.Point();
+
+            var gDir2 = new GetPoint();
+            gDir2.SetCommandPrompt("Direction end point");
+            gDir2.SetBasePoint(dirPt1, true);
+            gDir2.DrawLineFromPoint(dirPt1, true);
+            gDir2.AcceptNothing(true);
+            if (gDir2.Get() != GetResult.Point) continue;
+            var dirPt2 = gDir2.Point();
+
+            var dirVec = dirPt2 - dirPt1;
+            if (dirVec.IsTiny()) continue;
+            dirVec.Unitize();
+            parallelDir = dirVec;
+            mode = "parallel";
             ApplyModePrompt();
             continue;
           }

@@ -1916,6 +1916,14 @@ public sealed class vUzip : Command
     var    currentLabel = s.Label;
     var    currentTail  = s.Tail;
 
+    void SaveCurrent() => SaveSettings(new UzipSettings
+    {
+      Left = offL, Right = offR, Bottom = offB, Radius = radius,
+      Glass = glass, GlassOffset = s.GlassOffset, GlassLayer = s.GlassLayer,
+      Vis   = vis,   VisOffset   = s.VisOffset,   VisLayer   = s.VisLayer,
+      CenterLayer = s.CenterLayer, Parts = parts, Label = currentLabel ?? s.Label, Tail = currentTail,
+    });
+
     // Snapshot all preselected IDs before clearing selection
     var preselectedIds = doc.Objects.GetSelectedObjects(false, false)
       .Where(o => o != null)
@@ -2002,7 +2010,7 @@ public sealed class vUzip : Command
             }
           }
           need = 3 - preCurves.Count;
-          if (need == 0) { glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue; break; }
+          if (need == 0) { glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue; SaveCurrent(); break; }
           glass = glassT.CurrentValue; vis = visT.CurrentValue; parts = partsT.CurrentValue;
           var opt = go.Option()?.EnglishName ?? "";
           if      (opt == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL, DefaultLeft);    if (v == null) return Result.Cancel; offL = v.Value; }
@@ -2012,6 +2020,7 @@ public sealed class vUzip : Command
           else if (opt == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
           else if (opt == "Tail")    { var nt = currentTail;  if (RhinoGet.GetNumber("Tail length", true, ref nt) == Result.Success && nt >= 0.0) currentTail = nt; }
           else if (opt == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); offL = s.Left; offR = s.Right; offB = s.Bottom; radius = s.Radius; glass = s.Glass; vis = s.Vis; } }
+          SaveCurrent();
           // Re-select after the sub-prompt; any getter (GetString/GetNumber) deselects objects.
           foreach (var id in preCurveIds) doc.Objects.Select(id);
           continue;
@@ -2202,6 +2211,7 @@ public sealed class vUzip : Command
           offB        = bottomOptGm.CurrentValue;
           radius      = radiusOptGm.CurrentValue;
           currentTail = tailOptGm.CurrentValue;
+          SaveCurrent();
           // Read the actual Rhino selection state (pre-selected ± user changes).
           var newIds = doc.Objects.GetSelectedObjects(false, false)
             .Where(o => o?.Geometry is Curve && !uArmIds.Contains(o.Id))
@@ -2246,8 +2256,8 @@ public sealed class vUzip : Command
             if (gmIds.Count > 0) partsSelectionIds = gmIds;
             // Values already captured above; handle sub-prompts for Label/Options.
             var optM = gm.Option()?.EnglishName ?? "";
-            if      (optM == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
-            else if (optM == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
+            if      (optM == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) { currentLabel = (nl ?? DefaultLabel).Trim(); SaveCurrent(); } }
+            else if (optM == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; SaveCurrent(); } }
             continue;
           }
           if (gm.CommandResult() != Result.Success) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
@@ -2283,6 +2293,7 @@ public sealed class vUzip : Command
           offR   = rightOptGp2.CurrentValue;
           offB   = bottomOptGp2.CurrentValue;
           radius = radiusOptGp2.CurrentValue;
+          SaveCurrent();
           if (res2 == GetResult.Nothing) break;
           if (res2 == GetResult.Object)
           {
@@ -2295,7 +2306,7 @@ public sealed class vUzip : Command
           {
             // Values already captured above.
             var opt2 = gp2.Option()?.EnglishName ?? "";
-            if (opt2 == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
+            if (opt2 == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; SaveCurrent(); } }
             continue;
           }
         }
