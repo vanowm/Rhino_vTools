@@ -363,6 +363,7 @@ public sealed class vUzip : Command
 
   private static Curve? OffsetCurveInward(Curve curve, double distance, Point3d centerPt, Vector3d normal, double tol)
   {
+    if (distance <= RhinoMath.ZeroTolerance) return curve.DuplicateCurve();
     var pos = curve.Offset(centerPt, normal,  distance, tol, CurveOffsetCornerStyle.Sharp);
     var neg = curve.Offset(centerPt, normal, -distance, tol, CurveOffsetCornerStyle.Sharp);
     var candidates = new List<Curve>();
