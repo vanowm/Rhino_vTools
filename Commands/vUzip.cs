@@ -256,7 +256,7 @@ public sealed class vUzip : Command
           raw.Equals("r", StringComparison.OrdinalIgnoreCase))
         return defaultValue;
       var v = ParseDist(raw);
-      if (v.HasValue && v.Value > 0.0) return v.Value;
+      if (v.HasValue && v.Value >= 0.0) return v.Value;
       return current;
     }
     return null;
@@ -2168,10 +2168,15 @@ public sealed class vUzip : Command
           gm.EnablePreSelect(true, true);
           gm.DeselectAllBeforePostSelect = false;
           gm.AcceptNothing(true);
-          gm.AddOption("Left",   FmtOpt(offL));
-          gm.AddOption("Right",  FmtOpt(offR));
-          gm.AddOption("Bottom", FmtOpt(offB));
-          gm.AddOption("Radius", FmtOpt(radius));
+          var leftOptGm   = new OptionDouble(offL,        0.0, 1e300);
+          var rightOptGm  = new OptionDouble(offR,        0.0, 1e300);
+          var bottomOptGm = new OptionDouble(offB,        0.0, 1e300);
+          var radiusOptGm = new OptionDouble(radius,      0.0, 1e300);
+          var tailOptGm   = new OptionDouble(currentTail, 0.0, 1e300);
+          gm.AddOptionDouble("Left",   ref leftOptGm);
+          gm.AddOptionDouble("Right",  ref rightOptGm);
+          gm.AddOptionDouble("Bottom", ref bottomOptGm);
+          gm.AddOptionDouble("Radius", ref radiusOptGm);
           var glassT2p = new OptionToggle(glass, "No", "Yes");
           var visT2p   = new OptionToggle(vis,   "No", "Yes");
           var partsT2p = new OptionToggle(parts, "No", "Yes");
@@ -2179,7 +2184,7 @@ public sealed class vUzip : Command
           gm.AddOptionToggle("Vis",   ref visT2p);
           gm.AddOptionToggle("Parts", ref partsT2p);
           gm.AddOption("Label", string.IsNullOrEmpty(currentLabel) ? "none" : currentLabel);
-          gm.AddOption("Tail",  FmtOpt(currentTail));
+          gm.AddOptionDouble("Tail",  ref tailOptGm);
           gm.AddOption("Options");
           // Subscribe to selection events so the conduit updates in real-time as the user clicks.
           // Subscription is AFTER the pre-select calls so those don't trigger RefreshConduitFromLiveSel.
@@ -2231,13 +2236,13 @@ public sealed class vUzip : Command
               .ToList();
             if (gmIds.Count > 0) partsSelectionIds = gmIds;
             glass = glassT2p.CurrentValue; vis = visT2p.CurrentValue; parts = partsT2p.CurrentValue;
+            offL        = leftOptGm.CurrentValue;
+            offR        = rightOptGm.CurrentValue;
+            offB        = bottomOptGm.CurrentValue;
+            radius      = radiusOptGm.CurrentValue;
+            currentTail = tailOptGm.CurrentValue;
             var optM = gm.Option()?.EnglishName ?? "";
-            if      (optM == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL, DefaultLeft);    if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
-            else if (optM == "Right")   { var v = GetDistSubprompt("Right arm offset", offR, DefaultRight);   if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
-            else if (optM == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB, DefaultBottom);  if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
-            else if (optM == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius, DefaultRadius); if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
-            else if (optM == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
-            else if (optM == "Tail")    { var nt = currentTail;  if (RhinoGet.GetNumber("Tail length", true, ref nt) == Result.Success && nt >= 0.0) currentTail = nt; }
+            if      (optM == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
             else if (optM == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
             continue;
           }
@@ -2252,10 +2257,14 @@ public sealed class vUzip : Command
           gp2.GeometryFilter = ObjectType.Curve; gp2.SubObjectSelect = false;
           gp2.EnablePreSelect(false, true); gp2.DeselectAllBeforePostSelect = true;
           gp2.AcceptNothing(true);
-          gp2.AddOption("Left",   FmtOpt(offL));
-          gp2.AddOption("Right",  FmtOpt(offR));
-          gp2.AddOption("Bottom", FmtOpt(offB));
-          gp2.AddOption("Radius", FmtOpt(radius));
+          var leftOptGp2   = new OptionDouble(offL,   0.0, 1e300);
+          var rightOptGp2  = new OptionDouble(offR,   0.0, 1e300);
+          var bottomOptGp2 = new OptionDouble(offB,   0.0, 1e300);
+          var radiusOptGp2 = new OptionDouble(radius, 0.0, 1e300);
+          gp2.AddOptionDouble("Left",   ref leftOptGp2);
+          gp2.AddOptionDouble("Right",  ref rightOptGp2);
+          gp2.AddOptionDouble("Bottom", ref bottomOptGp2);
+          gp2.AddOptionDouble("Radius", ref radiusOptGp2);
           var glassT2 = new OptionToggle(glass, "No", "Yes");
           var visT2   = new OptionToggle(vis,   "No", "Yes");
           var partsT2 = new OptionToggle(parts, "No", "Yes");
@@ -2274,13 +2283,13 @@ public sealed class vUzip : Command
           if (gp2.CommandResult() != Result.Success) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
           if (res2 == GetResult.Option)
           {
-            glass = glassT2.CurrentValue; vis = visT2.CurrentValue; parts = partsT2.CurrentValue;
+            glass  = glassT2.CurrentValue; vis = visT2.CurrentValue; parts = partsT2.CurrentValue;
+            offL   = leftOptGp2.CurrentValue;
+            offR   = rightOptGp2.CurrentValue;
+            offB   = bottomOptGp2.CurrentValue;
+            radius = radiusOptGp2.CurrentValue;
             var opt2 = gp2.Option()?.EnglishName ?? "";
-            if      (opt2 == "Left")    { var v = GetDistSubprompt("Left arm offset",  offL, DefaultLeft);    if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offL = v.Value; }
-            else if (opt2 == "Right")   { var v = GetDistSubprompt("Right arm offset", offR, DefaultRight);   if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offR = v.Value; }
-            else if (opt2 == "Bottom")  { var v = GetDistSubprompt("Bottom offset",    offB, DefaultBottom);  if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } offB = v.Value; }
-            else if (opt2 == "Radius")  { var v = GetDistSubprompt("Fillet radius",  radius, DefaultRadius);  if (v == null) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; } radius = v.Value; }
-            else if (opt2 == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
+            if (opt2 == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
             continue;
           }
         }
