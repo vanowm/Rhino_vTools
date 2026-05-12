@@ -402,7 +402,6 @@ public sealed class vLine : Command
 
     var mode = initialMode;
     Vector3d? parallelDir = null;
-    var parallelSnapping = false;
 
     var cacheState = new CurveCacheState(CollectCurveCache(doc), DateTime.UtcNow.AddMilliseconds(500));
     string? lastAutoChoice = null;
@@ -507,12 +506,9 @@ public sealed class vLine : Command
           var snapPt = FindParallelRaySnap(startPoint, parallelDir.Value, cursorPoint, parallelCache, doc.ModelAbsoluteTolerance);
           if (snapPt.HasValue)
           {
-            parallelSnapping = true;
             return snapPt.Value;
           }
         }
-
-        parallelSnapping = false;
         return constrainedPt;
       }
 
@@ -658,8 +654,6 @@ public sealed class vLine : Command
       }
 
       e.Display.DrawPoint(ep, Rhino.Display.PointStyle.RoundSimple, 2, previewColor);
-      if (parallelSnapping)
-        e.Display.DrawPoint(ep, Rhino.Display.PointStyle.X, 10, Color.Yellow);
     };
 
     getPoint.DynamicDraw += drawPreview;
