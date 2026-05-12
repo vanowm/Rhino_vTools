@@ -443,6 +443,29 @@ public sealed class vUzip : Command
     return results != null && results.Length > 0 ? results[0] : null;
   }
 
+  // Returns the largest radius ≤ maxRadius such that the fillet arc tangent on 'arm'
+  // lands within arm's domain (not past openTip). Uses the interior corner angle at isect.
+  private static double ClampFilletRadius(double maxRadius, Curve arm, Curve bottom,
+    Point3d isect, Point3d openTip, Point3d towardOtherIsect)
+  {
+    if (!arm.ClosestPoint(isect,    out double tI)) return maxRadius;
+    if (!arm.ClosestPoint(openTip,  out double tT)) return maxRadius;
+    double armAvail = arm.GetLength(new Interval(Math.Min(tI, tT), Math.Max(tI, tT)));
+    if (armAvail <= 1e-9) return maxRadius;
+    if (!bottom.ClosestPoint(isect, out double tB)) return maxRadius;
+    // Build unit vectors pointing away from the corner into each curve (interior angle).
+    var armDir = arm.TangentAt(tI);
+    if (Vector3d.Multiply(armDir, openTip - isect) < 0) armDir = -armDir;
+    var btmDir = bottom.TangentAt(tB);
+    if (Vector3d.Multiply(btmDir, towardOtherIsect - isect) < 0) btmDir = -btmDir;
+    double cosA = armDir * btmDir;  // cos of interior corner angle
+    double sinA = Math.Sqrt(Math.Max(0.0, 1.0 - cosA * cosA));
+    if (sinA < 1e-6) return maxRadius;  // near-parallel; can't bound
+    // tangent_length = R / tan(θ/2)  →  R_max = armAvail * tan(θ/2) = armAvail * sinA/(1+cosA)
+    double rMax = armAvail * sinA / (1.0 + cosA) * 0.98;  // 2% margin
+    return Math.Min(maxRadius, Math.Max(rMax, 1e-3));
+  }
+
   private static (Point3d PtOnC1, Point3d PtOnC2) ArcTangentPts(Curve arc, Curve c1, Curve c2)
   {
     var pStart = arc.PointAtStart; var pEnd = arc.PointAtEnd;
@@ -576,26 +599,26 @@ public sealed class vUzip : Command
     if (resL == null || resR == null) { Dbg.Write($"  → null: resL={resL.HasValue} resR={resR.HasValue} (no arm-bottom intersection)"); return null; }
     var (isectL, _, _) = resL.Value; var (isectR, _, _) = resR.Value;
     Dbg.Write($"  intersections: isectL={isectL} isectR={isectR}");
-    var hintArmL = WalkAlongCurve(extLeft,   isectL, radius, hintLOpen);
-    var hintBtmL = WalkAlongCurve(extBottom, isectL, radius, isectR);
-    var hintArmR = WalkAlongCurve(extRight,  isectR, radius, hintROpen);
-    var hintBtmR = WalkAlongCurve(extBottom, isectR, radius, isectL);
+    // Clamp fillet radius per arm so the arc tangent can land within the arm bounds.
+    double radiusL = ClampFilletRadius(radius, extLeft,  extBottom, isectL, hintLOpen, isectR);
+    double radiusR = ClampFilletRadius(radius, extRight, extBottom, isectR, hintROpen, isectL);
+    Dbg.Write($"  radii: requested={radius:F3} radiusL={radiusL:F3} radiusR={radiusR:F3}");
+    var hintArmL = WalkAlongCurve(extLeft,   isectL, radiusL, hintLOpen);
+    var hintBtmL = WalkAlongCurve(extBottom, isectL, radiusL, isectR);
+    var hintArmR = WalkAlongCurve(extRight,  isectR, radiusR, hintROpen);
+    var hintBtmR = WalkAlongCurve(extBottom, isectR, radiusR, isectL);
     double angleTol = doc.ModelAngleToleranceRadians;
-    var arcL = FilletArcOnly(extLeft,  hintArmL, extBottom, hintBtmL, radius, tol, angleTol); if (arcL == null) { Dbg.Write("  → null: arcL fillet failed"); return null; }
-    var arcR = FilletArcOnly(extRight, hintArmR, extBottom, hintBtmR, radius, tol, angleTol); if (arcR == null) { Dbg.Write("  → null: arcR fillet failed"); return null; }
+    var arcL = FilletArcOnly(extLeft,  hintArmL, extBottom, hintBtmL, radiusL, tol, angleTol); if (arcL == null) { Dbg.Write("  → null: arcL fillet failed"); return null; }
+    var arcR = FilletArcOnly(extRight, hintArmR, extBottom, hintBtmR, radiusR, tol, angleTol); if (arcR == null) { Dbg.Write("  → null: arcR fillet failed"); return null; }
     var (tanLArm, tanLBtm) = ArcTangentPts(arcL, extLeft,  extBottom);
     var (tanRArm, tanRBtm) = ArcTangentPts(arcR, extRight, extBottom);
     Dbg.Write($"  tanPts: tanLArm={tanLArm} hintLOpen={hintLOpen} tanRArm={tanRArm} hintROpen={hintROpen}");
     var trimmedLeft   = TrimKeepSide(extLeft,   tanLArm, hintLOpen);
     var trimmedRight  = TrimKeepSide(extRight,  tanRArm, hintROpen);
     var trimmedBottom = TrimBetween(extBottom, tanLBtm, tanRBtm);
-    // trimmedLeft/Right can be null when the fillet overshoots the arm's open tip.
-    // In that case use a short bridge line from the open tip to the arc tangent point.
-    var leftPiece  = trimmedLeft  as Curve ?? new LineCurve(hintLOpen, tanLArm);
-    var rightPiece = trimmedRight as Curve ?? new LineCurve(hintROpen, tanRArm);
-    if (trimmedBottom == null) { Dbg.Write($"  → null: trimmedBottom is null"); return null; }
-    Dbg.Write($"  trimmed: left.len={leftPiece.GetLength():F3} (bridge={trimmedLeft == null}) right.len={rightPiece.GetLength():F3} (bridge={trimmedRight == null}) bottom.len={trimmedBottom.GetLength():F3}");
-    var pieces = new Curve[] { leftPiece, arcL, trimmedBottom, arcR, rightPiece };
+    if (trimmedLeft == null || trimmedRight == null || trimmedBottom == null) { Dbg.Write($"  → null: trimmedLeft={trimmedLeft != null} trimmedRight={trimmedRight != null} trimmedBottom={trimmedBottom != null}"); return null; }
+    Dbg.Write($"  trimmed: left.len={trimmedLeft.GetLength():F3} right.len={trimmedRight.GetLength():F3} bottom.len={trimmedBottom.GetLength():F3}");
+    var pieces = new Curve[] { trimmedLeft, arcL, trimmedBottom, arcR, trimmedRight };
     var joined = Curve.JoinCurves(pieces, tol);
     if (joined == null || joined.Length == 0) { Dbg.Write("  → null: JoinCurves failed"); return null; }
     Dbg.Write($"  → joined[0].len={joined[0].GetLength():F3} start={joined[0].PointAtStart} end={joined[0].PointAtEnd} domain=[{joined[0].Domain.T0:F6},{joined[0].Domain.T1:F6}]");
