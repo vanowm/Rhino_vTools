@@ -18,10 +18,17 @@ public sealed class vScallop : Command
   private const string SizeKey = "size";
   private const string DeleteOriginalKey = "deleteOriginal";
   private const string FreeKey = "free";
+  private const string AutoKey = "auto";
+  private const string SizePercentKey = "sizePercent";
 
-  private static double _size = 1.0;
+  private const double DefaultSize = 1.0;
+  private const double DefaultSizePercent = 5.0;
+
+  private static double _size = DefaultSize;
   private static bool _deleteOriginal;
   private static bool _free;
+  private static bool _auto;
+  private static double _sizePercent = DefaultSizePercent;
 
   /// <summary>
   /// Rhino command name.
@@ -41,10 +48,11 @@ public sealed class vScallop : Command
       go.SubObjectSelect = false;
       go.AcceptNumber(true, false);
 
-      var sizeOpt   = new OptionDouble(_size, doc.ModelAbsoluteTolerance, 1.0e300);
+      var autoOpt   = new OptionToggle(_auto, "No", "Yes");
       var deleteOpt = new OptionToggle(_deleteOriginal, "No", "Yes");
       var freeOpt   = new OptionToggle(_free, "No", "Yes");
-      go.AddOptionDouble("Size", ref sizeOpt);
+      go.AddOptionToggle("Auto", ref autoOpt);
+      var idxSize   = go.AddOption("Size", FormatSize());
       go.AddOptionToggle("DeleteOriginal", ref deleteOpt);
       go.AddOptionToggle("Free", ref freeOpt);
       var idxPoints = go.AddOption("Points");
@@ -57,13 +65,14 @@ public sealed class vScallop : Command
         return Result.Success;
       }
 
-      _size           = Math.Max(sizeOpt.CurrentValue, doc.ModelAbsoluteTolerance);
+      _auto           = autoOpt.CurrentValue;
       _deleteOriginal = deleteOpt.CurrentValue;
       _free           = freeOpt.CurrentValue;
 
       if (outerResult == GetResult.Number)
       {
-        _size = Math.Max(go.Number(), doc.ModelAbsoluteTolerance);
+        if (_auto) _sizePercent = Math.Max(go.Number(), 0.001);
+        else       _size = Math.Max(go.Number(), doc.ModelAbsoluteTolerance);
         SavePersistedOptions();
         continue;
       }
@@ -77,6 +86,17 @@ public sealed class vScallop : Command
         {
           if (opt.Index == idxPoints)
             twoPointMode = true;
+          else if (opt.Index == idxSize)
+          {
+            var v = GetSizeSubprompt(doc);
+            if (v != null)
+            {
+              if (_auto) _sizePercent = v.Value;
+              else _size = v.Value;
+              SavePersistedOptions();
+            }
+            continue;
+          }
           else
           {
             SavePersistedOptions();
@@ -166,6 +186,8 @@ public sealed class vScallop : Command
         var size = _size;
         var deleteOriginal = _deleteOriginal;
         var free = _free;
+        var auto = _auto;
+        var sizePercent = _sizePercent;
 
         if (vToolsOptionStore.TryGetDouble(section, SizeKey, out var persistedSize) && persistedSize > RhinoMath.ZeroTolerance)
           size = persistedSize;
@@ -173,13 +195,19 @@ public sealed class vScallop : Command
           deleteOriginal = persistedDelete;
         if (vToolsOptionStore.TryGetBool(section, FreeKey, out var persistedFree))
           free = persistedFree;
+        if (vToolsOptionStore.TryGetBool(section, AutoKey, out var persistedAuto))
+          auto = persistedAuto;
+        if (vToolsOptionStore.TryGetDouble(section, SizePercentKey, out var persistedSizePercent) && persistedSizePercent > 0)
+          sizePercent = persistedSizePercent;
 
-        return (size, deleteOriginal, free);
+        return (size, deleteOriginal, free, auto, sizePercent);
       });
 
     _size = Math.Max(values.size, RhinoMath.ZeroTolerance);
     _deleteOriginal = values.deleteOriginal;
     _free = values.free;
+    _auto = values.auto;
+    _sizePercent = Math.Max(values.sizePercent, 0.001);
   }
 
   private static void SavePersistedOptions()
@@ -191,7 +219,41 @@ public sealed class vScallop : Command
         section[SizeKey] = _size;
         section[DeleteOriginalKey] = _deleteOriginal;
         section[FreeKey] = _free;
+        section[AutoKey] = _auto;
+        section[SizePercentKey] = _sizePercent;
       });
+  }
+
+  private static string FormatSize() =>
+    _auto ? $"{_sizePercent:G}%" : $"{_size:G}";
+
+  private static double? GetSizeSubprompt(RhinoDoc doc)
+  {
+    double current = _auto ? _sizePercent : _size;
+    double def = _auto ? DefaultSizePercent : DefaultSize;
+    double minVal = _auto ? 0.001 : doc.ModelAbsoluteTolerance;
+    string unit = _auto ? "% (d=reset to 5)" : $"(d=reset to {DefaultSize:G})";
+
+    var gs = new GetString();
+    gs.SetCommandPrompt($"Size {unit} <{current:G}>");
+    gs.AcceptNumber(true, false);
+    var r = gs.Get();
+    if (gs.CommandResult() != Result.Success)
+      return null;
+    if (r == GetResult.Number)
+      return Math.Max(gs.Number(), minVal);
+    if (r == GetResult.String)
+    {
+      var s = gs.StringResult()?.Trim().ToLowerInvariant() ?? "";
+      while (s.StartsWith("_", StringComparison.Ordinal))
+        s = s[1..];
+      if (s is "d" or "r")
+        return def;
+      if (double.TryParse(s, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out double v))
+        return Math.Max(v, minVal);
+    }
+    return null;
   }
 
   private static bool TryPickPoint(RhinoDoc doc, string prompt, Point3d? basePoint, out Point3d point)
@@ -207,10 +269,11 @@ public sealed class vScallop : Command
 
       gp.AcceptNumber(true, false);
 
-      var sizeOption = new OptionDouble(_size, doc.ModelAbsoluteTolerance, 1.0e300);
+      var autoOption = new OptionToggle(_auto, "No", "Yes");
       var freeOption = new OptionToggle(_free, "No", "Yes");
 
-      gp.AddOptionDouble("Size", ref sizeOption);
+      gp.AddOptionToggle("Auto", ref autoOption);
+      var idxSize = gp.AddOption("Size", FormatSize());
       gp.AddOptionToggle("Free", ref freeOption);
 
       var result = gp.Get();
@@ -219,15 +282,22 @@ public sealed class vScallop : Command
 
       if (result == GetResult.Option)
       {
-        _size = Math.Max(sizeOption.CurrentValue, doc.ModelAbsoluteTolerance);
+        _auto = autoOption.CurrentValue;
         _free = freeOption.CurrentValue;
+        var opt = gp.Option();
+        if (opt?.Index == idxSize)
+        {
+          var v = GetSizeSubprompt(doc);
+          if (v != null) { if (_auto) _sizePercent = v.Value; else _size = v.Value; }
+        }
         SavePersistedOptions();
         continue;
       }
 
       if (result == GetResult.Number)
       {
-        _size = Math.Max(gp.Number(), doc.ModelAbsoluteTolerance);
+        if (_auto) _sizePercent = Math.Max(gp.Number(), 0.001);
+        else       _size = Math.Max(gp.Number(), doc.ModelAbsoluteTolerance);
         SavePersistedOptions();
         continue;
       }
@@ -261,10 +331,11 @@ public sealed class vScallop : Command
       gp.SetBasePoint(mid, true);
       gp.AcceptNumber(true, false);
 
-      var sizeOption = new OptionDouble(_size, doc.ModelAbsoluteTolerance, 1.0e300);
+      var autoOption = new OptionToggle(_auto, "No", "Yes");
       var freeOption = new OptionToggle(_free, "No", "Yes");
 
-      gp.AddOptionDouble("Size", ref sizeOption);
+      gp.AddOptionToggle("Auto", ref autoOption);
+      var idxSize = gp.AddOption("Size", FormatSize());
       gp.AddOptionToggle("Free", ref freeOption);
 
       EventHandler<GetPointDrawEventArgs> draw = (_, e) =>
@@ -283,15 +354,22 @@ public sealed class vScallop : Command
 
       if (result == GetResult.Option)
       {
-        _size = Math.Max(sizeOption.CurrentValue, doc.ModelAbsoluteTolerance);
+        _auto = autoOption.CurrentValue;
         _free = freeOption.CurrentValue;
+        var opt = gp.Option();
+        if (opt?.Index == idxSize)
+        {
+          var v = GetSizeSubprompt(doc);
+          if (v != null) { if (_auto) _sizePercent = v.Value; else _size = v.Value; }
+        }
         SavePersistedOptions();
         continue;
       }
 
       if (result == GetResult.Number)
       {
-        _size = Math.Max(gp.Number(), doc.ModelAbsoluteTolerance);
+        if (_auto) _sizePercent = Math.Max(gp.Number(), 0.001);
+        else       _size = Math.Max(gp.Number(), doc.ModelAbsoluteTolerance);
         SavePersistedOptions();
         continue;
       }
@@ -346,7 +424,11 @@ public sealed class vScallop : Command
   private static double ResolveBulgeSize(Point3d pointA, Point3d pointB, Point3d sidePoint, Vector3d sideDirection)
   {
     if (!_free)
+    {
+      if (_auto)
+        return Math.Max(pointA.DistanceTo(pointB) * _sizePercent / 100.0, 0.0);
       return _size;
+    }
 
     var mid = 0.5 * (pointA + pointB);
     var toSide = sidePoint - mid;
