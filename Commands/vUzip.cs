@@ -459,16 +459,10 @@ public sealed class vUzip : Command
     double tHi = Math.Max(tSplit, tKeep);
     if (tHi - tLo < RhinoMath.ZeroTolerance)
     {
-      // splitPt is past the curve end (clamped to same endpoint as keepPt).
-      // The fillet tangent point lies beyond the open tip, so the whole arm is inside the fillet zone.
-      // Return the full curve segment from that clamped endpoint to the other domain boundary.
-      double dMin = curve.Domain.Min;
-      double dMax = curve.Domain.Max;
-      bool atStart = Math.Abs(tSplit - dMin) < Math.Abs(tSplit - dMax);
-      tLo = atStart ? dMin : tSplit;  // tSplit == dMin or dMax
-      tHi = atStart ? dMax : dMax;    // extend to opposite end
-      Dbg.Write($"  TrimKeepSide: splitPt past end → full-arm fallback tLo={tLo:F6} tHi={tHi:F6}");
-      if (tHi - tLo < RhinoMath.ZeroTolerance) { Dbg.Write($"  TrimKeepSide: degenerate after fallback"); return null; }
+      // splitPt is past the curve end and clamps to the same endpoint as keepPt.
+      // Signal caller to use a bridge line instead.
+      Dbg.Write($"  TrimKeepSide: splitPt past end (tSplit={tSplit:F6} tKeep={tKeep:F6}) → null for bridge");
+      return null;
     }
     var result = curve.Trim(tLo, tHi);
     if (result == null) Dbg.Write($"  TrimKeepSide: Trim({tLo:F6},{tHi:F6}) returned null domain=[{curve.Domain.T0:F6},{curve.Domain.T1:F6}]");
@@ -595,9 +589,13 @@ public sealed class vUzip : Command
     var trimmedLeft   = TrimKeepSide(extLeft,   tanLArm, hintLOpen);
     var trimmedRight  = TrimKeepSide(extRight,  tanRArm, hintROpen);
     var trimmedBottom = TrimBetween(extBottom, tanLBtm, tanRBtm);
-    if (trimmedLeft == null || trimmedRight == null || trimmedBottom == null) { Dbg.Write($"  → null: trimmedLeft={trimmedLeft != null} trimmedRight={trimmedRight != null} trimmedBottom={trimmedBottom != null}"); return null; }
-    Dbg.Write($"  trimmed: left.len={trimmedLeft.GetLength():F3} right.len={trimmedRight.GetLength():F3} bottom.len={trimmedBottom.GetLength():F3}");
-    var pieces = new Curve[] { trimmedLeft, arcL, trimmedBottom, arcR, trimmedRight };
+    // trimmedLeft/Right can be null when the fillet overshoots the arm's open tip.
+    // In that case use a short bridge line from the open tip to the arc tangent point.
+    var leftPiece  = trimmedLeft  as Curve ?? new LineCurve(hintLOpen, tanLArm);
+    var rightPiece = trimmedRight as Curve ?? new LineCurve(hintROpen, tanRArm);
+    if (trimmedBottom == null) { Dbg.Write($"  → null: trimmedBottom is null"); return null; }
+    Dbg.Write($"  trimmed: left.len={leftPiece.GetLength():F3} (bridge={trimmedLeft == null}) right.len={rightPiece.GetLength():F3} (bridge={trimmedRight == null}) bottom.len={trimmedBottom.GetLength():F3}");
+    var pieces = new Curve[] { leftPiece, arcL, trimmedBottom, arcR, rightPiece };
     var joined = Curve.JoinCurves(pieces, tol);
     if (joined == null || joined.Length == 0) { Dbg.Write("  → null: JoinCurves failed"); return null; }
     Dbg.Write($"  → joined[0].len={joined[0].GetLength():F3} start={joined[0].PointAtStart} end={joined[0].PointAtEnd} domain=[{joined[0].Domain.T0:F6},{joined[0].Domain.T1:F6}]");
