@@ -2194,6 +2194,14 @@ public sealed class vUzip : Command
           var resM = gm.GetMultiple(0, 0);
           RhinoDoc.SelectObjects   -= OnSelChanged;
           RhinoDoc.DeselectObjects -= OnSelChanged;
+          // Capture option values immediately — AddOptionDouble value confirmed via Enter
+          // may return GetResult.Nothing in GetMultiple, so read before branching.
+          glass = glassT2p.CurrentValue; vis = visT2p.CurrentValue; parts = partsT2p.CurrentValue;
+          offL        = leftOptGm.CurrentValue;
+          offR        = rightOptGm.CurrentValue;
+          offB        = bottomOptGm.CurrentValue;
+          radius      = radiusOptGm.CurrentValue;
+          currentTail = tailOptGm.CurrentValue;
           // Read the actual Rhino selection state (pre-selected ± user changes).
           var newIds = doc.Objects.GetSelectedObjects(false, false)
             .Where(o => o?.Geometry is Curve && !uArmIds.Contains(o.Id))
@@ -2236,12 +2244,7 @@ public sealed class vUzip : Command
               .Where(id => !uArmIds.Contains(id))
               .ToList();
             if (gmIds.Count > 0) partsSelectionIds = gmIds;
-            glass = glassT2p.CurrentValue; vis = visT2p.CurrentValue; parts = partsT2p.CurrentValue;
-            offL        = leftOptGm.CurrentValue;
-            offR        = rightOptGm.CurrentValue;
-            offB        = bottomOptGm.CurrentValue;
-            radius      = radiusOptGm.CurrentValue;
-            currentTail = tailOptGm.CurrentValue;
+            // Values already captured above; handle sub-prompts for Label/Options.
             var optM = gm.Option()?.EnglishName ?? "";
             if      (optM == "Label")   { var nl = currentLabel; if (RhinoGet.GetString("Label", true, ref nl) == Result.Success) currentLabel = (nl ?? DefaultLabel).Trim(); }
             else if (optM == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
@@ -2274,6 +2277,12 @@ public sealed class vUzip : Command
           gp2.AddOptionToggle("Parts", ref partsT2);
           gp2.AddOption("Options");
           var res2 = gp2.Get();
+          // Capture option values immediately before branching.
+          glass  = glassT2.CurrentValue; vis = visT2.CurrentValue; parts = partsT2.CurrentValue;
+          offL   = leftOptGp2.CurrentValue;
+          offR   = rightOptGp2.CurrentValue;
+          offB   = bottomOptGp2.CurrentValue;
+          radius = radiusOptGp2.CurrentValue;
           if (res2 == GetResult.Nothing) break;
           if (res2 == GetResult.Object)
           {
@@ -2284,11 +2293,7 @@ public sealed class vUzip : Command
           if (gp2.CommandResult() != Result.Success) { conduit.Enabled = false; doc.Views.Redraw(); return Result.Cancel; }
           if (res2 == GetResult.Option)
           {
-            glass  = glassT2.CurrentValue; vis = visT2.CurrentValue; parts = partsT2.CurrentValue;
-            offL   = leftOptGp2.CurrentValue;
-            offR   = rightOptGp2.CurrentValue;
-            offB   = bottomOptGp2.CurrentValue;
-            radius = radiusOptGp2.CurrentValue;
+            // Values already captured above.
             var opt2 = gp2.Option()?.EnglishName ?? "";
             if (opt2 == "Options") { var dlg = new OptionsDialog(doc, s); dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow); if (dlg.Result) { dlg.ApplyTo(s); glass = s.Glass; vis = s.Vis; } }
             continue;
