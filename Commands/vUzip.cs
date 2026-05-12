@@ -457,7 +457,19 @@ public sealed class vUzip : Command
     if (!curve.ClosestPoint(keepPt,  out double tKeep))  { Dbg.Write($"  TrimKeepSide: ClosestPoint failed for keepPt={keepPt}");  return null; }
     double tLo = Math.Min(tSplit, tKeep);
     double tHi = Math.Max(tSplit, tKeep);
-    if (tHi - tLo < RhinoMath.ZeroTolerance) { Dbg.Write($"  TrimKeepSide: degenerate tSplit={tSplit:F6} tKeep={tKeep:F6} diff={tHi-tLo}"); return null; }
+    if (tHi - tLo < RhinoMath.ZeroTolerance)
+    {
+      // splitPt is past the curve end (clamped to same endpoint as keepPt).
+      // The fillet tangent point lies beyond the open tip, so the whole arm is inside the fillet zone.
+      // Return the full curve segment from that clamped endpoint to the other domain boundary.
+      double dMin = curve.Domain.Min;
+      double dMax = curve.Domain.Max;
+      bool atStart = Math.Abs(tSplit - dMin) < Math.Abs(tSplit - dMax);
+      tLo = atStart ? dMin : tSplit;  // tSplit == dMin or dMax
+      tHi = atStart ? dMax : dMax;    // extend to opposite end
+      Dbg.Write($"  TrimKeepSide: splitPt past end → full-arm fallback tLo={tLo:F6} tHi={tHi:F6}");
+      if (tHi - tLo < RhinoMath.ZeroTolerance) { Dbg.Write($"  TrimKeepSide: degenerate after fallback"); return null; }
+    }
     var result = curve.Trim(tLo, tHi);
     if (result == null) Dbg.Write($"  TrimKeepSide: Trim({tLo:F6},{tHi:F6}) returned null domain=[{curve.Domain.T0:F6},{curve.Domain.T1:F6}]");
     return result;
@@ -557,9 +569,13 @@ public sealed class vUzip : Command
     // Compute open-tip hints BEFORE extension: FarEndPt on the original offset is always the un-extended end.
     var hintLOpen  = FarEndPt(offLeft,  juncLeft.Value);
     var hintROpen  = FarEndPt(offRight, juncRight.Value);
+    Dbg.Write($"  offLeft: start={offLeft.PointAtStart} end={offLeft.PointAtEnd}  hintLOpen={hintLOpen}");
+    Dbg.Write($"  offRight: start={offRight.PointAtStart} end={offRight.PointAtEnd}  hintROpen={hintROpen}");
     var extLeft    = ExtendAtNearEnd(offLeft,  juncLeft.Value,  extAmt);
     var extRight   = ExtendAtNearEnd(offRight, juncRight.Value, extAmt);
     var extBottom  = ExtendBothEnds(offBottom, extAmt);
+    Dbg.Write($"  extLeft: start={extLeft.PointAtStart} end={extLeft.PointAtEnd} len={extLeft.GetLength():F3}");
+    Dbg.Write($"  extRight: start={extRight.PointAtStart} end={extRight.PointAtEnd} len={extRight.GetLength():F3}");
     Dbg.Write($"  extended: left.len={extLeft.GetLength():F3} right.len={extRight.GetLength():F3} bottom.len={extBottom.GetLength():F3} extAmt={extAmt:F3}");
     var resL = FindNearestIntersection(extLeft,  extBottom, juncLeft.Value,  tol);
     var resR = FindNearestIntersection(extRight, extBottom, juncRight.Value, tol);
