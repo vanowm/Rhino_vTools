@@ -402,6 +402,7 @@ public sealed class vLine : Command
 
     var mode = initialMode;
     Vector3d? parallelDir = null;
+    var parallelSnapping = false;
 
     var cacheState = new CurveCacheState(CollectCurveCache(doc), DateTime.UtcNow.AddMilliseconds(500));
     string? lastAutoChoice = null;
@@ -494,8 +495,25 @@ public sealed class vLine : Command
       {
         if (!parallelDir.HasValue)
           return null;
+
+        MaybeRefreshCurveCache(false);
+        var parallelCache = cacheState.CurveCache;
+
         var proj = Vector3d.Multiply(cursorPoint - startPoint, parallelDir.Value);
-        return startPoint + (parallelDir.Value * proj);
+        var constrainedPt = startPoint + (parallelDir.Value * proj);
+
+        if (parallelCache.Count > 0)
+        {
+          var snapPt = FindParallelRaySnap(startPoint, parallelDir.Value, cursorPoint, parallelCache, doc.ModelAbsoluteTolerance);
+          if (snapPt.HasValue)
+          {
+            parallelSnapping = true;
+            return snapPt.Value;
+          }
+        }
+
+        parallelSnapping = false;
+        return constrainedPt;
       }
 
       MaybeRefreshCurveCache(false);
@@ -640,6 +658,8 @@ public sealed class vLine : Command
       }
 
       e.Display.DrawPoint(ep, Rhino.Display.PointStyle.RoundSimple, 2, previewColor);
+      if (parallelSnapping)
+        e.Display.DrawPoint(ep, Rhino.Display.PointStyle.RoundSimple, 6, Color.White);
     };
 
     getPoint.DynamicDraw += drawPreview;
@@ -1307,6 +1327,46 @@ public sealed class vLine : Command
     });
 
     return valid[0].Point;
+  }
+
+  private static Point3d? FindParallelRaySnap(
+    Point3d startPoint,
+    Vector3d dir,
+    Point3d cursorPoint,
+    IReadOnlyList<CurveCacheItem> curveCache,
+    double tol)
+  {
+    const double rayLen = 1e6;
+    var rayLine = new LineCurve(new Line(startPoint - dir * rayLen, startPoint + dir * rayLen));
+
+    var cursorDist = cursorPoint.DistanceTo(startPoint);
+    var snapTol = Math.Max(tol * 50.0, cursorDist * 0.08);
+    var snapTolSq = snapTol * snapTol;
+
+    Point3d? best = null;
+    var bestDistSq = double.MaxValue;
+
+    foreach (var (curve, _) in curveCache)
+    {
+      var events = Rhino.Geometry.Intersect.Intersection.CurveCurve(rayLine, curve, tol, tol);
+      if (events == null) continue;
+
+      foreach (var ev in events)
+      {
+        var pt = ev.PointA;
+        if (pt.DistanceTo(startPoint) < tol * 2.0) continue;
+        if (Vector3d.Multiply(pt - startPoint, dir) < -tol) continue;
+
+        var d2 = pt.DistanceToSquared(cursorPoint);
+        if (d2 < bestDistSq)
+        {
+          bestDistSq = d2;
+          best = pt;
+        }
+      }
+    }
+
+    return best.HasValue && bestDistSq <= snapTolSq ? best : null;
   }
 
   private static void LaunchNativeLineMode()
