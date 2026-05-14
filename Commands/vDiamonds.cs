@@ -58,30 +58,34 @@ public sealed class vDiamonds : Command
 
     while (true)
     {
-      var (plotCurves, cutCurve, sizeLabelTe, basePt) = BuildGeometry(_width, _height, _cw, _ch);
-      CalibrateTextHeight(sizeLabelTe, _width * _cw);
-
-      double T = sizeLabelTe.TextHeight;
+      double W = _cw * _width;
       double H = _ch * _height;
 
-      // Stack size label above count label slot when both are shown
-      if (_showSize && _showCount)
-      {
-        var sizeOrigin = new Point3d(sizeLabelTe.Plane.Origin.X, H + LabelGap + T * 1.2, 0.0);
-        sizeLabelTe.Plane = new Plane(sizeOrigin, Vector3d.XAxis, Vector3d.YAxis);
-      }
+      var (plotCurves, cutCurve, sizeLabelTe, basePt) = BuildGeometry(_width, _height, _cw, _ch);
+      // Calibrate size label to fit bbox width
+      CalibrateTextHeight(sizeLabelTe, W);
 
+      // Build count label and calibrate it independently to fit bbox width
       TextEntity? countLabelTe = null;
       if (_showCount)
       {
-        var countOrigin = new Point3d(_cw * _width / 2.0, H + LabelGap, 0.0);
         countLabelTe = new TextEntity
         {
-          Plane         = new Plane(countOrigin, Vector3d.XAxis, Vector3d.YAxis),
+          Plane         = new Plane(new Point3d(W / 2.0, H + LabelGap, 0.0), Vector3d.XAxis, Vector3d.YAxis),
           PlainText     = $"({FmtFrac(_cw)} x {FmtFrac(_ch)})",
-          TextHeight    = T,
+          TextHeight    = sizeLabelTe.TextHeight,
           Justification = TextJustification.BottomCenter,
         };
+        CalibrateTextHeight(countLabelTe, W);
+      }
+
+      // Stack: size label sits above count label when both are shown
+      if (_showSize && countLabelTe != null)
+      {
+        double countT = countLabelTe.TextHeight;
+        sizeLabelTe.Plane = new Plane(
+          new Point3d(W / 2.0, H + LabelGap + countT * 1.2, 0.0),
+          Vector3d.XAxis, Vector3d.YAxis);
       }
 
       var fadedPlot = FadeColor(LayerColor(doc, LayerPlot));
@@ -121,11 +125,13 @@ public sealed class vDiamonds : Command
       var togCount    = new OptionToggle(_showCount,    "No", "Yes");
 
       var gp = new GetPoint();
-      gp.SetCommandPrompt("Pick diamond pattern placement point");
+      gp.SetCommandPrompt($"Pick placement point  [{FmtFrac(W)} x {FmtFrac(H)}]");
+      gp.AcceptString(true);
       var idxW        = gp.AddOption("Width",       FmtOpt(_width));
       var idxH        = gp.AddOption("Height",      FmtOpt(_height));
       var idxCW       = gp.AddOption("CountWidth",  FmtOpt(_cw));
       var idxCH       = gp.AddOption("CountHeight", FmtOpt(_ch));
+      var idxBySize   = gp.AddOption("BySize");
       var idxBoundary = gp.AddOptionToggle("Boundary", ref togBoundary);
       var idxSize     = gp.AddOptionToggle("Size",     ref togSize);
       var idxCount    = gp.AddOptionToggle("Count",    ref togCount);
@@ -137,6 +143,30 @@ public sealed class vDiamonds : Command
       if (result == GetResult.Cancel)
         return Result.Cancel;
 
+      // Direct input at placement prompt: "heightxwidth" sets diamond size
+      if (result == GetResult.String)
+      {
+        var raw = gp.StringResult().Trim();
+        var xi  = raw.IndexOf('x', StringComparison.OrdinalIgnoreCase);
+        if (xi > 0)
+        {
+          var a = ParseFrac(raw[..xi]);
+          var b = ParseFrac(raw[(xi + 1)..]);
+          if (a.HasValue && b.HasValue)
+          {
+            if (a.Value > 0.0) _height = a.Value;
+            if (b.Value > 0.0) _width  = b.Value;
+          }
+        }
+        else
+        {
+          var v = ParseFrac(raw);
+          if (v.HasValue && v.Value > 0.0) _width = v.Value;
+        }
+        SaveSettings();
+        continue;
+      }
+
       if (result == GetResult.Option)
       {
         var opt = gp.Option();
@@ -144,35 +174,37 @@ public sealed class vDiamonds : Command
 
         if (opt.Index == idxW)
         {
-          // AxB format: A=height, B=width  (matches size label: height x width)
-          var v = GetDoubleSubprompt("Diamond dimensions (height x width, or width only)", _width);
+          var v = GetDoubleSubprompt("Diamond width", _width);
           if (v == null) return Result.Cancel;
-          if (v.Value.Secondary.HasValue) { if (v.Value.Primary > 0.0) _height = v.Value.Primary; if (v.Value.Secondary.Value > 0.0) _width = v.Value.Secondary.Value; }
-          else { if (v.Value.Primary > 0.0) _width = v.Value.Primary; }
+          if (v.Value > 0.0) _width = v.Value;
         }
         else if (opt.Index == idxH)
         {
-          // AxB format: A=height, B=width  (matches size label: height x width)
-          var v = GetDoubleSubprompt("Diamond dimensions (height x width, or height only)", _height);
+          var v = GetDoubleSubprompt("Diamond height", _height);
           if (v == null) return Result.Cancel;
-          if (v.Value.Secondary.HasValue) { if (v.Value.Primary > 0.0) _height = v.Value.Primary; if (v.Value.Secondary.Value > 0.0) _width = v.Value.Secondary.Value; }
-          else { if (v.Value.Primary > 0.0) _height = v.Value.Primary; }
+          if (v.Value > 0.0) _height = v.Value;
         }
         else if (opt.Index == idxCW)
         {
-          // AxB format: A=countWidth, B=countHeight  (matches count label: CW x CH)
-          var v = GetDoubleSubprompt("Count (CW x CH, or CW only)", _cw);
+          var v = GetDoubleSubprompt("Number of diamonds wide", _cw);
           if (v == null) return Result.Cancel;
-          if (v.Value.Secondary.HasValue) { if (v.Value.Primary >= 1.0) _cw = v.Value.Primary; if (v.Value.Secondary.Value >= 1.0) _ch = v.Value.Secondary.Value; }
-          else { if (v.Value.Primary >= 1.0) _cw = v.Value.Primary; }
+          if (v.Value >= 1.0) _cw = v.Value;
         }
         else if (opt.Index == idxCH)
         {
-          // AxB format: A=countWidth, B=countHeight  (matches count label: CW x CH)
-          var v = GetDoubleSubprompt("Count (CW x CH, or CH only)", _ch);
+          var v = GetDoubleSubprompt("Number of diamonds tall", _ch);
           if (v == null) return Result.Cancel;
-          if (v.Value.Secondary.HasValue) { if (v.Value.Primary >= 1.0) _cw = v.Value.Primary; if (v.Value.Secondary.Value >= 1.0) _ch = v.Value.Secondary.Value; }
-          else { if (v.Value.Primary >= 1.0) _ch = v.Value.Primary; }
+          if (v.Value >= 1.0) _ch = v.Value;
+        }
+        else if (opt.Index == idxBySize)
+        {
+          var v = GetPairSubprompt("Bounding box size (width x height)", W, H);
+          if (v == null) return Result.Cancel;
+          if (v.Value.A > 0.0 && v.Value.B > 0.0)
+          {
+            _cw = Math.Max(1.0, v.Value.A / _width);
+            _ch = Math.Max(1.0, v.Value.B / _height);
+          }
         }
         else if (opt.Index == idxBoundary) _showBoundary = togBoundary.CurrentValue;
         else if (opt.Index == idxSize)     _showSize     = togSize.CurrentValue;
@@ -417,32 +449,46 @@ public sealed class vDiamonds : Command
   private static Color FadeColor(Color c) =>
     Color.FromArgb((c.R + 255) / 2, (c.G + 255) / 2, (c.B + 255) / 2);
 
-  private static (double Primary, double? Secondary)? GetDoubleSubprompt(string prompt, double current)
+  private static double? GetDoubleSubprompt(string prompt, double current)
   {
     var gs = new GetString();
     gs.SetCommandPrompt($"{prompt} ({FmtFrac(current)})");
     gs.AcceptNothing(true);
     var res = gs.Get();
-    if (res == GetResult.Nothing) return (current, null);
+    if (res == GetResult.Nothing) return current;
     if (res == GetResult.String)
     {
       var raw = gs.StringResult().Trim();
-      if (string.IsNullOrEmpty(raw)) return (current, null);
+      if (string.IsNullOrEmpty(raw)) return current;
+      var v = ParseFrac(raw);
+      return v.HasValue ? v.Value : current;
+    }
+    return null;
+  }
 
-      // Split on 'x' separator for paired input (e.g. "3+1/8x4" or "3.5x4")
+  private static (double A, double B)? GetPairSubprompt(string prompt, double curA, double curB)
+  {
+    var gs = new GetString();
+    gs.SetCommandPrompt($"{prompt} ({FmtFrac(curA)} x {FmtFrac(curB)})");
+    gs.AcceptNothing(true);
+    var res = gs.Get();
+    if (res == GetResult.Nothing) return (curA, curB);
+    if (res == GetResult.String)
+    {
+      var raw = gs.StringResult().Trim();
+      if (string.IsNullOrEmpty(raw)) return (curA, curB);
       var xi = raw.IndexOf('x', StringComparison.OrdinalIgnoreCase);
       if (xi > 0)
       {
         var a = ParseFrac(raw[..xi]);
         var b = ParseFrac(raw[(xi + 1)..]);
-        if (a.HasValue && b.HasValue)
+        if (a.HasValue && b.HasValue && a.Value > 0.0 && b.Value > 0.0)
           return (a.Value, b.Value);
       }
-
       var single = ParseFrac(raw);
-      return single.HasValue ? (single.Value, (double?)null) : (current, null);
+      if (single.HasValue && single.Value > 0.0) return (single.Value, curB);
+      return (curA, curB);
     }
-
     return null;
   }
 
