@@ -24,6 +24,8 @@ public sealed class vDiamonds : Command
   private const string ShowBoundaryKey = "showBoundary";
   private const string ShowSizeKey     = "showSize";
   private const string ShowCountKey    = "showCount";
+  private const string BySizeWKey      = "bySizeW";
+  private const string BySizeHKey      = "bySizeH";
 
   private const string LayerPlot = "PLOT";
   private const string LayerCut  = "CUT1";
@@ -46,6 +48,8 @@ public sealed class vDiamonds : Command
   private static bool   _showBoundary = true;
   private static bool   _showSize     = true;
   private static bool   _showCount    = true;
+  private static double _bySizeW      = 0.0;   // 0 = use count mode
+  private static double _bySizeH      = 0.0;
 
   public override string EnglishName => "vDiamonds";
 
@@ -58,21 +62,54 @@ public sealed class vDiamonds : Command
 
     while (true)
     {
-      double W = _cw * _width;
-      double H = _ch * _height;
+      // Effective geometry parameters
+      double W, H, patOffX, patOffY, byCW, byCH;
+      if (_bySizeW > 0.0 && _bySizeH > 0.0)
+      {
+        W       = _bySizeW;
+        H       = _bySizeH;
+        byCW    = Math.Max(1.0, Math.Floor(W / _width));
+        byCH    = Math.Max(1.0, Math.Floor(H / _height));
+        patOffX = (W - byCW * _width)  / 2.0;
+        patOffY = (H - byCH * _height) / 2.0;
+      }
+      else
+      {
+        byCW = _cw; byCH = _ch;
+        W = byCW * _width; H = byCH * _height;
+        patOffX = patOffY = 0.0;
+      }
 
-      var (plotCurves, cutCurve, sizeLabelTe, basePt) = BuildGeometry(_width, _height, _cw, _ch);
-      // Calibrate size label to fit bbox width
+      // Build diamond pattern curves (in pattern-local space)
+      var (plotCurves, _, sizeLabelTe, _) = BuildGeometry(_width, _height, byCW, byCH);
+
+      // Shift plot curves into bbox space when bySize centering is active
+      if (patOffX != 0.0 || patOffY != 0.0)
+      {
+        var shift = Transform.Translation(new Vector3d(patOffX, patOffY, 0.0));
+        foreach (var c in plotCurves) c.Transform(shift);
+      }
+
+      // Full bbox CUT1 curve (may be larger than pattern area in bySize mode)
+      var cutCurve = new PolylineCurve(new[]
+      {
+        new Point3d(0, 0, 0), new Point3d(W, 0, 0),
+        new Point3d(W, H, 0), new Point3d(0, H, 0),
+        new Point3d(0, 0, 0),
+      });
+
+      // Reposition size label to centre on full bbox width, then calibrate
+      sizeLabelTe.Plane = new Plane(new Point3d(W / 2.0, H + LabelGap, 0.0), Vector3d.XAxis, Vector3d.YAxis);
       CalibrateTextHeight(sizeLabelTe, W);
 
-      // Build count label and calibrate it independently to fit bbox width
+      // Build count label (shows effective byCW × byCH), calibrate independently
       TextEntity? countLabelTe = null;
       if (_showCount)
       {
         countLabelTe = new TextEntity
         {
           Plane         = new Plane(new Point3d(W / 2.0, H + LabelGap, 0.0), Vector3d.XAxis, Vector3d.YAxis),
-          PlainText     = $"({FmtFrac(_cw)} x {FmtFrac(_ch)})",
+          PlainText     = $"({FmtFrac(byCW)} x {FmtFrac(byCH)})",
           TextHeight    = sizeLabelTe.TextHeight,
           Justification = TextJustification.BottomCenter,
         };
@@ -88,6 +125,10 @@ public sealed class vDiamonds : Command
           Vector3d.XAxis, Vector3d.YAxis);
       }
 
+      // Print bbox size to command history
+      var bySizeNote = _bySizeW > 0.0 ? $"  (centered {(int)byCW} x {(int)byCH} diamonds)" : "";
+      RhinoApp.WriteLine($"Boundary box: {FmtFrac(W)} x {FmtFrac(H)}{bySizeNote}");
+
       var fadedPlot = FadeColor(LayerColor(doc, LayerPlot));
       var fadedCut  = FadeColor(LayerColor(doc, LayerCut));
       var fadedRef  = FadeColor(LayerColor(doc, LayerRef));
@@ -102,7 +143,7 @@ public sealed class vDiamonds : Command
       if (countLabelTe != null)
         previewItems.Add((countLabelTe.Duplicate(), fadedRef));
 
-      var capturedBase  = basePt;
+      var capturedBase  = new Point3d(0.0, H, 0.0);
       var capturedItems = previewItems;
 
       EventHandler<GetPointDrawEventArgs> onDraw = (_, e) =>
@@ -125,13 +166,15 @@ public sealed class vDiamonds : Command
       var togCount    = new OptionToggle(_showCount,    "No", "Yes");
 
       var gp = new GetPoint();
-      gp.SetCommandPrompt($"Pick placement point  [{FmtFrac(W)} x {FmtFrac(H)}]");
+      gp.SetCommandPrompt("Pick diamond pattern placement point");
       gp.AcceptString(true);
       var idxW        = gp.AddOption("Width",       FmtOpt(_width));
       var idxH        = gp.AddOption("Height",      FmtOpt(_height));
       var idxCW       = gp.AddOption("CountWidth",  FmtOpt(_cw));
       var idxCH       = gp.AddOption("CountHeight", FmtOpt(_ch));
-      var idxBySize   = gp.AddOption("BySize");
+      var idxBySize   = _bySizeW > 0.0
+        ? gp.AddOption("BySize", $"{FmtOpt(_bySizeW)}x{FmtOpt(_bySizeH)}")
+        : gp.AddOption("BySize");
       var idxBoundary = gp.AddOptionToggle("Boundary", ref togBoundary);
       var idxSize     = gp.AddOptionToggle("Size",     ref togSize);
       var idxCount    = gp.AddOptionToggle("Count",    ref togCount);
@@ -143,7 +186,7 @@ public sealed class vDiamonds : Command
       if (result == GetResult.Cancel)
         return Result.Cancel;
 
-      // Direct input at placement prompt: "heightxwidth" sets diamond size
+      // Direct string input at placement: "heightxwidth" sets diamond size
       if (result == GetResult.String)
       {
         var raw = gp.StringResult().Trim();
@@ -198,13 +241,14 @@ public sealed class vDiamonds : Command
         }
         else if (opt.Index == idxBySize)
         {
-          var v = GetPairSubprompt("Bounding box size (width x height)", W, H);
+          double curBsW = _bySizeW > 0.0 ? _bySizeW : W;
+          double curBsH = _bySizeH > 0.0 ? _bySizeH : H;
+          var v = GetPairSubprompt("Boundary box size (0 to use count mode)", curBsW, curBsH);
           if (v == null) return Result.Cancel;
-          if (v.Value.A > 0.0 && v.Value.B > 0.0)
-          {
-            _cw = Math.Max(1.0, v.Value.A / _width);
-            _ch = Math.Max(1.0, v.Value.B / _height);
-          }
+          if (v.Value.A <= 0.0 || v.Value.B <= 0.0)
+            { _bySizeW = 0.0; _bySizeH = 0.0; } // clear bySize → revert to count mode
+          else
+            { _bySizeW = v.Value.A; _bySizeH = v.Value.B; }
         }
         else if (opt.Index == idxBoundary) _showBoundary = togBoundary.CurrentValue;
         else if (opt.Index == idxSize)     _showSize     = togSize.CurrentValue;
@@ -216,12 +260,12 @@ public sealed class vDiamonds : Command
 
       if (result == GetResult.Point)
       {
-        var xform = Transform.Translation(gp.Point() - basePt);
+        var xform = Transform.Translation(gp.Point() - capturedBase);
         AddToDoc(doc, plotCurves,
                  _showBoundary ? cutCurve    : null,
                  _showSize     ? sizeLabelTe : null,
                  countLabelTe,
-                 xform, _width, _height, _cw, _ch);
+                 xform, _width, _height, byCW, byCH);
         SaveSettings();
         doc.Views.Redraw();
         return Result.Success;
@@ -395,7 +439,7 @@ public sealed class vDiamonds : Command
 
   private static void LoadSettings()
   {
-    (_width, _height, _cw, _ch, _showBoundary, _showSize, _showCount) = vToolsOptionStore.Read(SettingsSection, section =>
+    (_width, _height, _cw, _ch, _showBoundary, _showSize, _showCount, _bySizeW, _bySizeH) = vToolsOptionStore.Read(SettingsSection, section =>
     {
       var w  = _width;
       var h  = _height;
@@ -404,6 +448,8 @@ public sealed class vDiamonds : Command
       var sb = _showBoundary;
       var ss = _showSize;
       var sc = _showCount;
+      var bsW = _bySizeW;
+      var bsH = _bySizeH;
 
       if (vToolsOptionStore.TryGetDouble(section, WidthKey,       out var pw)  && pw  > 0.0) w  = pw;
       if (vToolsOptionStore.TryGetDouble(section, HeightKey,      out var ph)  && ph  > 0.0) h  = ph;
@@ -412,8 +458,10 @@ public sealed class vDiamonds : Command
       if (vToolsOptionStore.TryGetBool(section, ShowBoundaryKey, out var psb)) sb = psb;
       if (vToolsOptionStore.TryGetBool(section, ShowSizeKey,     out var pss)) ss = pss;
       if (vToolsOptionStore.TryGetBool(section, ShowCountKey,    out var psc)) sc = psc;
+      if (vToolsOptionStore.TryGetDouble(section, BySizeWKey,    out var pbsW) && pbsW > 0.0) bsW = pbsW;
+      if (vToolsOptionStore.TryGetDouble(section, BySizeHKey,    out var pbsH) && pbsH > 0.0) bsH = pbsH;
 
-      return (w, h, cw, ch, sb, ss, sc);
+      return (w, h, cw, ch, sb, ss, sc, bsW, bsH);
     });
   }
 
@@ -427,6 +475,8 @@ public sealed class vDiamonds : Command
       section[ShowBoundaryKey] = _showBoundary;
       section[ShowSizeKey]     = _showSize;
       section[ShowCountKey]    = _showCount;
+      section[BySizeWKey]      = _bySizeW;
+      section[BySizeHKey]      = _bySizeH;
     });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
