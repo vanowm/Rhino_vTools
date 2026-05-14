@@ -237,24 +237,10 @@ public sealed class vDiamonds : Command
 
   private static void CalibrateTextHeight(RhinoDoc doc, TextEntity labelTe, double targetWidth)
   {
-    var refIdx  = EnsureLayer(doc, LayerRef, RefColor);
-    var attr    = new ObjectAttributes { LayerIndex = refIdx };
-    var probeId = doc.Objects.AddText(labelTe, attr);
-    if (probeId == Guid.Empty) return;
-
-    var probeObj = doc.Objects.FindId(probeId);
-    if (probeObj != null)
-    {
-      var bb = probeObj.Geometry.GetBoundingBox(true);
-      if (bb.IsValid)
-      {
-        double actualW = bb.Max.X - bb.Min.X;
-        if (actualW > 0.0)
-          labelTe.TextHeight *= targetWidth / actualW;
-      }
-    }
-
-    doc.Objects.Delete(probeId, true);
+    // TextModelWidth returns the rendered text width in model units at the current TextHeight.
+    double textWidth = labelTe.TextModelWidth;
+    if (textWidth > 0.0)
+      labelTe.TextHeight *= targetWidth / textWidth;
   }
 
   private static void AddToDoc(
