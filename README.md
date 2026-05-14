@@ -1,4 +1,4 @@
-# vTools  ·  v26.5.7
+# vTools  ·  v26.5.14
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -8,6 +8,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 - Native commands:
   - [vChamfer](#vchamfer-flow) *(26.05.07.0723)* — cuts a corner formed by two curves with a straight line perpendicular to the angle bisector at a specified cut length
   - [vCurveToSpline](#vcurvetospline-flow) *(26.04.24.0934)* — converts selected curves to interpolated splines with join modes
+  - [vDiamonds](#vdiamonds-flow) *(26.5.14.1038)* — draws an argyle diamond pattern with optional bounding rectangle and size/count labels; supports BySize centering mode
   - [vFitBox](#vfitbox-flow) *(26.04.24.0934)* — finds the minimum bounding box for selected objects by optimizing rotation angle
   - [vLine](#vline-flow) *(26.04.27.2125)* — draws lines with chain modes, angle lock, length constraint, and perp/tangent endpoint solving
   - [vLineLength](#vlinelength-flow) *(26.04.27.2125)* — resizes an open curve to a target total, additive, or subtractive length
@@ -69,10 +70,25 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzipParts](#vuzipparts-flow), [vUzipCenter](#vuzipcenter-flow).
+Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vUzipParts](#vuzipparts-flow), [vUzipCenter](#vuzipcenter-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
+
+### vDiamonds flow
+
+1. Run `vDiamonds`.
+1. Adjust options while previewing the pattern:
+
+    - `Width` / `Height`: single-diamond cell width and height. Accept decimal, fraction (`3+1/8`), or type `heightxwidth` directly at the placement prompt (e.g. `2x3`).
+    - `CountWidth` / `CountHeight`: number of diamond cells across/tall; decimals allowed (`3.5` = 3 full + half cell).
+    - `BySize`: enter a target bounding box size as `widthxheight`. Diamonds are counted by `floor(box/cell)` and centered with equal margins. Does not change `CountWidth`/`CountHeight`. Enter `0` to revert to count mode.
+    - `Boundary=Yes/No`: show/hide the CUT1 bounding rectangle.
+    - `Size=Yes/No`: show/hide the size label (e.g. `2 x 2`), fitted to bbox width.
+    - `Count=Yes/No`: show/hide the count label (e.g. `(3 x 3)`), fitted to bbox width independently.
+
+1. Current bounding box dimensions print to command history on every preview update.
+1. Pick the placement point to commit. All objects are grouped. Output layers: `PLOT` (diamond lines), `CUT1` (boundary rect), `Reference` (labels).
 
 ### vChamfer flow
 
