@@ -24,9 +24,15 @@ public sealed class vDiamonds : Command
   private const string ShowBoundaryKey = "showBoundary";
   private const string ShowSizeKey     = "showSize";
   private const string ShowCountKey    = "showCount";
-  private const string LayerPlot = "PLOT";
-  private const string LayerCut  = "CUT1";
-  private const string LayerRef  = "Reference";
+  private const string BySizeWKey      = "bySizeW";
+  private const string BySizeHKey      = "bySizeH";
+  private const string LayerPlotKey    = "layerPlot";
+  private const string LayerCutKey     = "layerCut";
+  private const string LayerRefKey     = "layerRef";
+
+  private static string _layerPlot = "PLOT";
+  private static string _layerCut  = "CUT1";
+  private static string _layerRef  = "Reference";
 
   private static readonly Color PlotColor = Color.FromArgb(0x0F, 0x8A, 0x8A);
   private static readonly Color CutColor  = Color.FromArgb(0xCC, 0x33, 0x33);
@@ -45,23 +51,25 @@ public sealed class vDiamonds : Command
   private static bool   _showBoundary = true;
   private static bool   _showSize     = true;
   private static bool   _showCount    = true;
-  private static double _bySizeW      = 0.0;   // 0 = use count mode
+  private static double _bySizeW      = 0.0;   // stored dims (always positive when ever set)
   private static double _bySizeH      = 0.0;
+  private static bool   _bySizeActive = false; // transient: true only during the current invocation
 
   public override string EnglishName => "vDiamonds";
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadSettings();
-    EnsureLayer(doc, LayerPlot, PlotColor);
-    EnsureLayer(doc, LayerCut,  CutColor);
-    EnsureLayer(doc, LayerRef,  RefColor);
+    _bySizeActive = false;  // never carry over across command invocations
+    EnsureLayer(doc, _layerPlot, PlotColor);
+    EnsureLayer(doc, _layerCut,  CutColor);
+    EnsureLayer(doc, _layerRef,  RefColor);
 
     while (true)
     {
       // Effective geometry parameters
       double W, H, patOffX, patOffY, byCW, byCH;
-      if (_bySizeW > 0.0 && _bySizeH > 0.0)
+      if (_bySizeActive && _bySizeW > 0.0 && _bySizeH > 0.0)
       {
         W       = _bySizeW;
         H       = _bySizeH;
@@ -82,8 +90,8 @@ public sealed class vDiamonds : Command
       var (plotCurves, _, sizeLabelTe, _) = BuildGeometry(
         _width, _height, byCW, byCH,
         patOffX, patOffY,
-        _bySizeW > 0.0 ? W : 0.0,
-        _bySizeH > 0.0 ? H : 0.0);
+        _bySizeActive ? W : 0.0,
+        _bySizeActive ? H : 0.0);
 
       // Full bbox CUT1 curve (may be larger than pattern area in bySize mode)
       var cutCurve = new PolylineCurve(new[]
@@ -121,12 +129,12 @@ public sealed class vDiamonds : Command
       }
 
       // Print bbox size to command history
-      var bySizeNote = _bySizeW > 0.0 ? $"  (centered {(int)byCW} x {(int)byCH} diamonds)" : "";
+      var bySizeNote = _bySizeActive ? $"  (centered {(int)byCW} x {(int)byCH} diamonds)" : "";
       RhinoApp.WriteLine($"Boundary box: {FmtFrac(W)} x {FmtFrac(H)}{bySizeNote}");
 
-      var fadedPlot = FadeColor(LayerColor(doc, LayerPlot));
-      var fadedCut  = FadeColor(LayerColor(doc, LayerCut));
-      var fadedRef  = FadeColor(LayerColor(doc, LayerRef));
+      var fadedPlot = FadeColor(LayerColor(doc, _layerPlot));
+      var fadedCut  = FadeColor(LayerColor(doc, _layerCut));
+      var fadedRef  = FadeColor(LayerColor(doc, _layerRef));
 
       var previewItems = new List<(GeometryBase Geom, Color Color)>();
       foreach (var crv in plotCurves)
@@ -167,9 +175,11 @@ public sealed class vDiamonds : Command
       var idxH        = gp.AddOption("Height",      FmtOpt(_height));
       var idxCW       = gp.AddOption("CountWidth",  FmtOpt(_cw));
       var idxCH       = gp.AddOption("CountHeight", FmtOpt(_ch));
-      var idxBySize   = _bySizeW > 0.0
+      var idxBySize   = _bySizeActive
         ? gp.AddOption("BySize", $"{FmtOpt(_bySizeW)}x{FmtOpt(_bySizeH)}")
-        : gp.AddOption("BySize");
+        : _bySizeW > 0.0
+          ? gp.AddOption("BySize", $"({FmtOpt(_bySizeW)}x{FmtOpt(_bySizeH)})")
+          : gp.AddOption("BySize");
       var idxBoundary = gp.AddOptionToggle("Boundary", ref togBoundary);
       var idxSize     = gp.AddOptionToggle("Size",     ref togSize);
       var idxCount    = gp.AddOptionToggle("Count",    ref togCount);
@@ -238,12 +248,15 @@ public sealed class vDiamonds : Command
         {
           double curBsW = _bySizeW > 0.0 ? _bySizeW : W;
           double curBsH = _bySizeH > 0.0 ? _bySizeH : H;
-          var v = GetPairSubprompt("Boundary box size (0 to use count mode)", curBsW, curBsH);
+          var v = GetPairSubprompt("Boundary box size (0 to deactivate)", curBsW, curBsH);
           if (v == null) return Result.Cancel;
           if (v.Value.A <= 0.0 || v.Value.B <= 0.0)
-            { _bySizeW = 0.0; _bySizeH = 0.0; } // clear bySize → revert to count mode
+            _bySizeActive = false;  // deactivate only; stored dims are preserved
           else
-            { _bySizeW = v.Value.A; _bySizeH = v.Value.B; }
+          {
+            _bySizeW = v.Value.A; _bySizeH = v.Value.B;
+            _bySizeActive = true;
+          }
         }
         else if (opt.Index == idxBoundary) _showBoundary = togBoundary.CurrentValue;
         else if (opt.Index == idxSize)     _showSize     = togSize.CurrentValue;
@@ -261,7 +274,7 @@ public sealed class vDiamonds : Command
                  _showSize     ? sizeLabelTe : null,
                  countLabelTe,
                  xform, _width, _height, byCW, byCH);
-        _bySizeW = 0.0; _bySizeH = 0.0;  // BySize is one-time; reset after placement
+        _bySizeActive = false;  // BySize is one-time; deactivate after placement (dims preserved)
         SaveSettings();
         doc.Views.Redraw();
         return Result.Success;
@@ -391,9 +404,9 @@ public sealed class vDiamonds : Command
     Transform xform,
     double width, double height, double cw, double ch)
   {
-    var plotAttr = new ObjectAttributes { LayerIndex = EnsureLayer(doc, LayerPlot, PlotColor) };
-    var cutAttr  = new ObjectAttributes { LayerIndex = EnsureLayer(doc, LayerCut,  CutColor)  };
-    var refAttr  = new ObjectAttributes { LayerIndex = EnsureLayer(doc, LayerRef,  RefColor)  };
+    var plotAttr = new ObjectAttributes { LayerIndex = EnsureLayer(doc, _layerPlot, PlotColor) };
+    var cutAttr  = new ObjectAttributes { LayerIndex = EnsureLayer(doc, _layerCut,  CutColor)  };
+    var refAttr  = new ObjectAttributes { LayerIndex = EnsureLayer(doc, _layerRef,  RefColor)  };
 
     var addedIds = new List<Guid>();
 
@@ -444,25 +457,35 @@ public sealed class vDiamonds : Command
 
   private static void LoadSettings()
   {
-    (_width, _height, _cw, _ch, _showBoundary, _showSize, _showCount) = vToolsOptionStore.Read(SettingsSection, section =>
+    (_width, _height, _cw, _ch, _showBoundary, _showSize, _showCount, _bySizeW, _bySizeH, _layerPlot, _layerCut, _layerRef) = vToolsOptionStore.Read(SettingsSection, section =>
     {
-      var w  = _width;
-      var h  = _height;
-      var cw = _cw;
-      var ch = _ch;
-      var sb = _showBoundary;
-      var ss = _showSize;
-      var sc = _showCount;
+      var w   = _width;
+      var h   = _height;
+      var cw  = _cw;
+      var ch  = _ch;
+      var sb  = _showBoundary;
+      var ss  = _showSize;
+      var sc  = _showCount;
+      var bsW = _bySizeW;
+      var bsH = _bySizeH;
+      var lp  = _layerPlot;
+      var lc  = _layerCut;
+      var lr  = _layerRef;
 
-      if (vToolsOptionStore.TryGetDouble(section, WidthKey,       out var pw)  && pw  > 0.0) w  = pw;
-      if (vToolsOptionStore.TryGetDouble(section, HeightKey,      out var ph)  && ph  > 0.0) h  = ph;
-      if (vToolsOptionStore.TryGetDouble(section, CountWidthKey,  out var pcw) && pcw >= 1.0) cw = pcw;
-      if (vToolsOptionStore.TryGetDouble(section, CountHeightKey, out var pch) && pch >= 1.0) ch = pch;
-      if (vToolsOptionStore.TryGetBool(section, ShowBoundaryKey, out var psb)) sb = psb;
-      if (vToolsOptionStore.TryGetBool(section, ShowSizeKey,     out var pss)) ss = pss;
-      if (vToolsOptionStore.TryGetBool(section, ShowCountKey,    out var psc)) sc = psc;
+      if (vToolsOptionStore.TryGetDouble(section, WidthKey,       out var pw)  && pw  > 0.0) w   = pw;
+      if (vToolsOptionStore.TryGetDouble(section, HeightKey,      out var ph)  && ph  > 0.0) h   = ph;
+      if (vToolsOptionStore.TryGetDouble(section, CountWidthKey,  out var pcw) && pcw >= 1.0) cw  = pcw;
+      if (vToolsOptionStore.TryGetDouble(section, CountHeightKey, out var pch) && pch >= 1.0) ch  = pch;
+      if (vToolsOptionStore.TryGetBool(section, ShowBoundaryKey, out var psb)) sb  = psb;
+      if (vToolsOptionStore.TryGetBool(section, ShowSizeKey,     out var pss)) ss  = pss;
+      if (vToolsOptionStore.TryGetBool(section, ShowCountKey,    out var psc)) sc  = psc;
+      if (vToolsOptionStore.TryGetDouble(section, BySizeWKey,    out var pbsW) && pbsW > 0.0) bsW = pbsW;
+      if (vToolsOptionStore.TryGetDouble(section, BySizeHKey,    out var pbsH) && pbsH > 0.0) bsH = pbsH;
+      if (vToolsOptionStore.TryGetString(section, LayerPlotKey,  out var plp) && !string.IsNullOrWhiteSpace(plp)) lp = plp;
+      if (vToolsOptionStore.TryGetString(section, LayerCutKey,   out var plc) && !string.IsNullOrWhiteSpace(plc)) lc = plc;
+      if (vToolsOptionStore.TryGetString(section, LayerRefKey,   out var plr) && !string.IsNullOrWhiteSpace(plr)) lr = plr;
 
-      return (w, h, cw, ch, sb, ss, sc);
+      return (w, h, cw, ch, sb, ss, sc, bsW, bsH, lp, lc, lr);
     });
   }
 
@@ -476,6 +499,11 @@ public sealed class vDiamonds : Command
       section[ShowBoundaryKey] = _showBoundary;
       section[ShowSizeKey]     = _showSize;
       section[ShowCountKey]    = _showCount;
+      section[BySizeWKey]      = _bySizeW;
+      section[BySizeHKey]      = _bySizeH;
+      section[LayerPlotKey]    = _layerPlot;
+      section[LayerCutKey]     = _layerCut;
+      section[LayerRefKey]     = _layerRef;
     });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
