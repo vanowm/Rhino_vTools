@@ -4,26 +4,23 @@ using Rhino.Commands;
 
 namespace vTools.Commands;
 
-/// <summary>
-/// Native offset command ported from Offset.py.
-/// Delegates to built-in _Offset and clears selection after each run.
-/// Pressing Enter repeats vOffset so the workflow stays continuous.
-/// </summary>
 public sealed class vOffset : Command
 {
+  private static bool _restartingAfterOffsetDelegate;
   private static EventHandler? _pendingOffsetIdleHandler;
 
-  /// <summary>
-  /// Rhino command name.
-  /// </summary>
   public override string EnglishName => "vOffset";
 
-  /// <summary>
-  /// Queues the built-in _Offset command via idle handler and returns immediately,
-  /// keeping vOffset as Rhino's last command so Enter-repeat re-runs vOffset.
-  /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
+    // Silent no-op re-run after delegating to _Offset — registers vOffset as the
+    // repeatable last command without showing any prompt.
+    if (_restartingAfterOffsetDelegate)
+    {
+      _restartingAfterOffsetDelegate = false;
+      return Result.Success;
+    }
+
     CancelPendingOffset();
     _pendingOffsetIdleHandler = OnLaunchOffsetOnIdle;
     RhinoApp.Idle += _pendingOffsetIdleHandler;
@@ -47,17 +44,15 @@ public sealed class vOffset : Command
     if (doc == null)
       return;
 
-    // echo:false keeps vOffset as Rhino's last command so Enter-repeat re-runs vOffset.
-    var ok = RhinoApp.RunScript("_Offset", false);
+    _ = RhinoApp.RunScript("_Offset", false);
 
     doc.Objects.UnselectAll();
     doc.Views.Redraw();
 
-    // Re-queue for the next iteration as long as the user didn't cancel.
-    if (ok)
-    {
-      _pendingOffsetIdleHandler = OnLaunchOffsetOnIdle;
-      RhinoApp.Idle += _pendingOffsetIdleHandler;
-    }
+    // Silently re-run vOffset (restart flag set so RunCommand returns immediately)
+    // so that pressing Enter afterward repeats vOffset, not _Offset.
+    _restartingAfterOffsetDelegate = true;
+    _ = RhinoApp.RunScript("_vOffset", false);
+    _restartingAfterOffsetDelegate = false; // safety clear if RunScript didn't invoke us
   }
 }
