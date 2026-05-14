@@ -144,27 +144,35 @@ public sealed class vDiamonds : Command
 
         if (opt.Index == idxW)
         {
-          var v = GetDoubleSubprompt("Diamond width", _width);
+          // AxB format: A=height, B=width  (matches size label: height x width)
+          var v = GetDoubleSubprompt("Diamond dimensions (height x width, or width only)", _width);
           if (v == null) return Result.Cancel;
-          if (v.Value > 0.0) _width = v.Value;
+          if (v.Value.Secondary.HasValue) { if (v.Value.Primary > 0.0) _height = v.Value.Primary; if (v.Value.Secondary.Value > 0.0) _width = v.Value.Secondary.Value; }
+          else { if (v.Value.Primary > 0.0) _width = v.Value.Primary; }
         }
         else if (opt.Index == idxH)
         {
-          var v = GetDoubleSubprompt("Diamond height", _height);
+          // AxB format: A=height, B=width  (matches size label: height x width)
+          var v = GetDoubleSubprompt("Diamond dimensions (height x width, or height only)", _height);
           if (v == null) return Result.Cancel;
-          if (v.Value > 0.0) _height = v.Value;
+          if (v.Value.Secondary.HasValue) { if (v.Value.Primary > 0.0) _height = v.Value.Primary; if (v.Value.Secondary.Value > 0.0) _width = v.Value.Secondary.Value; }
+          else { if (v.Value.Primary > 0.0) _height = v.Value.Primary; }
         }
         else if (opt.Index == idxCW)
         {
-          var v = GetDoubleSubprompt("Number of diamonds wide", _cw);
+          // AxB format: A=countWidth, B=countHeight  (matches count label: CW x CH)
+          var v = GetDoubleSubprompt("Count (CW x CH, or CW only)", _cw);
           if (v == null) return Result.Cancel;
-          if (v.Value >= 1.0) _cw = v.Value;
+          if (v.Value.Secondary.HasValue) { if (v.Value.Primary >= 1.0) _cw = v.Value.Primary; if (v.Value.Secondary.Value >= 1.0) _ch = v.Value.Secondary.Value; }
+          else { if (v.Value.Primary >= 1.0) _cw = v.Value.Primary; }
         }
         else if (opt.Index == idxCH)
         {
-          var v = GetDoubleSubprompt("Number of diamonds tall", _ch);
+          // AxB format: A=countWidth, B=countHeight  (matches count label: CW x CH)
+          var v = GetDoubleSubprompt("Count (CW x CH, or CH only)", _ch);
           if (v == null) return Result.Cancel;
-          if (v.Value >= 1.0) _ch = v.Value;
+          if (v.Value.Secondary.HasValue) { if (v.Value.Primary >= 1.0) _cw = v.Value.Primary; if (v.Value.Secondary.Value >= 1.0) _ch = v.Value.Secondary.Value; }
+          else { if (v.Value.Primary >= 1.0) _ch = v.Value.Primary; }
         }
         else if (opt.Index == idxBoundary) _showBoundary = togBoundary.CurrentValue;
         else if (opt.Index == idxSize)     _showSize     = togSize.CurrentValue;
@@ -409,22 +417,75 @@ public sealed class vDiamonds : Command
   private static Color FadeColor(Color c) =>
     Color.FromArgb((c.R + 255) / 2, (c.G + 255) / 2, (c.B + 255) / 2);
 
-  private static double? GetDoubleSubprompt(string prompt, double current)
+  private static (double Primary, double? Secondary)? GetDoubleSubprompt(string prompt, double current)
   {
     var gs = new GetString();
     gs.SetCommandPrompt($"{prompt} ({FmtFrac(current)})");
     gs.AcceptNothing(true);
     var res = gs.Get();
-    if (res == GetResult.Nothing) return current;
+    if (res == GetResult.Nothing) return (current, null);
     if (res == GetResult.String)
     {
       var raw = gs.StringResult().Trim();
-      if (string.IsNullOrEmpty(raw)) return current;
-      if (double.TryParse(raw, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0.0)
-        return v;
-      return current;
+      if (string.IsNullOrEmpty(raw)) return (current, null);
+
+      // Split on 'x' separator for paired input (e.g. "3+1/8x4" or "3.5x4")
+      var xi = raw.IndexOf('x', StringComparison.OrdinalIgnoreCase);
+      if (xi > 0)
+      {
+        var a = ParseFrac(raw[..xi]);
+        var b = ParseFrac(raw[(xi + 1)..]);
+        if (a.HasValue && b.HasValue)
+          return (a.Value, b.Value);
+      }
+
+      var single = ParseFrac(raw);
+      return single.HasValue ? (single.Value, (double?)null) : (current, null);
     }
+
+    return null;
+  }
+
+  /// <summary>
+  /// Parses decimal, fraction (N+P/Q or N-P/Q or P/Q), or plain integer.
+  /// Returns null if input cannot be parsed.
+  /// </summary>
+  private static double? ParseFrac(string s)
+  {
+    s = s.Trim();
+    if (string.IsNullOrEmpty(s)) return null;
+
+    // Plain decimal / integer
+    if (double.TryParse(s, System.Globalization.NumberStyles.Float,
+          System.Globalization.CultureInfo.InvariantCulture, out var d))
+      return d;
+
+    // N+P/Q or N-P/Q  (dash must not be leading minus)
+    int sep = s.IndexOf('+');
+    if (sep < 0) { var di = s.IndexOf('-', 1); if (di > 0) sep = di; }
+    if (sep > 0)
+    {
+      var sl = s.IndexOf('/', sep + 1);
+      if (sl > sep + 1 &&
+          double.TryParse(s[..sep], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var whole) &&
+          double.TryParse(s[(sep + 1)..sl], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var num) &&
+          double.TryParse(s[(sl + 1)..], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var den) &&
+          den != 0)
+        return whole + num / den;
+    }
+
+    // Pure fraction P/Q
+    var psl = s.IndexOf('/');
+    if (psl > 0 &&
+        double.TryParse(s[..psl], System.Globalization.NumberStyles.Float,
+          System.Globalization.CultureInfo.InvariantCulture, out var pn) &&
+        double.TryParse(s[(psl + 1)..], System.Globalization.NumberStyles.Float,
+          System.Globalization.CultureInfo.InvariantCulture, out var pd) &&
+        pd != 0)
+      return pn / pd;
 
     return null;
   }
