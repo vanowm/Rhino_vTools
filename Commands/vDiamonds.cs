@@ -24,9 +24,6 @@ public sealed class vDiamonds : Command
   private const string ShowBoundaryKey = "showBoundary";
   private const string ShowSizeKey     = "showSize";
   private const string ShowCountKey    = "showCount";
-  private const string BySizeWKey      = "bySizeW";
-  private const string BySizeHKey      = "bySizeH";
-
   private const string LayerPlot = "PLOT";
   private const string LayerCut  = "CUT1";
   private const string LayerRef  = "Reference";
@@ -80,15 +77,13 @@ public sealed class vDiamonds : Command
         patOffX = patOffY = 0.0;
       }
 
-      // Build diamond pattern curves (in pattern-local space)
-      var (plotCurves, _, sizeLabelTe, _) = BuildGeometry(_width, _height, byCW, byCH);
-
-      // Shift plot curves into bbox space when bySize centering is active
-      if (patOffX != 0.0 || patOffY != 0.0)
-      {
-        var shift = Transform.Translation(new Vector3d(patOffX, patOffY, 0.0));
-        foreach (var c in plotCurves) c.Transform(shift);
-      }
+      // Build diamond pattern curves; in BySize mode the grid is centered and all
+      // lines are clipped to the full bbox (extending to touch all four edges).
+      var (plotCurves, _, sizeLabelTe, _) = BuildGeometry(
+        _width, _height, byCW, byCH,
+        patOffX, patOffY,
+        _bySizeW > 0.0 ? W : 0.0,
+        _bySizeH > 0.0 ? H : 0.0);
 
       // Full bbox CUT1 curve (may be larger than pattern area in bySize mode)
       var cutCurve = new PolylineCurve(new[]
@@ -266,6 +261,7 @@ public sealed class vDiamonds : Command
                  _showSize     ? sizeLabelTe : null,
                  countLabelTe,
                  xform, _width, _height, byCW, byCH);
+        _bySizeW = 0.0; _bySizeH = 0.0;  // BySize is one-time; reset after placement
         SaveSettings();
         doc.Views.Redraw();
         return Result.Success;
@@ -276,31 +272,40 @@ public sealed class vDiamonds : Command
   // ── Geometry ────────────────────────────────────────────────────────────────
 
   private static (List<NurbsCurve> PlotCurves, PolylineCurve CutCurve, TextEntity SizeLabelTe, Point3d BasePt)
-    BuildGeometry(double width, double height, double cw, double ch)
+    BuildGeometry(double width, double height, double cw, double ch,
+                  double offsetX = 0.0, double offsetY = 0.0,
+                  double clipW = 0.0, double clipH = 0.0)
   {
-    double W = cw * width;
-    double H = ch * height;
+    // clipW/clipH > 0: clip lines to this full bbox (BySize mode).
+    // offsetX/offsetY: shift the diamond grid origin within that bbox.
+    double innerH = ch * height;
+    double W = clipW > 0.0 ? clipW : cw * width;
+    double H = clipH > 0.0 ? clipH : innerH;
     double s = height / width;
 
     int cwCeil = (int)Math.Ceiling(cw);
     int chCeil = (int)Math.Ceiling(ch);
+    // Widen the loop range in BySize mode so lines reach all four bbox edges.
+    int extra = clipW > 0.0 ? 2 : 0;
 
     var plotCurves = new List<NurbsCurve>();
 
-    // ↗ family (slope +s): y = s*x + b_n
-    for (int n = 0; n < cwCeil + chCeil; n++)
+    // ↗ family (slope +s): y = s*x + b_n, intercept adjusted for grid offset
+    for (int n = -extra; n < cwCeil + chCeil + extra; n++)
     {
-      double b = H - ((n + 0.5) * height);
-      var r = ClipLineToBbox(s, b, W, H);
+      double b        = innerH - ((n + 0.5) * height);
+      double bShifted = b + offsetY - s * offsetX;
+      var r = ClipLineToBbox(s, bShifted, W, H);
       if (r.HasValue)
         plotCurves.Add(new Line(r.Value.A, r.Value.B).ToNurbsCurve());
     }
 
-    // ↘ family (slope -s): y = -s*x + c_k
-    for (int k = -chCeil; k < cwCeil; k++)
+    // ↘ family (slope -s): y = -s*x + c_k, intercept adjusted for grid offset
+    for (int k = -chCeil - extra; k < cwCeil + extra; k++)
     {
-      double c = H + ((k + 0.5) * height);
-      var r = ClipLineToBbox(-s, c, W, H);
+      double c        = innerH + ((k + 0.5) * height);
+      double cShifted = c + offsetY + s * offsetX;
+      var r = ClipLineToBbox(-s, cShifted, W, H);
       if (r.HasValue)
         plotCurves.Add(new Line(r.Value.A, r.Value.B).ToNurbsCurve());
     }
@@ -439,7 +444,7 @@ public sealed class vDiamonds : Command
 
   private static void LoadSettings()
   {
-    (_width, _height, _cw, _ch, _showBoundary, _showSize, _showCount, _bySizeW, _bySizeH) = vToolsOptionStore.Read(SettingsSection, section =>
+    (_width, _height, _cw, _ch, _showBoundary, _showSize, _showCount) = vToolsOptionStore.Read(SettingsSection, section =>
     {
       var w  = _width;
       var h  = _height;
@@ -448,8 +453,6 @@ public sealed class vDiamonds : Command
       var sb = _showBoundary;
       var ss = _showSize;
       var sc = _showCount;
-      var bsW = _bySizeW;
-      var bsH = _bySizeH;
 
       if (vToolsOptionStore.TryGetDouble(section, WidthKey,       out var pw)  && pw  > 0.0) w  = pw;
       if (vToolsOptionStore.TryGetDouble(section, HeightKey,      out var ph)  && ph  > 0.0) h  = ph;
@@ -458,10 +461,8 @@ public sealed class vDiamonds : Command
       if (vToolsOptionStore.TryGetBool(section, ShowBoundaryKey, out var psb)) sb = psb;
       if (vToolsOptionStore.TryGetBool(section, ShowSizeKey,     out var pss)) ss = pss;
       if (vToolsOptionStore.TryGetBool(section, ShowCountKey,    out var psc)) sc = psc;
-      if (vToolsOptionStore.TryGetDouble(section, BySizeWKey,    out var pbsW) && pbsW > 0.0) bsW = pbsW;
-      if (vToolsOptionStore.TryGetDouble(section, BySizeHKey,    out var pbsH) && pbsH > 0.0) bsH = pbsH;
 
-      return (w, h, cw, ch, sb, ss, sc, bsW, bsH);
+      return (w, h, cw, ch, sb, ss, sc);
     });
   }
 
@@ -475,8 +476,6 @@ public sealed class vDiamonds : Command
       section[ShowBoundaryKey] = _showBoundary;
       section[ShowSizeKey]     = _showSize;
       section[ShowCountKey]    = _showCount;
-      section[BySizeWKey]      = _bySizeW;
-      section[BySizeHKey]      = _bySizeH;
     });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
