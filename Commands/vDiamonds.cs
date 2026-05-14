@@ -177,9 +177,7 @@ public sealed class vDiamonds : Command
       var idxCH       = gp.AddOption("CountHeight", FmtOpt(_ch));
       var idxBySize   = _bySizeActive
         ? gp.AddOption("BySize", $"{FmtOpt(_bySizeW)}x{FmtOpt(_bySizeH)}")
-        : _bySizeW > 0.0
-          ? gp.AddOption("BySize", $"({FmtOpt(_bySizeW)}x{FmtOpt(_bySizeH)})")
-          : gp.AddOption("BySize");
+        : gp.AddOption("BySize");
       var idxBoundary = gp.AddOptionToggle("Boundary", ref togBoundary);
       var idxSize     = gp.AddOptionToggle("Size",     ref togSize);
       var idxCount    = gp.AddOptionToggle("Count",    ref togCount);
@@ -563,7 +561,11 @@ public sealed class vDiamonds : Command
           return (a.Value, b.Value);
       }
       var single = ParseFrac(raw);
-      if (single.HasValue && single.Value > 0.0) return (single.Value, curB);
+      if (single.HasValue)
+      {
+        if (single.Value <= 0.0) return (0.0, 0.0);  // 0 = deactivate signal
+        return (single.Value, curB);
+      }
       return (curA, curB);
     }
     return null;
