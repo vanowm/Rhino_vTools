@@ -6,28 +6,28 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 
 - Rhino plug-in entry point: vToolsPlugIn
 - Native commands:
-  - [vChamfer](#vchamfer-flow) *(26.05.07.0723)* — cuts a corner formed by two curves with a straight line perpendicular to the angle bisector at a specified cut length
-  - [vCurveToSpline](#vcurvetospline-flow) *(26.04.24.0934)* — converts selected curves to interpolated splines with join modes
-  - [vDiamonds](#vdiamonds-flow) *(26.5.14.1038)* — draws an argyle diamond pattern with optional bounding rectangle and size/count labels; supports BySize centering mode
-  - [vFitBox](#vfitbox-flow) *(26.04.24.0934)* — finds the minimum bounding box for selected objects by optimizing rotation angle
-  - [vLine](#vline-flow) *(26.04.27.2125)* — draws lines with chain modes, angle lock, length constraint, and perp/tangent endpoint solving
-  - [vLineLength](#vlinelength-flow) *(26.04.27.2125)* — resizes an open curve to a target total, additive, or subtractive length
-  - [vMiddleCurve](#vmiddlecurve-flow) *(26.04.27.2125)* — creates an interpolated curve equidistant between two selected curves
-  - [vOffset](#voffset-flow) *(26.04.27.2125)* — runs built-in Offset in a continuous loop, clearing selection after each run
-  - [vOrient2pt](#vorient2pt-flow) *(26.04.24.0934)* — orients objects from a source two-point frame to a target two-point frame
-  - [vOrient3pt](#vorient3pt-flow) *(26.04.24.0934)* — orients objects from a source three-point frame to a target three-point frame
-  - [vPerpendicularTo](#vperpendicularto-flow) *(26.05.05.0757)* — rotates curve A about its nearest endpoint so it is perpendicular to curve B in the active CPlane
-  - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.04.27.2109)* — places points projected onto the closest surface normal evaluation point
-  - [vRectangle](#vrectangle-flow) *(26.04.27.2125)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
-  - [vScallop](#vscallop-flow) *(26.04.27.2125)* — creates an arc scallop between two points or along a selected line
-  - [vSplitAtCorners](#vsplitatcorners-flow) *(26.04.27.2125)* — splits curves at detected corners with interactive per-corner toggle preview
-  - [vTangent](#vtangent-flow) *(26.05.05.0757)* — moves a curve rigidly so one or both endpoints align tangentially to selected driver curves
-  - [vTextAligned](#vtextaligned-flow) *(26.04.27.2125)* — places or repositions annotation text aligned and offset along a selected curve
-  - [vTextFlip](#vtextflip-flow) *(26.04.27.2125)* — flips or rotates annotation text around its object plane
-  - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.04.24.1712)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
-  - [vTrim](#vtrim-flow) *(26.04.24.1633)* — trims and extends curves with auto-cutter detection and join
-  - [vUzipParts](#vuzipparts-flow) *(26.04.24.0934)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
-  - [vUzipCenter](#vuzipcenter-flow) *(26.05.01.2200)* — offsets a U-shape's three curves inward, fillets the inside corners, and produces a single joined open curve
+  - [vChamfer](#vchamfer-flow) *(26.5.7.723)* — cuts a corner formed by two curves with a straight line perpendicular to the angle bisector at a specified cut length
+  - [vCurveToSpline](#vcurvetospline-flow) *(26.4.24.934)* — converts selected curves to interpolated splines with join modes
+  - [vDiamonds](#vdiamonds-flow) *(26.5.14.928)* — draws an argyle diamond pattern with optional bounding rectangle and size/count labels; supports BySize centering mode
+  - [vFitBox](#vfitbox-flow) *(26.4.24.934)* — finds the minimum bounding box for selected objects by optimizing rotation angle
+  - [vLine](#vline-flow) *(26.4.27.2125)* — draws lines with chain modes, angle lock, length constraint, and perp/tangent endpoint solving
+  - [vLineLength](#vlinelength-flow) *(26.4.27.2125)* — resizes an open curve to a target total, additive, or subtractive length
+  - [vMiddleCurve](#vmiddlecurve-flow) *(26.4.27.2125)* — creates an interpolated curve equidistant between two selected curves
+  - [vOffset](#voffset-flow) *(26.4.27.2125)* — runs built-in Offset in a continuous loop, clearing selection after each run
+  - [vOrient2pt](#vorient2pt-flow) *(26.4.24.934)* — orients objects from a source two-point frame to a target two-point frame
+  - [vOrient3pt](#vorient3pt-flow) *(26.4.24.934)* — orients objects from a source three-point frame to a target three-point frame
+  - [vPerpendicularTo](#vperpendicularto-flow) *(26.5.5.757)* — rotates curve A about its nearest endpoint so it is perpendicular to curve B in the active CPlane
+  - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.4.27.2109)* — places points projected onto the closest surface normal evaluation point
+  - [vRectangle](#vrectangle-flow) *(26.4.27.2125)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
+  - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
+  - [vSplitAtCorners](#vsplitatcorners-flow) *(26.4.27.2125)* — splits curves at detected corners with interactive per-corner toggle preview
+  - [vTangent](#vtangent-flow) *(26.5.5.757)* — moves a curve rigidly so one or both endpoints align tangentially to selected driver curves
+  - [vTextAligned](#vtextaligned-flow) *(26.4.27.2125)* — places or repositions annotation text aligned and offset along a selected curve
+  - [vTextFlip](#vtextflip-flow) *(26.4.27.2125)* — flips or rotates annotation text around its object plane
+  - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.4.24.1712)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
+  - [vTrim](#vtrim-flow) *(26.4.24.1633)* — trims and extends curves with auto-cutter detection and join
+  - [vUzipParts](#vuzipparts-flow) *(26.4.24.934)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
+  - [vUzipCenter](#vuzipcenter-flow) *(26.5.1.2200)* — offsets a U-shape's three curves inward, fillets the inside corners, and produces a single joined open curve
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
 
