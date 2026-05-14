@@ -21,6 +21,9 @@ public sealed class vDiamonds : Command
   private const string HeightKey       = "height";
   private const string CountWidthKey   = "countWidth";
   private const string CountHeightKey  = "countHeight";
+  private const string ShowBoundaryKey = "showBoundary";
+  private const string ShowSizeKey     = "showSize";
+  private const string ShowCountKey    = "showCount";
 
   private const string LayerPlot = "PLOT";
   private const string LayerCut  = "CUT1";
@@ -32,14 +35,17 @@ public sealed class vDiamonds : Command
 
   private const double DefaultWidth  = 2.0;
   private const double DefaultHeight = 2.0;
-  private const int    DefaultCW     = 3;
-  private const int    DefaultCH     = 3;
+  private const double DefaultCW     = 3.0;
+  private const double DefaultCH     = 3.0;
   private const double LabelGap      = 0.125;
 
-  private static double _width  = DefaultWidth;
-  private static double _height = DefaultHeight;
-  private static int    _cw     = DefaultCW;
-  private static int    _ch     = DefaultCH;
+  private static double _width        = DefaultWidth;
+  private static double _height       = DefaultHeight;
+  private static double _cw           = DefaultCW;
+  private static double _ch           = DefaultCH;
+  private static bool   _showBoundary = true;
+  private static bool   _showSize     = true;
+  private static bool   _showCount    = true;
 
   public override string EnglishName => "vDiamonds";
 
@@ -52,8 +58,31 @@ public sealed class vDiamonds : Command
 
     while (true)
     {
-      var (plotCurves, cutCurve, labelTe, basePt) = BuildGeometry(_width, _height, _cw, _ch);
-      CalibrateTextHeight(doc, labelTe, _width * _cw);
+      var (plotCurves, cutCurve, sizeLabelTe, basePt) = BuildGeometry(_width, _height, _cw, _ch);
+      CalibrateTextHeight(sizeLabelTe, _width * _cw);
+
+      double T = sizeLabelTe.TextHeight;
+      double H = _ch * _height;
+
+      // Stack size label above count label slot when both are shown
+      if (_showSize && _showCount)
+      {
+        var sizeOrigin = new Point3d(sizeLabelTe.Plane.Origin.X, H + LabelGap + T * 1.2, 0.0);
+        sizeLabelTe.Plane = new Plane(sizeOrigin, Vector3d.XAxis, Vector3d.YAxis);
+      }
+
+      TextEntity? countLabelTe = null;
+      if (_showCount)
+      {
+        var countOrigin = new Point3d(_cw * _width / 2.0, H + LabelGap, 0.0);
+        countLabelTe = new TextEntity
+        {
+          Plane         = new Plane(countOrigin, Vector3d.XAxis, Vector3d.YAxis),
+          PlainText     = $"({FmtFrac(_cw)} x {FmtFrac(_ch)})",
+          TextHeight    = T,
+          Justification = TextJustification.BottomCenter,
+        };
+      }
 
       var fadedPlot = FadeColor(LayerColor(doc, LayerPlot));
       var fadedCut  = FadeColor(LayerColor(doc, LayerCut));
@@ -62,8 +91,12 @@ public sealed class vDiamonds : Command
       var previewItems = new List<(GeometryBase Geom, Color Color)>();
       foreach (var crv in plotCurves)
         previewItems.Add((crv.DuplicateCurve(), fadedPlot));
-      previewItems.Add((cutCurve.DuplicateCurve(), fadedCut));
-      previewItems.Add((labelTe.Duplicate(), fadedRef));
+      if (_showBoundary)
+        previewItems.Add((cutCurve.DuplicateCurve(), fadedCut));
+      if (_showSize)
+        previewItems.Add((sizeLabelTe.Duplicate(), fadedRef));
+      if (countLabelTe != null)
+        previewItems.Add((countLabelTe.Duplicate(), fadedRef));
 
       var capturedBase  = basePt;
       var capturedItems = previewItems;
@@ -83,12 +116,19 @@ public sealed class vDiamonds : Command
         }
       };
 
+      var togBoundary = new OptionToggle(_showBoundary, "No", "Yes");
+      var togSize     = new OptionToggle(_showSize,     "No", "Yes");
+      var togCount    = new OptionToggle(_showCount,    "No", "Yes");
+
       var gp = new GetPoint();
       gp.SetCommandPrompt("Pick diamond pattern placement point");
-      var idxW  = gp.AddOption("Width",       FmtOpt(_width));
-      var idxH  = gp.AddOption("Height",      FmtOpt(_height));
-      var idxCW = gp.AddOption("CountWidth",  _cw.ToString());
-      var idxCH = gp.AddOption("CountHeight", _ch.ToString());
+      var idxW        = gp.AddOption("Width",       FmtOpt(_width));
+      var idxH        = gp.AddOption("Height",      FmtOpt(_height));
+      var idxCW       = gp.AddOption("CountWidth",  FmtOpt(_cw));
+      var idxCH       = gp.AddOption("CountHeight", FmtOpt(_ch));
+      var idxBoundary = gp.AddOptionToggle("Boundary", ref togBoundary);
+      var idxSize     = gp.AddOptionToggle("Size",     ref togSize);
+      var idxCount    = gp.AddOptionToggle("Count",    ref togCount);
 
       gp.DynamicDraw += onDraw;
       var result = gp.Get();
@@ -116,16 +156,19 @@ public sealed class vDiamonds : Command
         }
         else if (opt.Index == idxCW)
         {
-          var v = GetIntSubprompt("Number of diamonds wide", _cw);
+          var v = GetDoubleSubprompt("Number of diamonds wide", _cw);
           if (v == null) return Result.Cancel;
-          if (v.Value >= 1) _cw = v.Value;
+          if (v.Value >= 1.0) _cw = v.Value;
         }
         else if (opt.Index == idxCH)
         {
-          var v = GetIntSubprompt("Number of diamonds tall", _ch);
+          var v = GetDoubleSubprompt("Number of diamonds tall", _ch);
           if (v == null) return Result.Cancel;
-          if (v.Value >= 1) _ch = v.Value;
+          if (v.Value >= 1.0) _ch = v.Value;
         }
+        else if (opt.Index == idxBoundary) _showBoundary = togBoundary.CurrentValue;
+        else if (opt.Index == idxSize)     _showSize     = togSize.CurrentValue;
+        else if (opt.Index == idxCount)    _showCount    = togCount.CurrentValue;
 
         SaveSettings();
         continue;
@@ -134,7 +177,11 @@ public sealed class vDiamonds : Command
       if (result == GetResult.Point)
       {
         var xform = Transform.Translation(gp.Point() - basePt);
-        AddToDoc(doc, plotCurves, cutCurve, labelTe, xform, _width, _height, _cw, _ch);
+        AddToDoc(doc, plotCurves,
+                 _showBoundary ? cutCurve    : null,
+                 _showSize     ? sizeLabelTe : null,
+                 countLabelTe,
+                 xform, _width, _height, _cw, _ch);
         SaveSettings();
         doc.Views.Redraw();
         return Result.Success;
@@ -144,17 +191,20 @@ public sealed class vDiamonds : Command
 
   // ── Geometry ────────────────────────────────────────────────────────────────
 
-  private static (List<NurbsCurve> PlotCurves, PolylineCurve CutCurve, TextEntity LabelTe, Point3d BasePt)
-    BuildGeometry(double width, double height, int cw, int ch)
+  private static (List<NurbsCurve> PlotCurves, PolylineCurve CutCurve, TextEntity SizeLabelTe, Point3d BasePt)
+    BuildGeometry(double width, double height, double cw, double ch)
   {
     double W = cw * width;
     double H = ch * height;
     double s = height / width;
 
+    int cwCeil = (int)Math.Ceiling(cw);
+    int chCeil = (int)Math.Ceiling(ch);
+
     var plotCurves = new List<NurbsCurve>();
 
     // ↗ family (slope +s): y = s*x + b_n
-    for (int n = 0; n < cw + ch; n++)
+    for (int n = 0; n < cwCeil + chCeil; n++)
     {
       double b = H - ((n + 0.5) * height);
       var r = ClipLineToBbox(s, b, W, H);
@@ -163,7 +213,7 @@ public sealed class vDiamonds : Command
     }
 
     // ↘ family (slope -s): y = -s*x + c_k
-    for (int k = -ch; k < cw; k++)
+    for (int k = -chCeil; k < cwCeil; k++)
     {
       double c = H + ((k + 0.5) * height);
       var r = ClipLineToBbox(-s, c, W, H);
@@ -183,7 +233,7 @@ public sealed class vDiamonds : Command
     var textHeight = W / 10.0;
     var origin     = new Point3d(W / 2.0, H + LabelGap, 0.0);
     var labelPlane = new Plane(origin, Vector3d.XAxis, Vector3d.YAxis);
-    var labelTe = new TextEntity
+    var sizeLabelTe = new TextEntity
     {
       Plane         = labelPlane,
       PlainText     = labelText,
@@ -191,7 +241,7 @@ public sealed class vDiamonds : Command
       Justification = TextJustification.BottomCenter,
     };
 
-    return (plotCurves, cutCurve, labelTe, new Point3d(0.0, H, 0.0));
+    return (plotCurves, cutCurve, sizeLabelTe, new Point3d(0.0, H, 0.0));
   }
 
   private static (Point3d A, Point3d B)? ClipLineToBbox(double slope, double intercept, double W, double H)
@@ -235,7 +285,7 @@ public sealed class vDiamonds : Command
     return (unique[0], unique[1]);
   }
 
-  private static void CalibrateTextHeight(RhinoDoc doc, TextEntity labelTe, double targetWidth)
+  private static void CalibrateTextHeight(TextEntity labelTe, double targetWidth)
   {
     // TextModelWidth returns the rendered text width in model units at the current TextHeight.
     double textWidth = labelTe.TextModelWidth;
@@ -246,10 +296,11 @@ public sealed class vDiamonds : Command
   private static void AddToDoc(
     RhinoDoc doc,
     List<NurbsCurve> plotCurves,
-    PolylineCurve cutCurve,
-    TextEntity labelTe,
+    PolylineCurve? cutCurve,
+    TextEntity? sizeLabelTe,
+    TextEntity? countLabelTe,
     Transform xform,
-    double width, double height, int cw, int ch)
+    double width, double height, double cw, double ch)
   {
     var plotAttr = new ObjectAttributes { LayerIndex = EnsureLayer(doc, LayerPlot, PlotColor) };
     var cutAttr  = new ObjectAttributes { LayerIndex = EnsureLayer(doc, LayerCut,  CutColor)  };
@@ -265,22 +316,29 @@ public sealed class vDiamonds : Command
       if (id != Guid.Empty) addedIds.Add(id);
     }
 
-    var cut = cutCurve.DuplicateCurve();
-    cut.Transform(xform);
-    var cutId = doc.Objects.AddCurve(cut, cutAttr);
-    if (cutId != Guid.Empty) addedIds.Add(cutId);
-
-    if (labelTe.Duplicate() is TextEntity te)
+    if (cutCurve != null)
     {
-      te.Transform(xform);
-      var teId = doc.Objects.AddText(te, refAttr);
-      if (teId != Guid.Empty) addedIds.Add(teId);
+      var cut = cutCurve.DuplicateCurve();
+      cut.Transform(xform);
+      var cutId = doc.Objects.AddCurve(cut, cutAttr);
+      if (cutId != Guid.Empty) addedIds.Add(cutId);
+    }
+
+    foreach (var te in new[] { sizeLabelTe, countLabelTe })
+    {
+      if (te == null) continue;
+      if (te.Duplicate() is TextEntity copy)
+      {
+        copy.Transform(xform);
+        var teId = doc.Objects.AddText(copy, refAttr);
+        if (teId != Guid.Empty) addedIds.Add(teId);
+      }
     }
 
     if (addedIds.Count > 1)
     {
       var shortId   = Guid.NewGuid().ToString()[..8];
-      var groupName = $"Diamonds_{FmtFrac(height)}x{FmtFrac(width)}_({cw}x{ch})_{shortId}";
+      var groupName = $"Diamonds_{FmtFrac(height)}x{FmtFrac(width)}_({FmtFrac(cw)}x{FmtFrac(ch)})_{shortId}";
       var groupIdx  = doc.Groups.Add(groupName);
       foreach (var id in addedIds)
       {
@@ -297,29 +355,38 @@ public sealed class vDiamonds : Command
 
   private static void LoadSettings()
   {
-    (_width, _height, _cw, _ch) = vToolsOptionStore.Read(SettingsSection, section =>
+    (_width, _height, _cw, _ch, _showBoundary, _showSize, _showCount) = vToolsOptionStore.Read(SettingsSection, section =>
     {
       var w  = _width;
       var h  = _height;
       var cw = _cw;
       var ch = _ch;
+      var sb = _showBoundary;
+      var ss = _showSize;
+      var sc = _showCount;
 
       if (vToolsOptionStore.TryGetDouble(section, WidthKey,       out var pw)  && pw  > 0.0) w  = pw;
       if (vToolsOptionStore.TryGetDouble(section, HeightKey,      out var ph)  && ph  > 0.0) h  = ph;
-      if (vToolsOptionStore.TryGetDouble(section, CountWidthKey,  out var pcw) && pcw >= 1.0) cw = (int)Math.Round(pcw);
-      if (vToolsOptionStore.TryGetDouble(section, CountHeightKey, out var pch) && pch >= 1.0) ch = (int)Math.Round(pch);
+      if (vToolsOptionStore.TryGetDouble(section, CountWidthKey,  out var pcw) && pcw >= 1.0) cw = pcw;
+      if (vToolsOptionStore.TryGetDouble(section, CountHeightKey, out var pch) && pch >= 1.0) ch = pch;
+      if (vToolsOptionStore.TryGetBool(section, ShowBoundaryKey, out var psb)) sb = psb;
+      if (vToolsOptionStore.TryGetBool(section, ShowSizeKey,     out var pss)) ss = pss;
+      if (vToolsOptionStore.TryGetBool(section, ShowCountKey,    out var psc)) sc = psc;
 
-      return (w, h, cw, ch);
+      return (w, h, cw, ch, sb, ss, sc);
     });
   }
 
   private static void SaveSettings() =>
     vToolsOptionStore.Update(SettingsSection, section =>
     {
-      section[WidthKey]       = _width;
-      section[HeightKey]      = _height;
-      section[CountWidthKey]  = _cw;
-      section[CountHeightKey] = _ch;
+      section[WidthKey]        = _width;
+      section[HeightKey]       = _height;
+      section[CountWidthKey]   = _cw;
+      section[CountHeightKey]  = _ch;
+      section[ShowBoundaryKey] = _showBoundary;
+      section[ShowSizeKey]     = _showSize;
+      section[ShowCountKey]    = _showCount;
     });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -362,24 +429,6 @@ public sealed class vDiamonds : Command
     return null;
   }
 
-  private static int? GetIntSubprompt(string prompt, int current)
-  {
-    var gs = new GetString();
-    gs.SetCommandPrompt($"{prompt} ({current})");
-    gs.AcceptNothing(true);
-    var res = gs.Get();
-    if (res == GetResult.Nothing) return current;
-    if (res == GetResult.String)
-    {
-      var raw = gs.StringResult().Trim();
-      if (string.IsNullOrEmpty(raw)) return current;
-      if (int.TryParse(raw, out var v) && v >= 1)
-        return v;
-      return current;
-    }
-
-    return null;
-  }
 
   private static (int Whole, int Num, int Den) ToFraction(double v, int den = 16)
   {
