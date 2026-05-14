@@ -44,7 +44,7 @@ public sealed class vOffset : Command
     if (doc == null)
       return;
 
-    _ = RhinoApp.RunScript("_Offset", false);
+    var ok = RhinoApp.RunScript("_Offset", false);
 
     doc.Objects.UnselectAll();
     doc.Views.Redraw();
@@ -54,5 +54,12 @@ public sealed class vOffset : Command
     _restartingAfterOffsetDelegate = true;
     _ = RhinoApp.RunScript("_vOffset", false);
     _restartingAfterOffsetDelegate = false; // safety clear if RunScript didn't invoke us
+
+    // Re-queue for the next iteration as long as the user didn't cancel.
+    if (ok)
+    {
+      _pendingOffsetIdleHandler = OnLaunchOffsetOnIdle;
+      RhinoApp.Idle += _pendingOffsetIdleHandler;
+    }
   }
 }
