@@ -408,6 +408,8 @@ public sealed class vLine : Command
 
     var mode = initialMode;
     Vector3d? parallelDir = null;
+    Curve? perpLockedCurve = null;
+    Vector3d? perpLockedDir = null;
 
     var cacheState = new CurveCacheState(CollectCurveCache(doc), DateTime.UtcNow.AddMilliseconds(500));
     string? lastAutoChoice = null;
@@ -416,7 +418,11 @@ public sealed class vLine : Command
     void ApplyModePrompt()
     {
       if (mode == "perp")
-        getPoint.SetCommandPrompt("End point of line (Perp mode: hover near curve, click to accept)");
+        getPoint.SetCommandPrompt(perpLockedDir.HasValue
+          ? "End point of line (Perp: perpendicular to curve at start point)"
+          : perpLockedCurve != null
+            ? "End point of line (Perp: locked to selected curve)"
+            : "End point of line (Perp)");
       else if (mode == "tangent")
         getPoint.SetCommandPrompt("End point of line (Tangent mode: hover near curve, click to accept)");
       else if (mode == "perp_any")
@@ -518,6 +524,31 @@ public sealed class vLine : Command
         return constrainedPt;
       }
 
+      // Perp (explicit selection): use locked direction or locked curve, no cache needed.
+      if (modeName == "perp")
+      {
+        if (perpLockedDir.HasValue)
+        {
+          var proj = Vector3d.Multiply(cursorPoint - startPoint, perpLockedDir.Value);
+          return startPoint + (perpLockedDir.Value * proj);
+        }
+        if (perpLockedCurve != null)
+        {
+          DebugLog($"Perp: locked curve hint=({cursorPoint.X:F3},{cursorPoint.Y:F3},{cursorPoint.Z:F3}) preview={preview}");
+          var pt = PerpPointFromStartWithHint(startPoint, perpLockedCurve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
+          if (pt.HasValue)
+          {
+            DebugLog($"Perp: found ({pt.Value.X:F3},{pt.Value.Y:F3},{pt.Value.Z:F3})");
+            return pt.Value;
+          }
+          DebugLog("Perp: PerpPointFromStartWithHint null -> trying fallback");
+          var fb = PerpFallbackToPointedSegment(startPoint, perpLockedCurve, cursorPoint, preview);
+          DebugLog($"Perp: fallback={(fb.HasValue ? $"({fb.Value.X:F3},{fb.Value.Y:F3},{fb.Value.Z:F3})" : "null")}");
+          return fb;
+        }
+        return null;
+      }
+
       MaybeRefreshCurveCache(false);
       var curveCache = cacheState.CurveCache;
 
@@ -527,27 +558,41 @@ public sealed class vLine : Command
         return null;
       }
 
-      var curve = NearestCurveToPoint(cursorPoint, curveCache);
+      // "tangent" snaps when hovering near a curve; "perp_any" / "tangent_any" always use nearest.
+      Curve? curve;
+      if (modeName == "tangent")
+      {
+        var captureTol = doc.ModelAbsoluteTolerance * 100.0;
+        curve = CurveAtCursorPoint(cursorPoint, curveCache, captureTol);
+        if (curve == null)
+        {
+          DebugLog($"EndpointForMode({modeName}): cursor not within capture tol of any curve");
+          return null;
+        }
+      }
+      else
+      {
+        curve = NearestCurveToPoint(cursorPoint, curveCache);
+      }
 
       if (curve == null)
       {
-        DebugLog($"EndpointForMode({modeName}): NearestCurve returned null");
+        DebugLog($"EndpointForMode({modeName}): no curve resolved");
         return null;
       }
 
-      if (modeName is "perp" or "perp_any")
+      if (modeName == "perp_any")
       {
-        DebugLog($"Perp: start=({startPoint.X:F3},{startPoint.Y:F3},{startPoint.Z:F3}) hint=({cursorPoint.X:F3},{cursorPoint.Y:F3},{cursorPoint.Z:F3}) curve={curve.GetType().Name} preview={preview}");
+        DebugLog($"PerpNear: hint=({cursorPoint.X:F3},{cursorPoint.Y:F3},{cursorPoint.Z:F3}) curve={curve.GetType().Name} preview={preview}");
         var pt = PerpPointFromStartWithHint(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
         if (pt.HasValue)
         {
-          DebugLog($"Perp: found ({pt.Value.X:F3},{pt.Value.Y:F3},{pt.Value.Z:F3})");
+          DebugLog($"PerpNear: found ({pt.Value.X:F3},{pt.Value.Y:F3},{pt.Value.Z:F3})");
           return pt.Value;
         }
-
-        DebugLog("Perp: PerpPointFromStartWithHint null -> trying fallback segments");
+        DebugLog("PerpNear: null -> trying fallback");
         var fb = PerpFallbackToPointedSegment(startPoint, curve, cursorPoint, preview);
-        DebugLog($"Perp: fallback={(fb.HasValue ? $"({fb.Value.X:F3},{fb.Value.Y:F3},{fb.Value.Z:F3})" : "null")}");
+        DebugLog($"PerpNear: fallback={(fb.HasValue ? $"({fb.Value.X:F3},{fb.Value.Y:F3},{fb.Value.Z:F3})" : "null")}");
         return fb;
       }
 
@@ -729,6 +774,69 @@ public sealed class vLine : Command
 
           if (option.Index == idxPerp)
           {
+            var go = new GetObject();
+            go.SetCommandPrompt("Select curve for perpendicular");
+            go.GeometryFilter = Rhino.DocObjects.ObjectType.Curve;
+            var goResult = go.Get();
+            if (goResult != GetResult.Object)
+            {
+              perpLockedCurve = null;
+              perpLockedDir = null;
+              mode = null;
+              ApplyModePrompt();
+              continue;
+            }
+            var picked = go.Object(0);
+            var pickedCurve = picked.Curve();
+            if (pickedCurve == null) continue;
+            var pickPoint = picked.SelectionPoint();
+
+            pickedCurve.ClosestPoint(startPoint, out var paramAtStart);
+            var ptOnCurve = pickedCurve.PointAt(paramAtStart);
+
+            if (ptOnCurve.DistanceTo(startPoint) <= doc.ModelAbsoluteTolerance * 10.0)
+            {
+              // Start is on the curve — lock the line direction to be perp to the curve tangent.
+              // At a kink, use the pick-point position to determine which side's tangent.
+              var domain = pickedCurve.Domain;
+              var eps = (domain.T1 - domain.T0) * 1e-5;
+              var tBefore = Math.Max(domain.T0, paramAtStart - eps);
+              var tAfter = Math.Min(domain.T1, paramAtStart + eps);
+              var tanBefore = pickedCurve.TangentAt(tBefore);
+              var tanAfter = pickedCurve.TangentAt(tAfter);
+
+              Vector3d useTangent;
+              var isKink = tanBefore.IsValid && tanAfter.IsValid && tanBefore * tanAfter < 0.9999;
+              if (isKink)
+              {
+                pickedCurve.ClosestPoint(pickPoint, out var paramAtPick);
+                useTangent = paramAtPick >= paramAtStart ? tanAfter : tanBefore;
+                DebugLog($"Perp: kink detected at param {paramAtStart:F4}, pick side={(paramAtPick >= paramAtStart ? "after" : "before")}");
+              }
+              else
+              {
+                useTangent = pickedCurve.TangentAt(paramAtStart);
+              }
+
+              var t2d = ToCPlane2d(useTangent, cplane);
+              if (!TryUnitize2d(t2d, out var t2du))
+                t2du = new Vector2d(1.0, 0.0);
+              var perp2d = new Vector2d(-t2du.Y, t2du.X);
+              var perp3d = (cplane.XAxis * perp2d.X) + (cplane.YAxis * perp2d.Y);
+              if (!perp3d.IsTiny()) perp3d.Unitize();
+
+              perpLockedDir = perp3d;
+              perpLockedCurve = null;
+              DebugLog($"Perp: direction locked to ({perp3d.X:F3},{perp3d.Y:F3},{perp3d.Z:F3}){(isKink ? " [kink]" : "")}");
+            }
+            else
+            {
+              // Start is off the curve — snap endpoint to the perp point on that curve.
+              perpLockedCurve = pickedCurve;
+              perpLockedDir = null;
+              DebugLog($"Perp: curve locked, start-to-curve dist={ptOnCurve.DistanceTo(startPoint):F4}");
+            }
+
             mode = "perp";
             ApplyModePrompt();
             continue;
