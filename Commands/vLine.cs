@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Drawing;
 using Rhino;
@@ -47,6 +48,9 @@ public sealed class vLine : Command
 
   private static string? _pendingNativeLineMode;
   private static EventHandler? _pendingNativeLineLaunchIdleHandler;
+
+  private static bool _debugMode = false;
+  private static string? _debugLogPath = null;
 
   /// <summary>
   /// Rhino command name.
@@ -399,6 +403,8 @@ public sealed class vLine : Command
     getPoint.AddOptionToggle("AngleLock", ref angleLock);
     var idxAngle = getPoint.AddOptionDouble("Angle", ref angleOption);
     getPoint.AddOptionToggle("AngleRef", ref angleRelative);
+    var debugToggle = new OptionToggle(_debugMode, "Off", "On");
+    getPoint.AddOptionToggle("Debug", ref debugToggle);
 
     var mode = initialMode;
     Vector3d? parallelDir = null;
@@ -516,20 +522,33 @@ public sealed class vLine : Command
       var curveCache = cacheState.CurveCache;
 
       if (curveCache.Count == 0)
+      {
+        DebugLog($"EndpointForMode({modeName}): no curves in cache");
         return null;
+      }
 
       var curve = NearestCurveToPoint(cursorPoint, curveCache);
 
       if (curve == null)
+      {
+        DebugLog($"EndpointForMode({modeName}): NearestCurve returned null");
         return null;
+      }
 
       if (modeName is "perp" or "perp_any")
       {
+        DebugLog($"Perp: start=({startPoint.X:F3},{startPoint.Y:F3},{startPoint.Z:F3}) hint=({cursorPoint.X:F3},{cursorPoint.Y:F3},{cursorPoint.Z:F3}) curve={curve.GetType().Name} preview={preview}");
         var pt = PerpPointFromStartWithHint(startPoint, curve, cursorPoint, preview ? 80 : 240, preview ? 8 : 18);
         if (pt.HasValue)
+        {
+          DebugLog($"Perp: found ({pt.Value.X:F3},{pt.Value.Y:F3},{pt.Value.Z:F3})");
           return pt.Value;
+        }
 
-        return PerpFallbackToPointedSegment(startPoint, curve, cursorPoint, preview);
+        DebugLog("Perp: PerpPointFromStartWithHint null -> trying fallback segments");
+        var fb = PerpFallbackToPointedSegment(startPoint, curve, cursorPoint, preview);
+        DebugLog($"Perp: fallback={(fb.HasValue ? $"({fb.Value.X:F3},{fb.Value.Y:F3},{fb.Value.Z:F3})" : "null")}");
+        return fb;
       }
 
       if (modeName is "tangent" or "tangent_any")
@@ -663,14 +682,28 @@ public sealed class vLine : Command
     {
       while (true)
       {
+        if (debugToggle.CurrentValue && !_debugMode)
+        {
+          _debugMode = true;
+          EnsureDebugLog();
+          DebugLog($"Debug ON  start=({startPoint.X:F3},{startPoint.Y:F3},{startPoint.Z:F3}) mode={mode ?? "none"} curves={cacheState.CurveCache.Count}");
+        }
+        else if (!debugToggle.CurrentValue && _debugMode)
+        {
+          DebugLog("Debug OFF");
+          _debugMode = false;
+        }
+
         var result = getPoint.Get();
 
         if (result == GetResult.Point)
         {
+          var clickedRaw = getPoint.Point();
+          DebugLog($"Click: cursor=({clickedRaw.X:F3},{clickedRaw.Y:F3},{clickedRaw.Z:F3}) mode={mode ?? "free"}");
           Point3d endPoint;
           if (!string.IsNullOrWhiteSpace(mode))
           {
-            var endpointForMode = EndpointForMode(mode, getPoint.Point(), preview: false);
+            var endpointForMode = EndpointForMode(mode, clickedRaw, preview: false);
             if (!endpointForMode.HasValue)
             {
               RhinoApp.WriteLine($"vLine: no valid {mode} solution found on nearby curves at this cursor location.");
@@ -681,7 +714,7 @@ public sealed class vLine : Command
           }
           else
           {
-            endPoint = PreviewEndFromCurrent(getPoint.Point());
+            endPoint = PreviewEndFromCurrent(clickedRaw);
           }
 
           var state = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
@@ -1112,6 +1145,18 @@ public sealed class vLine : Command
     }
 
     var valid = unique.FindAll(v => v.Error <= 0.02);
+    if (_debugMode)
+    {
+      DebugLog($"PerpSolver: candidates={candidates.Count} refined={refined.Count} unique={unique.Count} valid={valid.Count}");
+      if (unique.Count > 0)
+      {
+        var bestErr = unique[0].Error;
+        for (var i = 1; i < unique.Count; i++)
+          if (unique[i].Error < bestErr) bestErr = unique[i].Error;
+        DebugLog($"PerpSolver: best error={bestErr:F6} threshold=0.02{(valid.Count == 0 ? " -> FAILED" : " -> OK")}");
+      }
+    }
+
     if (valid.Count == 0)
       return null;
 
@@ -1361,6 +1406,24 @@ public sealed class vLine : Command
     }
 
     return best.HasValue && bestDistSq <= snapTolSq ? best : null;
+  }
+
+  private static void DebugLog(string msg)
+  {
+    if (!_debugMode) return;
+    var line = $"[vLine {DateTime.Now:HH:mm:ss.fff}] {msg}";
+    RhinoApp.WriteLine(line);
+    try { if (_debugLogPath != null) File.AppendAllText(_debugLogPath, line + "\n"); } catch { }
+  }
+
+  private static void EnsureDebugLog()
+  {
+    if (_debugLogPath != null) return;
+    var asmDir = Path.GetDirectoryName(typeof(vLine).Assembly.Location) ?? ".";
+    var logsDir = Path.Combine(asmDir, "logs");
+    try { Directory.CreateDirectory(logsDir); } catch { logsDir = asmDir; }
+    _debugLogPath = Path.Combine(logsDir, $"vLine_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+    RhinoApp.WriteLine($"[vLine] Debug log: {_debugLogPath}");
   }
 
   private static void LaunchNativeLineMode()
