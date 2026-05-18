@@ -44,7 +44,7 @@ public sealed class vPart : Command
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
-    go.GroupSelect = true;
+    go.GroupSelect = false;
     go.EnableClearObjectsOnEntry(false);
     go.EnableUnselectObjectsOnExit(false);
     go.DeselectAllBeforePostSelect = false;
@@ -67,7 +67,7 @@ public sealed class vPart : Command
       go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
       go.GeometryFilter = ObjectType.Curve;
       go.SubObjectSelect = false;
-      go.GroupSelect = true;
+      go.GroupSelect = false;
       go.EnableClearObjectsOnEntry(false);
       go.EnableUnselectObjectsOnExit(false);
       go.DeselectAllBeforePostSelect = false;
