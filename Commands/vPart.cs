@@ -25,6 +25,10 @@ public sealed class vPart : Command
 {
   public override string EnglishName => "vPart";
 
+  // Persisted option defaults
+  private static bool _group    = false;
+  private static bool _joinPerim = false;
+
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     var tol = doc.ModelAbsoluteTolerance;
@@ -141,8 +145,13 @@ public sealed class vPart : Command
       return (Geom: p.Geom.Duplicate()!, Color: color);
     }).Where(p => p.Geom != null).ToList();
 
+    var groupToggle    = new OptionToggle(_group,    "No", "Yes");
+    var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
+
     var gp = new GetPoint();
-    gp.SetCommandPrompt("Pick placement point for Part (Esc to cancel)");
+    gp.SetCommandPrompt("Pick placement point for Part");
+    gp.AddOptionToggle("Group",         ref groupToggle);
+    gp.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
     gp.DynamicDraw += (_, e) =>
     {
       var xform = Transform.Translation(e.CurrentPoint - basePoint);
@@ -155,19 +164,52 @@ public sealed class vPart : Command
       }
     };
 
-    var gpResult = gp.Get();
+    GetResult gpResult;
+    do { gpResult = gp.Get(); }
+    while (gpResult == GetResult.Option);
+
     if (gpResult != GetResult.Point)
       return Result.Cancel;
+
+    _group    = groupToggle.CurrentValue;
+    _joinPerim = joinPerimToggle.CurrentValue;
 
     // ── 8. Commit ─────────────────────────────────────────────────────────
 
     var translation = Transform.Translation(gp.Point() - basePoint);
-    foreach (var (geom, attr) in partItems)
+    var addedIds    = new List<Guid>();
+
+    var commitItems = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
+    if (_joinPerim)
+    {
+      // Single joined closed perimeter on current layer, then inside objects
+      commitItems.Add(((GeometryBase)perimeter!, currentLayerAttr.Duplicate()));
+      commitItems.AddRange(insideObjects);
+    }
+    else
+    {
+      commitItems.AddRange(partItems);
+    }
+
+    foreach (var (geom, attr) in commitItems)
     {
       var placed = geom.Duplicate();
       if (placed == null) continue;
       placed.Transform(translation);
-      AddObjectToDoc(doc, placed, attr);
+      var id = AddObjectToDoc(doc, placed, attr);
+      if (id != Guid.Empty) addedIds.Add(id);
+    }
+
+    if (_group && addedIds.Count > 1)
+    {
+      var grpIdx = doc.Groups.Add();
+      foreach (var id in addedIds)
+      {
+        var obj = doc.Objects.FindId(id);
+        if (obj == null) continue;
+        obj.Attributes.AddToGroup(grpIdx);
+        obj.CommitChanges();
+      }
     }
 
     doc.Views.Redraw();
@@ -202,6 +244,19 @@ public sealed class vPart : Command
       openEnds.Add((i, false, pieces[i].PointAtEnd));
     }
 
+    // Log gap distances before bridging
+    RhinoApp.WriteLine($"vPart[perim]: {curves.Count} curve(s) — {openEnds.Count} open endpoints");
+    for (var di = 0; di < openEnds.Count; di++)
+      for (var dj = di + 1; dj < openEnds.Count; dj++)
+      {
+        if (openEnds[dj].CrvIdx == openEnds[di].CrvIdx) continue;
+        var gapDist = openEnds[di].Pt.DistanceTo(openEnds[dj].Pt);
+        var tag = gapDist <= tol      ? "(coincident)"
+                : gapDist < tol * 200 ? "(will bridge)"
+                : $"(TOO FAR — {gapDist / tol:F0}× tol, not bridged)";
+        RhinoApp.WriteLine($"  [{openEnds[di].CrvIdx}/{(openEnds[di].IsStart ? "S" : "E")}]\u2194[{openEnds[dj].CrvIdx}/{(openEnds[dj].IsStart ? "S" : "E")}] dist={gapDist:F4} {tag}");
+      }
+
     var used = new HashSet<int>();
     for (var i = 0; i < openEnds.Count; i++)
     {
@@ -225,15 +280,20 @@ public sealed class vPart : Command
       }
     }
 
+    RhinoApp.WriteLine($"vPart[perim]: {bridges.Count} bridge(s) added — {pieces.Count} pieces for join");
+
     // Join copies (only for containment testing)
     var joined = Curve.JoinCurves(pieces.ToArray(), tol * 10);
+    RhinoApp.WriteLine($"vPart[perim]: join@tol×10 → {(joined == null ? "null" : $"{joined.Length} result(s), closed={joined.Any(c => c.IsClosed)}")} ");
     if (joined != null && joined.Length == 1 && joined[0].IsClosed)
       return (joined[0], bridges);
 
     var final = Curve.JoinCurves(pieces.ToArray(), tol * 100);
+    RhinoApp.WriteLine($"vPart[perim]: join@tol×100 → {(final == null ? "null" : $"{final.Length} result(s), closed={final.Any(c => c.IsClosed)}")} ");
     if (final != null && final.Length == 1 && final[0].IsClosed)
       return (final[0], bridges);
 
+    RhinoApp.WriteLine("vPart[perim]: FAILED — endpoints not reachable or loop not closed");
     return (null, bridges);
   }
 
@@ -345,18 +405,18 @@ public sealed class vPart : Command
     }
   }
 
-  private static void AddObjectToDoc(RhinoDoc doc, GeometryBase geom, ObjectAttributes attr)
+  private static Guid AddObjectToDoc(RhinoDoc doc, GeometryBase geom, ObjectAttributes attr)
   {
     switch (geom)
     {
-      case Curve c:                          doc.Objects.AddCurve(c, attr);                         break;
-      case TextEntity te:                    doc.Objects.AddText(te, attr);                         break;
-      case TextDot td:                       doc.Objects.AddTextDot(td, attr);                      break;
-      case Rhino.Geometry.Point pt:          doc.Objects.AddPoint(pt.Location, attr);               break;
-      case Hatch h:                          doc.Objects.AddHatch(h, attr);                         break;
-      case Brep b:                           doc.Objects.AddBrep(b, attr);                          break;
-      case Mesh m:                           doc.Objects.AddMesh(m, attr);                          break;
-      default:                               doc.Objects.Add(geom, attr);                           break;
+      case Curve c:                          return doc.Objects.AddCurve(c, attr);
+      case TextEntity te:                    return doc.Objects.AddText(te, attr);
+      case TextDot td:                       return doc.Objects.AddTextDot(td, attr);
+      case Rhino.Geometry.Point pt:          return doc.Objects.AddPoint(pt.Location, attr);
+      case Hatch h:                          return doc.Objects.AddHatch(h, attr);
+      case Brep b:                           return doc.Objects.AddBrep(b, attr);
+      case Mesh m:                           return doc.Objects.AddMesh(m, attr);
+      default:                               return doc.Objects.Add(geom, attr);
     }
   }
 }
