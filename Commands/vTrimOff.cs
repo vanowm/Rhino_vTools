@@ -74,7 +74,10 @@ public sealed class vTrimOff : Command
       return Result.Nothing;
     }
 
-    var plane = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
+    var vp    = doc.Views.ActiveView?.ActiveViewport;
+    var plane = Plane.WorldXY;
+    if (vp != null && vp.GetCameraFrame(out var camFrame))
+      plane = new Plane(Point3d.Origin, camFrame.XAxis, camFrame.YAxis);
 
     var boundary = DetectBoundary(curves, plane, tol);
     if (boundary.Count == 0)
