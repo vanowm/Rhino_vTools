@@ -61,32 +61,19 @@ public sealed class vPart : Command
     // ── 1. Select perimeter curves ─────────────────────────────────────────
     // Single-pick toggle loop: click to add, click again to remove.
     // Options work at any point without affecting selection state.
+    // We do NOT call Select() manually — Rhino handles the toggle visually.
+    // After each Get() we read the object's resulting IsSelected state to
+    // decide whether it was added or removed.
 
     var collectedIds  = new HashSet<Guid>();
     var collectedMap  = new Dictionary<Guid, ObjRef>();
-
-    // Capture any preselected curves before entering the interactive loop
-    var goPre = new GetObject();
-    goPre.GeometryFilter = ObjectType.Curve;
-    goPre.SubObjectSelect = false;
-    goPre.GroupSelect = false;
-    goPre.EnablePreSelect(true, false);
-    goPre.EnablePostSelect(false);
-    goPre.AcceptNothing(true);
-    goPre.GetMultiple(0, 0);
-    if (goPre.CommandResult() == Result.Success)
-      for (var i = 0; i < goPre.ObjectCount; i++)
-      {
-        var r = goPre.Object(i);
-        if (collectedIds.Add(r.ObjectId)) { collectedMap[r.ObjectId] = r; r.Object()?.Select(true); }
-      }
 
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = false;
-    go.EnablePreSelect(false, false);
+    go.EnablePreSelect(true, true);
     go.DeselectAllBeforePostSelect = false;
     go.AcceptNothing(true);
     go.AddOptionToggle("Group",         ref groupToggle);
@@ -107,17 +94,18 @@ public sealed class vPart : Command
 
       var picked = go.Object(0);
       var pid    = picked.ObjectId;
-      if (collectedIds.Contains(pid))
+      var obj    = picked.Object();
+      if (obj == null) continue;
+
+      // Rhino has already toggled selection — read resulting state
+      if (obj.IsSelected(false) > 0)
       {
-        collectedIds.Remove(pid);
-        collectedMap.Remove(pid);
-        picked.Object()?.Select(false);
+        if (collectedIds.Add(pid)) collectedMap[pid] = picked;
       }
       else
       {
-        collectedIds.Add(pid);
-        collectedMap[pid] = picked;
-        picked.Object()?.Select(true);
+        collectedIds.Remove(pid);
+        collectedMap.Remove(pid);
       }
     }
 
