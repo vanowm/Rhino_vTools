@@ -47,6 +47,11 @@ public sealed class vTrimOff : Command
     // can add/remove curves and adjust MaxGap before pressing Enter to confirm.
     if (go.ObjectsWerePreselected)
     {
+      // Restore visual selection to match internal tracked state (preselection highlight
+      // is cleared by GetObject even though EnableClearObjectsOnEntry(false) retains the list).
+      for (var i = 0; i < go.ObjectCount; i++)
+        doc.Objects.Select(go.Object(i).ObjectId, true);
+
       go.SetCommandPrompt("Add/remove curves or set options, then press Enter");
       go.EnablePreSelect(false, false); // don't re-consume preselection
       go.AcceptNothing(true);           // Enter with current list proceeds
