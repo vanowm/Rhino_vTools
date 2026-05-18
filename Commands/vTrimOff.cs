@@ -22,7 +22,6 @@ public sealed class vTrimOff : Command
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = true;
-    go.EnableClearObjectsOnEntry(false);
     go.AcceptNothing(true);
 
     go.GetMultiple(1, 0);
