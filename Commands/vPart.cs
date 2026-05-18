@@ -91,12 +91,19 @@ public sealed class vPart : Command
       return Result.Nothing;
     }
 
-    // ── 2. Build closed perimeter for containment testing ─────────────────────
-    //  Returns the joined closed curve (internal use only) + any bridge
-    //  segments that filled gaps (these go into the output Part).
+    // ── 2. View plane (needed for perimeter detection and containment testing) ──
+
+    var vp    = doc.Views.ActiveView?.ActiveViewport;
+    var plane = Plane.WorldXY;
+    if (vp != null && vp.GetCameraFrame(out var camFrame))
+      plane = new Plane(Point3d.Origin, camFrame.XAxis, camFrame.YAxis);
+
+    // ── 3. Build closed perimeter for containment testing ─────────────────────
+    //  Uses CreateBooleanRegions first (handles curves extending past corners),
+    //  then falls back to endpoint joining + gap bridging.
 
     var perimLog = new List<string>();
-    var (perimeter, bridges) = BuildClosedPerimeter(perimList.Select(p => p.Crv).ToList(), tol, perimLog);
+    var (perimeter, bridges) = BuildClosedPerimeter(perimList.Select(p => p.Crv).ToList(), plane, tol, perimLog);
     if (perimLog.Count > 0)
     {
       try
@@ -116,26 +123,19 @@ public sealed class vPart : Command
       return Result.Nothing;
     }
 
-    // ── 3. View plane for containment testing ──────────────────────────────
-
-    var vp    = doc.Views.ActiveView?.ActiveViewport;
-    var plane = Plane.WorldXY;
-    if (vp != null && vp.GetCameraFrame(out var camFrame))
-      plane = new Plane(Point3d.Origin, camFrame.XAxis, camFrame.YAxis);
-
     // ── 4. Collect inside objects (all visible types, trimmed for curves) ──
 
     var insideObjects = CollectInsideObjects(doc, perimIds, perimeter, plane, tol);
 
     // ── 5. Assemble Part items ─────────────────────────────────────────────────────
-    //  • Original perimeter curves — each on its own layer
+    //  • Original perimeter curves trimmed to the closed boundary — each on its own layer
     //  • Bridge segments (gap fillers) — on current doc layer
     //  • Inside objects — on their original layers
 
     var currentLayerAttr = new ObjectAttributes { LayerIndex = doc.Layers.CurrentLayerIndex };
 
     var partItems = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
-    foreach (var (crv, attr) in perimList)
+    foreach (var (crv, attr) in TrimToPerimeter(perimList, perimeter!, tol))
       partItems.Add((crv, attr));
     foreach (var bridge in bridges)
       partItems.Add((bridge, currentLayerAttr.Duplicate()));
@@ -239,15 +239,34 @@ public sealed class vPart : Command
   /// separately so the caller can include them in the output Part.
   /// </summary>
   private static (Curve? Closed, List<LineCurve> Bridges) BuildClosedPerimeter(
-    List<Curve> curves, double tol, List<string> log)
+    List<Curve> curves, Plane plane, double tol, List<string> log)
   {
     var bridges = new List<LineCurve>();
 
-    // Single closed curve → nothing to join or bridge
+    // Single closed curve → nothing to do
     if (curves.Count == 1 && curves[0].IsClosed)
       return (curves[0].DuplicateCurve(), bridges);
 
-    // Build a working copy for containment-testing join (originals stay intact)
+    // Primary: CreateBooleanRegions — handles curves extending past corners
+    var regions = Curve.CreateBooleanRegions(curves.ToArray(), plane, combineRegions: true, tol);
+    if (regions != null)
+    {
+      for (var r = 0; r < regions.RegionCount; r++)
+      {
+        var rc = regions.RegionCurves(r);
+        if (rc == null) continue;
+        foreach (var c in rc)
+          if (c?.IsClosed == true)
+            return (c, bridges);  // success — no bridges needed
+      }
+      log.Add($"vPart[perim]: CreateBooleanRegions: {regions.RegionCount} region(s), none closed — trying endpoint join");
+    }
+    else
+    {
+      log.Add("vPart[perim]: CreateBooleanRegions returned null — trying endpoint join");
+    }
+
+    // Fallback: endpoint joining with gap bridging
     var pieces = curves.Select(c => c.DuplicateCurve()).ToList();
 
     // Greedily bridge nearest open-endpoint pairs across different curves
@@ -312,8 +331,58 @@ public sealed class vPart : Command
     return (null, bridges);
   }
 
-  /// <summary>
-  /// Returns all visible objects (excluding selected perimeter IDs) whose
+  /// <summary>  /// Splits each perimeter curve at its intersections with the other perimeter
+  /// curves, then keeps only the segments whose midpoint lies on the closed
+  /// boundary (within tol\u00d710).  For already-trimmed curves this returns them
+  /// whole; for curves extending past corners, the protruding portions are
+  /// discarded.
+  /// </summary>
+  private static IEnumerable<(Curve Crv, ObjectAttributes Attr)> TrimToPerimeter(
+    List<(Curve Crv, ObjectAttributes Attr)> source, Curve boundary, double tol)
+  {
+    var crvs = source.Select(s => s.Crv).ToList();
+    for (var si = 0; si < source.Count; si++)
+    {
+      var (crv, attr) = source[si];
+      var splitParams  = new SortedSet<double>();
+      for (var oi = 0; oi < crvs.Count; oi++)
+      {
+        if (oi == si) continue;
+        var events = Intersection.CurveCurve(crv, crvs[oi], tol, tol);
+        if (events == null) continue;
+        foreach (var ev in events)
+        {
+          if (ev.IsOverlap) { splitParams.Add(ev.OverlapA.T0); splitParams.Add(ev.OverlapA.T1); }
+          else               splitParams.Add(ev.ParameterA);
+        }
+      }
+
+      if (splitParams.Count == 0)
+      {
+        if (IsOnCurve(crv.PointAtNormalizedLength(0.5), boundary, tol * 10))
+          yield return (crv.DuplicateCurve(), attr);
+      }
+      else
+      {
+        var segs = crv.Split(splitParams);
+        if (segs == null) continue;
+        foreach (var seg in segs)
+        {
+          if (seg.GetLength() < tol) continue;
+          if (IsOnCurve(seg.PointAtNormalizedLength(0.5), boundary, tol * 10))
+            yield return (seg, attr);
+        }
+      }
+    }
+  }
+
+  private static bool IsOnCurve(Point3d pt, Curve crv, double tol)
+  {
+    if (!pt.IsValid || !crv.ClosestPoint(pt, out var t)) return false;
+    return pt.DistanceTo(crv.PointAt(t)) <= tol;
+  }
+
+  /// <summary>  /// Returns all visible objects (excluding selected perimeter IDs) whose
   /// content falls inside the closed perimeter.
   /// • Curves: split at the perimeter boundary, keep inside segments.
   /// • All other types (text, dots, points, hatches, …): included whole when
