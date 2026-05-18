@@ -59,7 +59,7 @@ public sealed class vPart : Command
       if (goResult == GetResult.Option)
       { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
     }
-    while (goResult == GetResult.Option && go.ObjectCount == 0);
+    while (goResult == GetResult.Option);
     if (go.CommandResult() != Result.Success)
       return go.CommandResult();
 
@@ -87,7 +87,7 @@ public sealed class vPart : Command
         if (goResult == GetResult.Option)
         { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
       }
-      while (goResult == GetResult.Option && go.ObjectCount == 0);
+      while (goResult == GetResult.Option);
       if (go.CommandResult() != Result.Success)
         return go.CommandResult();
     }
