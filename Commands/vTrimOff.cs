@@ -47,19 +47,23 @@ public sealed class vTrimOff : Command
     // can add/remove curves and adjust MaxGap before pressing Enter to confirm.
     if (go.ObjectsWerePreselected)
     {
-      // Restore visual selection to match internal tracked state (preselection highlight
-      // is cleared by GetObject even though EnableClearObjectsOnEntry(false) retains the list).
+      // Re-select visually. GetOption (used below) does not touch selection state,
+      // so objects remain highlighted while the user reviews/adjusts options.
       for (var i = 0; i < go.ObjectCount; i++)
         doc.Objects.Select(go.Object(i).ObjectId, true);
 
-      go.SetCommandPrompt("Add/remove curves or set options, then press Enter");
-      go.EnablePreSelect(false, false); // don't re-consume preselection
-      go.AcceptNothing(true);           // Enter with current list proceeds
+      var confirm = new GetOption();
+      confirm.SetCommandPrompt($"vTrimOff ({go.ObjectCount} curves) — press Enter or adjust options");
+      confirm.AcceptNothing(true);
 
-      while ((res = go.GetMultiple(2, 0)) == GetResult.Option)
-        _maxGap = optMaxGap.CurrentValue;
+      var optMaxGap2 = new OptionDouble(_maxGap.Value, true, 0.0);
+      confirm.AddOptionDouble("MaxGap", ref optMaxGap2);
 
-      if (res == GetResult.Cancel) return Result.Cancel;
+      GetResult r2;
+      while ((r2 = confirm.Get()) == GetResult.Option)
+        _maxGap = optMaxGap2.CurrentValue;
+
+      if (r2 == GetResult.Cancel) return Result.Cancel;
     }
 
     var objRefs = new List<ObjRef>();
@@ -84,58 +88,28 @@ public sealed class vTrimOff : Command
     var plane = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
     var maxGap = _maxGap.Value;
 
-    // Attribute template for synthesised bridge lines (first object's layer/colour).
-    var bridgeAttr = objRefs[0].Object()?.Attributes?.Duplicate() ?? new ObjectAttributes();
-
-    // Working set starts as the original curves only.
-    // Bridges are added only if the initial region detection fails.
-    var allCurves = new List<Curve>(curves);
-    var allObjRefs = new List<ObjRef?>();
-    foreach (var r in objRefs) allObjRefs.Add(r);
-
-    // First attempt: no bridges.
-    var regions = Curve.CreateBooleanRegions(allCurves, plane, combineRegions: true, tol);
-
-    // If no region found and MaxGap is active, try bridging near-endpoint gaps.
-    if ((regions == null || regions.RegionCount == 0) && maxGap > tol)
+    // Try exact-tolerance boundary first; fall back to JoinCurves with maxGap.
+    var boundary = DetectBoundary(curves, plane, tol);
+    if (boundary.Count == 0 && maxGap > tol)
     {
-      var before = allCurves.Count;
-      AddGapBridges(curves, maxGap, tol, allCurves, allObjRefs);
-      if (allCurves.Count > before)
-      {
-        RhinoApp.WriteLine($"vTrimOff: bridged {allCurves.Count - before} gap(s), retrying.");
-        regions = Curve.CreateBooleanRegions(allCurves, plane, combineRegions: true, tol);
-      }
+      boundary = JoinBoundary(curves, maxGap);
+      if (boundary.Count > 0)
+        RhinoApp.WriteLine("vTrimOff: boundary closed via MaxGap.");
     }
 
-    if (regions == null || regions.RegionCount == 0)
+    if (boundary.Count == 0)
     {
       RhinoApp.WriteLine("vTrimOff: no enclosed region found. Try increasing MaxGap.");
       return Result.Nothing;
     }
 
-    var boundary = new List<Curve>();
-    for (var r = 0; r < regions.RegionCount; r++)
-    {
-      var rc = regions.RegionCurves(r);
-      if (rc == null) continue;
-      foreach (var c in rc)
-        if (c != null && c.IsClosed) boundary.Add(c);
-    }
-
-    if (boundary.Count == 0)
-    {
-      RhinoApp.WriteLine("vTrimOff: failed to extract closed boundary.");
-      return Result.Failure;
-    }
-
-    // For each curve (original or bridge): split at boundary crossings, keep inside/on parts.
+    // Split each original curve against the boundary; keep inside/on segments.
     var keepPairs = new List<(Curve Curve, ObjectAttributes Attr)>();
 
-    for (var i = 0; i < allCurves.Count; i++)
+    for (var i = 0; i < curves.Count; i++)
     {
-      var crv = allCurves[i];
-      var srcAttr = allObjRefs[i]?.Object()?.Attributes?.Duplicate() ?? bridgeAttr;
+      var crv = curves[i];
+      var srcAttr = objRefs[i].Object()?.Attributes?.Duplicate() ?? new ObjectAttributes();
       var splitParams = new SortedSet<double>();
 
       foreach (var bc in boundary)
@@ -175,7 +149,6 @@ public sealed class vTrimOff : Command
       return Result.Nothing;
     }
 
-    // Delete only original doc objects; bridges were never added to the document.
     foreach (var objRef in objRefs)
       doc.Objects.Delete(objRef.ObjectId, true);
 
@@ -186,40 +159,31 @@ public sealed class vTrimOff : Command
     return Result.Success;
   }
 
-  /// <summary>
-  /// For every pair of endpoints on different curves within (tol, maxGap], adds a straight
-  /// bridge LineCurve to allCurves (with a null allObjRefs entry).
-  /// </summary>
-  private static void AddGapBridges(
-    List<Curve> curves, double maxGap, double tol,
-    List<Curve> allCurves, List<ObjRef?> allObjRefs)
+  // Returns closed boundary curves from CreateBooleanRegions at exact model tolerance.
+  private static List<Curve> DetectBoundary(List<Curve> curves, Plane plane, double tol)
   {
-    for (var i = 0; i < curves.Count; i++)
+    var result = new List<Curve>();
+    var regions = Curve.CreateBooleanRegions(curves, plane, combineRegions: true, tol);
+    if (regions == null) return result;
+    for (var r = 0; r < regions.RegionCount; r++)
     {
-      var a0 = curves[i].PointAtStart;
-      var a1 = curves[i].PointAtEnd;
-      for (var j = i + 1; j < curves.Count; j++)
-      {
-        var b0 = curves[j].PointAtStart;
-        var b1 = curves[j].PointAtEnd;
-        TryBridge(a0, b0, maxGap, tol, allCurves, allObjRefs);
-        TryBridge(a0, b1, maxGap, tol, allCurves, allObjRefs);
-        TryBridge(a1, b0, maxGap, tol, allCurves, allObjRefs);
-        TryBridge(a1, b1, maxGap, tol, allCurves, allObjRefs);
-      }
+      var rc = regions.RegionCurves(r);
+      if (rc == null) continue;
+      foreach (var c in rc)
+        if (c != null && c.IsClosed) result.Add(c);
     }
+    return result;
   }
 
-  private static void TryBridge(
-    Point3d a, Point3d b, double maxGap, double tol,
-    List<Curve> allCurves, List<ObjRef?> allObjRefs)
+  // Joins curves with gap tolerance = maxGap; returns any closed results as the boundary.
+  private static List<Curve> JoinBoundary(List<Curve> curves, double maxGap)
   {
-    var dist = a.DistanceTo(b);
-    if (dist > tol && dist <= maxGap)
-    {
-      allCurves.Add(new LineCurve(a, b));
-      allObjRefs.Add(null);
-    }
+    var result = new List<Curve>();
+    var joined = Curve.JoinCurves(curves, maxGap);
+    if (joined == null) return result;
+    foreach (var c in joined)
+      if (c != null && c.IsClosed) result.Add(c);
+    return result;
   }
 
   private static bool IsInsideOrOn(Point3d pt, List<Curve> closed, Plane plane, double tol)
