@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using Rhino;
 using Rhino.Commands;
@@ -94,7 +95,21 @@ public sealed class vPart : Command
     //  Returns the joined closed curve (internal use only) + any bridge
     //  segments that filled gaps (these go into the output Part).
 
-    var (perimeter, bridges) = BuildClosedPerimeter(perimList.Select(p => p.Crv).ToList(), tol);
+    var perimLog = new List<string>();
+    var (perimeter, bridges) = BuildClosedPerimeter(perimList.Select(p => p.Crv).ToList(), tol, perimLog);
+    if (perimLog.Count > 0)
+    {
+      try
+      {
+        var asmDir  = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
+        var logsDir = Path.Combine(asmDir, "logs");
+        Directory.CreateDirectory(logsDir);
+        var logPath = Path.Combine(logsDir, $"vPart_perim_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+        File.WriteAllLines(logPath, perimLog);
+        RhinoApp.WriteLine($"vPart: perimeter log → {logPath}");
+      }
+      catch { /* ignore log write failures */ }
+    }
     if (perimeter == null)
     {
       RhinoApp.WriteLine("vPart: could not form a closed perimeter from selected curves.");
@@ -224,7 +239,7 @@ public sealed class vPart : Command
   /// separately so the caller can include them in the output Part.
   /// </summary>
   private static (Curve? Closed, List<LineCurve> Bridges) BuildClosedPerimeter(
-    List<Curve> curves, double tol)
+    List<Curve> curves, double tol, List<string> log)
   {
     var bridges = new List<LineCurve>();
 
@@ -245,7 +260,7 @@ public sealed class vPart : Command
     }
 
     // Log gap distances before bridging
-    RhinoApp.WriteLine($"vPart[perim]: {curves.Count} curve(s) — {openEnds.Count} open endpoints");
+    log.Add($"vPart[perim]: {curves.Count} curve(s) — {openEnds.Count} open endpoints");
     for (var di = 0; di < openEnds.Count; di++)
       for (var dj = di + 1; dj < openEnds.Count; dj++)
       {
@@ -254,7 +269,7 @@ public sealed class vPart : Command
         var tag = gapDist <= tol      ? "(coincident)"
                 : gapDist < tol * 200 ? "(will bridge)"
                 : $"(TOO FAR — {gapDist / tol:F0}× tol, not bridged)";
-        RhinoApp.WriteLine($"  [{openEnds[di].CrvIdx}/{(openEnds[di].IsStart ? "S" : "E")}]\u2194[{openEnds[dj].CrvIdx}/{(openEnds[dj].IsStart ? "S" : "E")}] dist={gapDist:F4} {tag}");
+        log.Add($"  [{openEnds[di].CrvIdx}/{(openEnds[di].IsStart ? "S" : "E")}]↔[{openEnds[dj].CrvIdx}/{(openEnds[dj].IsStart ? "S" : "E")}] dist={gapDist:F4} {tag}");
       }
 
     var used = new HashSet<int>();
@@ -280,20 +295,20 @@ public sealed class vPart : Command
       }
     }
 
-    RhinoApp.WriteLine($"vPart[perim]: {bridges.Count} bridge(s) added — {pieces.Count} pieces for join");
+    log.Add($"vPart[perim]: {bridges.Count} bridge(s) added — {pieces.Count} pieces for join");
 
     // Join copies (only for containment testing)
     var joined = Curve.JoinCurves(pieces.ToArray(), tol * 10);
-    RhinoApp.WriteLine($"vPart[perim]: join@tol×10 → {(joined == null ? "null" : $"{joined.Length} result(s), closed={joined.Any(c => c.IsClosed)}")} ");
+    log.Add($"vPart[perim]: join@tol×10 → {(joined == null ? "null" : $"{joined.Length} result(s), closed={joined.Any(c => c.IsClosed)}")} ");
     if (joined != null && joined.Length == 1 && joined[0].IsClosed)
       return (joined[0], bridges);
 
     var final = Curve.JoinCurves(pieces.ToArray(), tol * 100);
-    RhinoApp.WriteLine($"vPart[perim]: join@tol×100 → {(final == null ? "null" : $"{final.Length} result(s), closed={final.Any(c => c.IsClosed)}")} ");
+    log.Add($"vPart[perim]: join@tol×100 → {(final == null ? "null" : $"{final.Length} result(s), closed={final.Any(c => c.IsClosed)}")} ");
     if (final != null && final.Length == 1 && final[0].IsClosed)
       return (final[0], bridges);
 
-    RhinoApp.WriteLine("vPart[perim]: FAILED — endpoints not reachable or loop not closed");
+    log.Add("vPart[perim]: FAILED — endpoints not reachable or loop not closed");
     return (null, bridges);
   }
 
