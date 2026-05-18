@@ -25,20 +25,34 @@ public sealed class vTrimOff : Command
     go.EnableClearObjectsOnEntry(false);
     go.EnableUnselectObjectsOnExit(false);
     go.DeselectAllBeforePostSelect = false;
+    go.AcceptNothing(true);
 
-    while (true)
+    go.GetMultiple(1, 0);
+    if (go.CommandResult() != Result.Success)
+      return go.CommandResult();
+
+    if (go.ObjectsWerePreselected)
     {
+      // Re-select so they stay highlighted, then use a fresh GetObject —
+      // reusing the same instance marks Shift-deselected objects as rejected,
+      // preventing them from being re-added.
+      for (var i = 0; i < go.ObjectCount; i++)
+        go.Object(i).Object()?.Select(true);
+
+      go = new GetObject();
+      go.SetCommandPrompt("Select curves to trim. Press Enter when done");
+      go.GeometryFilter = ObjectType.Curve;
+      go.SubObjectSelect = false;
+      go.GroupSelect = true;
+      go.EnableClearObjectsOnEntry(false);
+      go.EnableUnselectObjectsOnExit(false);
+      go.DeselectAllBeforePostSelect = false;
+      go.EnablePreSelect(false, false);
+      go.AcceptNothing(true);
+
       go.GetMultiple(1, 0);
       if (go.CommandResult() != Result.Success)
         return go.CommandResult();
-
-      if (go.ObjectsWerePreselected)
-      {
-        go.EnablePreSelect(false, true);
-        continue;
-      }
-
-      break;
     }
 
     var objRefs = new List<ObjRef>();
