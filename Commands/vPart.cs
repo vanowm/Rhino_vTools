@@ -26,12 +26,32 @@ public sealed class vPart : Command
 {
   public override string EnglishName => "vPart";
 
+  private const string SectionName  = "vPart";
+  private const string GroupKey     = "group";
+  private const string JoinPerimKey = "joinPerim";
+
   // Persisted option defaults
   private static bool _group    = false;
   private static bool _joinPerim = false;
 
+  private static void LoadOptions() =>
+    vToolsOptionStore.Read<int>(SectionName, section =>
+    {
+      if (vToolsOptionStore.TryGetBool(section, GroupKey,     out var g)) _group    = g;
+      if (vToolsOptionStore.TryGetBool(section, JoinPerimKey, out var j)) _joinPerim = j;
+      return 0;
+    });
+
+  private static void SaveOptions() =>
+    vToolsOptionStore.Update(SectionName, section =>
+    {
+      section[GroupKey]     = _group;
+      section[JoinPerimKey] = _joinPerim;
+    });
+
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
+    LoadOptions();
     var tol = doc.ModelAbsoluteTolerance;
 
     // Options — declared early so they are visible at every stage
@@ -74,6 +94,7 @@ public sealed class vPart : Command
       if (goResult == GetResult.Option)
       {
         _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
+        SaveOptions();
         go.SetCommandPrompt($"Select perimeter curves ({collectedIds.Count} selected). Press Enter when done");
       }
     }
@@ -107,6 +128,7 @@ public sealed class vPart : Command
         if (goResult == GetResult.Option)
         {
           _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
+          SaveOptions();
           go.SetCommandPrompt($"Select perimeter curves ({collectedIds.Count} selected). Press Enter when done");
         }
       }
@@ -229,7 +251,7 @@ public sealed class vPart : Command
     {
       gpResult = gp.Get();
       if (gpResult == GetResult.Option)
-      { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
+      { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; SaveOptions(); }
     }
     while (gpResult == GetResult.Option);
 
