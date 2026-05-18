@@ -219,6 +219,7 @@ public sealed class vPart : Command
       var placed = geom.Duplicate();
       if (placed == null) continue;
       placed.Transform(translation);
+      attr.RemoveFromAllGroups();
       var id = AddObjectToDoc(doc, placed, attr);
       if (id != Guid.Empty) addedIds.Add(id);
     }
