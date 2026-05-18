@@ -26,7 +26,6 @@ public sealed class vTrimOff : Command
     go.EnableUnselectObjectsOnExit(false);
     go.DeselectAllBeforePostSelect = false;
 
-    var preselected = false;
     while (true)
     {
       go.GetMultiple(1, 0);
@@ -35,7 +34,6 @@ public sealed class vTrimOff : Command
 
       if (go.ObjectsWerePreselected)
       {
-        preselected = true;
         go.EnablePreSelect(false, true);
         continue;
       }
