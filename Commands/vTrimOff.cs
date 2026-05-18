@@ -22,11 +22,26 @@ public sealed class vTrimOff : Command
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = true;
-    go.AcceptNothing(true);
+    go.EnableClearObjectsOnEntry(false);
+    go.EnableUnselectObjectsOnExit(false);
+    go.DeselectAllBeforePostSelect = false;
 
-    go.GetMultiple(1, 0);
-    if (go.CommandResult() != Result.Success)
-      return go.CommandResult();
+    var preselected = false;
+    while (true)
+    {
+      go.GetMultiple(1, 0);
+      if (go.CommandResult() != Result.Success)
+        return go.CommandResult();
+
+      if (go.ObjectsWerePreselected)
+      {
+        preselected = true;
+        go.EnablePreSelect(false, true);
+        continue;
+      }
+
+      break;
+    }
 
     var objRefs = new List<ObjRef>();
     var curves  = new List<Curve>();
