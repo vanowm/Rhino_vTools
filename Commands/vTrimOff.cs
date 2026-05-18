@@ -43,38 +43,67 @@ public sealed class vTrimOff : Command
 
     if (res == GetResult.Cancel) return Result.Cancel;
 
-    // If preselection was consumed silently, re-prompt on the same go instance so the user
-    // can add/remove curves and adjust MaxGap before pressing Enter to confirm.
-    if (go.ObjectsWerePreselected)
-    {
-      // Re-select visually. GetOption (used below) does not touch selection state,
-      // so objects remain highlighted while the user reviews/adjusts options.
-      for (var i = 0; i < go.ObjectCount; i++)
-        doc.Objects.Select(go.Object(i).ObjectId, true);
+    // Collect the final ObjRef list — either directly (no preselect)
+    // or via a second interactive pass that supports add/remove toggle.
+    var selectedRefs = new List<ObjRef>();
 
-      var confirm = new GetOption();
-      confirm.SetCommandPrompt($"vTrimOff ({go.ObjectCount} curves) — press Enter or adjust options");
-      confirm.AcceptNothing(true);
+    if (!go.ObjectsWerePreselected)
+    {
+      for (var i = 0; i < go.ObjectCount; i++)
+        selectedRefs.Add(go.Object(i));
+    }
+    else
+    {
+      // Preselection was consumed silently. Re-select in doc so objects stay highlighted,
+      // then open a fresh GetObject for modification.
+      // Clicking a preselected curve toggles it OFF; clicking a new curve toggles it ON.
+      var preRefs = new List<ObjRef>();
+      var preIds  = new HashSet<Guid>();
+      for (var i = 0; i < go.ObjectCount; i++)
+      {
+        var r = go.Object(i);
+        preRefs.Add(r);
+        preIds.Add(r.ObjectId);
+        doc.Objects.Select(r.ObjectId, true);
+      }
+
+      var go2 = new GetObject();
+      go2.SetCommandPrompt($"vTrimOff: {preRefs.Count} curves — click to toggle, press Enter to accept");
+      go2.GeometryFilter = ObjectType.Curve;
+      go2.SubObjectSelect = false;
+      go2.GroupSelect = true;
+      go2.EnablePreSelect(false, false);    // don't fire immediately; preselected stays highlighted in doc
+      go2.AcceptNothing(true);             // Enter = accept current set
+      go2.AlreadySelectedObjectSelect = true; // allow clicking doc-selected (preselected) curves
 
       var optMaxGap2 = new OptionDouble(_maxGap.Value, true, 0.0);
-      confirm.AddOptionDouble("MaxGap", ref optMaxGap2);
+      go2.AddOptionDouble("MaxGap", ref optMaxGap2);
 
-      GetResult r2;
-      while ((r2 = confirm.Get()) == GetResult.Option)
+      GetResult res2;
+      while ((res2 = go2.GetMultiple(0, 0)) == GetResult.Option)
         _maxGap = optMaxGap2.CurrentValue;
 
-      if (r2 == GetResult.Cancel) return Result.Cancel;
+      if (res2 == GetResult.Cancel) return Result.Cancel;
+
+      // Toggle: clicked preselected = remove; clicked new = add.
+      var go2Ids = new HashSet<Guid>();
+      for (var i = 0; i < go2.ObjectCount; i++)
+        go2Ids.Add(go2.Object(i).ObjectId);
+
+      foreach (var r in preRefs)
+        if (!go2Ids.Contains(r.ObjectId)) selectedRefs.Add(r);  // kept
+      for (var i = 0; i < go2.ObjectCount; i++)
+        if (!preIds.Contains(go2.Object(i).ObjectId)) selectedRefs.Add(go2.Object(i));  // added
     }
 
     var objRefs = new List<ObjRef>();
-    var curves = new List<Curve>();
+    var curves  = new List<Curve>();
 
-    for (var i = 0; i < go.ObjectCount; i++)
+    foreach (var r in selectedRefs)
     {
-      var objRef = go.Object(i);
-      if (objRef.Curve() is { } crv)
+      if (r.Curve() is { } crv)
       {
-        objRefs.Add(objRef);
+        objRefs.Add(r);
         curves.Add(crv.DuplicateCurve());
       }
     }
