@@ -95,8 +95,6 @@ public sealed class vPart : Command
       {
         _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
         SaveOptions();
-        foreach (var r in collectedRefs) r.Object()?.Select(false);
-        go.SetCommandPrompt($"Select perimeter curves ({collectedIds.Count} selected). Press Enter when done");
       }
     }
     while (goResult == GetResult.Option);
@@ -130,8 +128,6 @@ public sealed class vPart : Command
         {
           _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
           SaveOptions();
-          foreach (var r in collectedRefs) r.Object()?.Select(false);
-          go.SetCommandPrompt($"Select perimeter curves ({collectedIds.Count} selected). Press Enter when done");
         }
       }
       while (goResult == GetResult.Option);
