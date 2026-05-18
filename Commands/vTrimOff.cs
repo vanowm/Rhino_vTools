@@ -31,15 +31,31 @@ public sealed class vTrimOff : Command
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = true;
+    go.EnableClearObjectsOnEntry(false); // retain preselection across multiple GetMultiple calls
 
     var optMaxGap = new OptionDouble(_maxGap.Value, true, 0.0);
     go.AddOptionDouble("MaxGap", ref optMaxGap);
 
-    while (go.GetMultiple(2, 0) == GetResult.Option)
+    // First pass: picks up preselection immediately OR waits for interactive selection.
+    GetResult res;
+    while ((res = go.GetMultiple(2, 0)) == GetResult.Option)
       _maxGap = optMaxGap.CurrentValue;
 
-    if (go.CommandResult() != Result.Success)
-      return go.CommandResult();
+    if (res == GetResult.Cancel) return Result.Cancel;
+
+    // If preselection was consumed silently, re-prompt on the same go instance so the user
+    // can add/remove curves and adjust MaxGap before pressing Enter to confirm.
+    if (go.ObjectsWerePreselected)
+    {
+      go.SetCommandPrompt("Add/remove curves or set options, then press Enter");
+      go.EnablePreSelect(false, false); // don't re-consume preselection
+      go.AcceptNothing(true);           // Enter with current list proceeds
+
+      while ((res = go.GetMultiple(2, 0)) == GetResult.Option)
+        _maxGap = optMaxGap.CurrentValue;
+
+      if (res == GetResult.Cancel) return Result.Cancel;
+    }
 
     var objRefs = new List<ObjRef>();
     var curves = new List<Curve>();
@@ -63,26 +79,29 @@ public sealed class vTrimOff : Command
     var plane = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
     var maxGap = _maxGap.Value;
 
-    // Build the working set: original curves + synthesised gap bridges.
-    // allObjRefs[i] == null means curve i is a bridge (not in the document).
+    // Attribute template for synthesised bridge lines (first object's layer/colour).
+    var bridgeAttr = objRefs[0].Object()?.Attributes?.Duplicate() ?? new ObjectAttributes();
+
+    // Working set starts as the original curves only.
+    // Bridges are added only if the initial region detection fails.
     var allCurves = new List<Curve>(curves);
     var allObjRefs = new List<ObjRef?>();
     foreach (var r in objRefs) allObjRefs.Add(r);
 
-    // Attribute template for bridge lines: inherit first object's layer/colour.
-    var bridgeAttr = objRefs[0].Object()?.Attributes?.Duplicate() ?? new ObjectAttributes();
+    // First attempt: no bridges.
+    var regions = Curve.CreateBooleanRegions(allCurves, plane, combineRegions: true, tol);
 
-    if (maxGap > tol)
+    // If no region found and MaxGap is active, try bridging near-endpoint gaps.
+    if ((regions == null || regions.RegionCount == 0) && maxGap > tol)
     {
       var before = allCurves.Count;
       AddGapBridges(curves, maxGap, tol, allCurves, allObjRefs);
-      var added = allCurves.Count - before;
-      if (added > 0)
-        RhinoApp.WriteLine($"vTrimOff: bridged {added} gap{(added == 1 ? "" : "s")}.");
+      if (allCurves.Count > before)
+      {
+        RhinoApp.WriteLine($"vTrimOff: bridged {allCurves.Count - before} gap(s), retrying.");
+        regions = Curve.CreateBooleanRegions(allCurves, plane, combineRegions: true, tol);
+      }
     }
-
-    // Find the combined outer boundary of all enclosed regions.
-    var regions = Curve.CreateBooleanRegions(allCurves, plane, combineRegions: true, tol);
 
     if (regions == null || regions.RegionCount == 0)
     {
