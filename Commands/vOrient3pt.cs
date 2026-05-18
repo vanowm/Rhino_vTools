@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Rhino;
 using Rhino.Commands;
 using Rhino.Geometry;
+using Rhino.Input;
 
 namespace vTools.Commands;
 
@@ -54,25 +55,56 @@ public sealed class vOrient3pt : Command
     }
     previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceXAxisPoint, targetXAxisPoint));
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Source third point", ref copyMode, out var sourceYAxisPoint, previewSegments: previewSegments))
+    // Source third point is optional — Enter falls back to 2-point orient
+    var src3 = OrientCommandCommon.TryGetOptionalPointWithCopyOption(
+      doc, "Source third point. Press Enter for 2-point orient",
+      ref copyMode, out var sourceYAxisPoint, previewSegments: previewSegments);
+
+    if (src3 == GetResult.Cancel)
     {
       OrientCommandCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Target third point", ref copyMode, out var targetYAxisPoint, basePoint: targetOrigin, traceFrom: sourceYAxisPoint, previewSegments: previewSegments))
-    {
-      OrientCommandCommon.SaveCopyOption(copyMode);
-      return Result.Cancel;
-    }
-    previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceYAxisPoint, targetYAxisPoint));
+    Plane sourcePlane, targetPlane;
 
-    if (!OrientCommandCommon.TryBuildPlaneFromThreePoints(sourceOrigin, sourceXAxisPoint, sourceYAxisPoint, out var sourcePlane) ||
-        !OrientCommandCommon.TryBuildPlaneFromThreePoints(targetOrigin, targetXAxisPoint, targetYAxisPoint, out var targetPlane))
+    if (src3 == GetResult.Nothing)
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
-      RhinoApp.WriteLine("vOrient3pt: Could not build orientation plane from selected points.");
-      return Result.Failure;
+      // 2-point fallback
+      if (!OrientCommandCommon.TryBuildPlaneFromTwoPoints(doc, sourceOrigin, sourceXAxisPoint, out sourcePlane) ||
+          !OrientCommandCommon.TryBuildPlaneFromTwoPoints(doc, targetOrigin, targetXAxisPoint, out targetPlane))
+      {
+        OrientCommandCommon.SaveCopyOption(copyMode);
+        RhinoApp.WriteLine("vOrient3pt: Could not build orientation plane.");
+        return Result.Failure;
+      }
+    }
+    else
+    {
+      // Target third point is optional — Enter uses source point as target
+      var tgt3 = OrientCommandCommon.TryGetOptionalPointWithCopyOption(
+        doc, "Target third point. Press Enter to use source point",
+        ref copyMode, out var targetYAxisPoint,
+        basePoint: targetOrigin, traceFrom: sourceYAxisPoint, previewSegments: previewSegments);
+
+      if (tgt3 == GetResult.Cancel)
+      {
+        OrientCommandCommon.SaveCopyOption(copyMode);
+        return Result.Cancel;
+      }
+
+      if (tgt3 == GetResult.Nothing)
+        targetYAxisPoint = sourceYAxisPoint;
+      else
+        previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceYAxisPoint, targetYAxisPoint));
+
+      if (!OrientCommandCommon.TryBuildPlaneFromThreePoints(sourceOrigin, sourceXAxisPoint, sourceYAxisPoint, out sourcePlane) ||
+          !OrientCommandCommon.TryBuildPlaneFromThreePoints(targetOrigin, targetXAxisPoint, targetYAxisPoint, out targetPlane))
+      {
+        OrientCommandCommon.SaveCopyOption(copyMode);
+        RhinoApp.WriteLine("vOrient3pt: Could not build orientation plane.");
+        return Result.Failure;
+      }
     }
 
     var xform = Transform.PlaneToPlane(sourcePlane, targetPlane);

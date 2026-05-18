@@ -86,10 +86,40 @@ internal static class OrientCommandCommon
     Point3d? traceFrom = null,
     IReadOnlyList<PreviewSegment>? previewSegments = null)
   {
+    return GetPointCore(doc, prompt, false, ref copyMode, out point, basePoint, traceFrom, previewSegments) == GetResult.Point;
+  }
+
+  /// <summary>
+  /// Gets an optional point: Enter skips (GetResult.Nothing), Esc cancels (GetResult.Cancel).
+  /// </summary>
+  internal static GetResult TryGetOptionalPointWithCopyOption(
+    RhinoDoc doc,
+    string prompt,
+    ref bool copyMode,
+    out Point3d point,
+    Point3d? basePoint = null,
+    Point3d? traceFrom = null,
+    IReadOnlyList<PreviewSegment>? previewSegments = null)
+  {
+    return GetPointCore(doc, prompt, true, ref copyMode, out point, basePoint, traceFrom, previewSegments);
+  }
+
+  private static GetResult GetPointCore(
+    RhinoDoc doc,
+    string prompt,
+    bool acceptNothing,
+    ref bool copyMode,
+    out Point3d point,
+    Point3d? basePoint,
+    Point3d? traceFrom,
+    IReadOnlyList<PreviewSegment>? previewSegments)
+  {
     point = Point3d.Unset;
 
     var gp = new GetPoint();
     gp.SetCommandPrompt(prompt);
+    if (acceptNothing)
+      gp.AcceptNothing(true);
     if (basePoint.HasValue)
       gp.SetBasePoint(basePoint.Value, true);
 
@@ -125,13 +155,13 @@ internal static class OrientCommandCommon
         if (result == GetResult.Point)
         {
           point = gp.Point();
-          return true;
+          return GetResult.Point;
         }
 
         if (result == GetResult.Option)
           continue;
 
-        return false;
+        return result;
       }
     }
     finally
