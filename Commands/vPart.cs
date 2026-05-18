@@ -34,6 +34,10 @@ public sealed class vPart : Command
   {
     var tol = doc.ModelAbsoluteTolerance;
 
+    // Options — declared early so they are visible at every stage
+    var groupToggle    = new OptionToggle(_group,    "No", "Yes");
+    var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
+
     // ── 1. Select perimeter curves ─────────────────────────────────────────
 
     var go = new GetObject();
@@ -45,8 +49,12 @@ public sealed class vPart : Command
     go.EnableUnselectObjectsOnExit(false);
     go.DeselectAllBeforePostSelect = false;
     go.AcceptNothing(true);
+    go.AddOptionToggle("Group",         ref groupToggle);
+    go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
-    go.GetMultiple(1, 0);
+    GetResult goResult;
+    do { goResult = go.GetMultiple(1, 0); }
+    while (goResult == GetResult.Option);
     if (go.CommandResult() != Result.Success)
       return go.CommandResult();
 
@@ -65,8 +73,11 @@ public sealed class vPart : Command
       go.DeselectAllBeforePostSelect = false;
       go.EnablePreSelect(false, false);
       go.AcceptNothing(true);
+      go.AddOptionToggle("Group",         ref groupToggle);
+      go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
-      go.GetMultiple(1, 0);
+      do { goResult = go.GetMultiple(1, 0); }
+      while (goResult == GetResult.Option);
       if (go.CommandResult() != Result.Success)
         return go.CommandResult();
     }
@@ -159,9 +170,6 @@ public sealed class vPart : Command
       var color  = layer?.Color ?? Color.Cyan;
       return (Geom: p.Geom.Duplicate()!, Color: color);
     }).Where(p => p.Geom != null).ToList();
-
-    var groupToggle    = new OptionToggle(_group,    "No", "Yes");
-    var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
 
     var gp = new GetPoint();
     gp.SetCommandPrompt("Pick placement point for Part");
