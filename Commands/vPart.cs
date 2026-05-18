@@ -59,70 +59,56 @@ public sealed class vPart : Command
     var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
-    // Single-pick toggle loop: click to add, click again to remove.
-    // Options work at any point without affecting selection state.
-    // Rhino handles selection visually; we read IsSelected after each pick.
-    // PreSelect is DISABLED on the main loop — re-entering Get() with
-    // preselect enabled would cause an infinite loop on already-selected objects.
+    // GetMultiple snapshot loop:
+    // - On each iteration we select all collected objects so GetMultiple sees them
+    //   as pre-selected; the user can click them again to deselect (native toggle).
+    // - When an option changes we snapshot the current pick list and loop back.
+    // - EnablePreSelect(true, false): capture already-selected objects at start,
+    //   but don't re-accept preselect on re-enterable iterations.
 
     var collectedIds = new HashSet<Guid>();
     var collectedMap = new Dictionary<Guid, ObjRef>();
 
-    // Capture preselected curves before starting the interactive loop
-    var goPre = new GetObject();
-    goPre.GeometryFilter = ObjectType.Curve;
-    goPre.SubObjectSelect = false;
-    goPre.GroupSelect = false;
-    goPre.EnablePreSelect(true, false);
-    goPre.EnablePostSelect(false);
-    goPre.AcceptNothing(true);
-    goPre.GetMultiple(0, 0);
-    if (goPre.CommandResult() == Result.Success)
-      for (var i = 0; i < goPre.ObjectCount; i++)
+    while (true)
+    {
+      // Restore visual selection for all currently collected objects
+      foreach (var id in collectedIds) doc.Objects.Select(id, true);
+
+      var go = new GetObject();
+      go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
+      go.GeometryFilter = ObjectType.Curve;
+      go.SubObjectSelect = false;
+      go.GroupSelect = false;
+      go.EnablePreSelect(true, false);
+      go.DeselectAllBeforePostSelect = false;
+      go.AcceptNothing(true);
+      go.AddOptionToggle("Group",         ref groupToggle);
+      go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
+
+      var goRes = go.GetMultiple(0, 0);
+
+      // Snapshot whatever GetMultiple has, regardless of why it returned
+      collectedIds.Clear();
+      collectedMap.Clear();
+      for (var i = 0; i < go.ObjectCount; i++)
       {
-        var r = goPre.Object(i);
+        var r = go.Object(i);
         if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
       }
 
-    var go = new GetObject();
-    go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
-    go.GeometryFilter = ObjectType.Curve;
-    go.SubObjectSelect = false;
-    go.GroupSelect = false;
-    go.EnablePreSelect(false, false);
-    go.DeselectAllBeforePostSelect = false;
-    go.AcceptNothing(true);
-    go.AddOptionToggle("Group",         ref groupToggle);
-    go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
-
-    while (true)
-    {
-      var goRes = go.Get();
-      if (goRes == GetResult.Cancel)  return Result.Cancel;
-      if (goRes == GetResult.Nothing) break;
+      if (goRes == GetResult.Cancel)
+      {
+        foreach (var id in collectedIds) doc.Objects.Select(id, false);
+        doc.Views.Redraw();
+        return Result.Cancel;
+      }
       if (goRes == GetResult.Option)
       {
         _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
         SaveOptions();
         continue;
       }
-      if (goRes != GetResult.Object) continue;
-
-      var picked = go.Object(0);
-      var pid    = picked.ObjectId;
-      var obj    = picked.Object();
-      if (obj == null) continue;
-
-      // Rhino has already toggled selection — read resulting state
-      if (obj.IsSelected(false) > 0)
-      {
-        if (collectedIds.Add(pid)) collectedMap[pid] = picked;
-      }
-      else
-      {
-        collectedIds.Remove(pid);
-        collectedMap.Remove(pid);
-      }
+      break; // GetResult.Nothing = Enter
     }
 
     // Collect perimeter curves — keep each with its own attributes
@@ -416,7 +402,12 @@ public sealed class vPart : Command
 
       if (splitParams.Count == 0)
       {
-        if (IsOnCurve(crv.PointAtNormalizedLength(0.5), boundary, tol * 10))
+        // Use a broad IsOnCurve check for boundary-hugging curves, but also
+        // include curves that are entirely inside the perimeter (e.g. accidentally
+        // selected interior curves — they were in the user's selection so they
+        // should appear in the output).
+        var mid = crv.PointAtNormalizedLength(0.5);
+        if (IsOnCurve(mid, boundary, tol * 10) || IsInsideOrOn(mid, new List<Curve> { boundary }, Plane.WorldXY, tol))
           yield return (crv.DuplicateCurve(), attr);
       }
       else
