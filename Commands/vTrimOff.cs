@@ -18,12 +18,14 @@ public sealed class vTrimOff : Command
     var tol = doc.ModelAbsoluteTolerance;
 
     var go = new GetObject();
-    go.SetCommandPrompt("Select curves to trim");
+    go.SetCommandPrompt("Select curves to trim. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = true;
+    go.EnableClearObjectsOnEntry(false);
+    go.AcceptNothing(true);
 
-    go.GetMultiple(2, 0);
+    go.GetMultiple(1, 0);
     if (go.CommandResult() != Result.Success)
       return go.CommandResult();
 
