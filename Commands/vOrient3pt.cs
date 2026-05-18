@@ -42,18 +42,45 @@ public sealed class vOrient3pt : Command
     }
     previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceOrigin, targetOrigin));
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Source second point", ref copyMode, out var sourceXAxisPoint, previewSegments: previewSegments))
+    // Source second point is optional — Enter falls back to 1-point orient (translation)
+    var src2 = OrientCommandCommon.TryGetOptionalPointWithCopyOption(
+      doc, "Source second point. Press Enter for 1-point orient",
+      ref copyMode, out var sourceXAxisPoint, previewSegments: previewSegments);
+
+    if (src2 == GetResult.Cancel)
     {
       OrientCommandCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Target second point", ref copyMode, out var targetXAxisPoint, basePoint: targetOrigin, traceFrom: sourceXAxisPoint, previewSegments: previewSegments))
+    if (src2 == GetResult.Nothing)
+    {
+      // 1-point fallback: translation only
+      var xform1pt = Transform.Translation(targetOrigin - sourceOrigin);
+      var transformedIds1pt = OrientCommandCommon.TransformObjects(doc, objectIds, xform1pt, copyMode);
+      if (copyMode)
+        OrientCommandCommon.RecreateGroupsForCopiedObjects(doc, objectIds, transformedIds1pt);
+      OrientCommandCommon.SaveCopyOption(copyMode);
+      doc.Views.Redraw();
+      return Result.Success;
+    }
+
+    // Target second point is optional — Enter uses source point as target
+    var tgt2 = OrientCommandCommon.TryGetOptionalPointWithCopyOption(
+      doc, "Target second point. Press Enter to use source point",
+      ref copyMode, out var targetXAxisPoint,
+      basePoint: targetOrigin, traceFrom: sourceXAxisPoint, previewSegments: previewSegments);
+
+    if (tgt2 == GetResult.Cancel)
     {
       OrientCommandCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
-    previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceXAxisPoint, targetXAxisPoint));
+
+    if (tgt2 == GetResult.Nothing)
+      targetXAxisPoint = sourceXAxisPoint;
+    else
+      previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceXAxisPoint, targetXAxisPoint));
 
     // Source third point is optional — Enter falls back to 2-point orient
     var src3 = OrientCommandCommon.TryGetOptionalPointWithCopyOption(
