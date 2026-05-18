@@ -61,19 +61,35 @@ public sealed class vPart : Command
     // ── 1. Select perimeter curves ─────────────────────────────────────────
     // Single-pick toggle loop: click to add, click again to remove.
     // Options work at any point without affecting selection state.
-    // We do NOT call Select() manually — Rhino handles the toggle visually.
-    // After each Get() we read the object's resulting IsSelected state to
-    // decide whether it was added or removed.
+    // Rhino handles selection visually; we read IsSelected after each pick.
+    // PreSelect is DISABLED on the main loop — re-entering Get() with
+    // preselect enabled would cause an infinite loop on already-selected objects.
 
-    var collectedIds  = new HashSet<Guid>();
-    var collectedMap  = new Dictionary<Guid, ObjRef>();
+    var collectedIds = new HashSet<Guid>();
+    var collectedMap = new Dictionary<Guid, ObjRef>();
+
+    // Capture preselected curves before starting the interactive loop
+    var goPre = new GetObject();
+    goPre.GeometryFilter = ObjectType.Curve;
+    goPre.SubObjectSelect = false;
+    goPre.GroupSelect = false;
+    goPre.EnablePreSelect(true, false);
+    goPre.EnablePostSelect(false);
+    goPre.AcceptNothing(true);
+    goPre.GetMultiple(0, 0);
+    if (goPre.CommandResult() == Result.Success)
+      for (var i = 0; i < goPre.ObjectCount; i++)
+      {
+        var r = goPre.Object(i);
+        if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
+      }
 
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = false;
-    go.EnablePreSelect(true, true);
+    go.EnablePreSelect(false, false);
     go.DeselectAllBeforePostSelect = false;
     go.AcceptNothing(true);
     go.AddOptionToggle("Group",         ref groupToggle);
