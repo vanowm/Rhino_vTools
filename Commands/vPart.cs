@@ -72,7 +72,10 @@ public sealed class vPart : Command
       goResult = go.GetMultiple(1, 0);
       SnapshotPicks(go);
       if (goResult == GetResult.Option)
-      { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
+      {
+        _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
+        go.SetCommandPrompt($"Select perimeter curves ({collectedIds.Count} selected). Press Enter when done");
+      }
     }
     while (goResult == GetResult.Option);
     if (go.CommandResult() != Result.Success)
@@ -102,7 +105,10 @@ public sealed class vPart : Command
         goResult = go.GetMultiple(1, 0);
         SnapshotPicks(go);
         if (goResult == GetResult.Option)
-        { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
+        {
+          _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
+          go.SetCommandPrompt($"Select perimeter curves ({collectedIds.Count} selected). Press Enter when done");
+        }
       }
       while (goResult == GetResult.Option);
       if (go.CommandResult() != Result.Success)
@@ -127,6 +133,11 @@ public sealed class vPart : Command
       RhinoApp.WriteLine("vPart: no curves selected.");
       return Result.Nothing;
     }
+
+    // Deselect source curves now that we have them captured
+    foreach (var r in collectedRefs)
+      r.Object()?.Select(false);
+    doc.Views.Redraw();
 
     // ── 2. View plane (needed for perimeter detection and containment testing) ──
 
