@@ -59,91 +59,77 @@ public sealed class vPart : Command
     var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
-    // Accumulate picks across all GetMultiple calls — re-entering GetMultiple
-    // clears its internal list, so we snapshot after every call.
+    // Single-pick toggle loop: click to add, click again to remove.
+    // Options work at any point without affecting selection state.
 
     var collectedIds  = new HashSet<Guid>();
-    var collectedRefs = new List<ObjRef>();
+    var collectedMap  = new Dictionary<Guid, ObjRef>();
 
-    void SnapshotPicks(GetObject g)
-    {
-      for (var i = 0; i < g.ObjectCount; i++)
+    // Capture any preselected curves before entering the interactive loop
+    var goPre = new GetObject();
+    goPre.GeometryFilter = ObjectType.Curve;
+    goPre.SubObjectSelect = false;
+    goPre.GroupSelect = false;
+    goPre.EnablePreSelect(true, false);
+    goPre.EnablePostSelect(false);
+    goPre.AcceptNothing(true);
+    goPre.GetMultiple(0, 0);
+    if (goPre.CommandResult() == Result.Success)
+      for (var i = 0; i < goPre.ObjectCount; i++)
       {
-        var r = g.Object(i);
-        if (collectedIds.Add(r.ObjectId)) collectedRefs.Add(r);
+        var r = goPre.Object(i);
+        if (collectedIds.Add(r.ObjectId)) { collectedMap[r.ObjectId] = r; r.Object()?.Select(true); }
       }
-    }
 
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = false;
-    go.EnableClearObjectsOnEntry(false);
-    go.EnableUnselectObjectsOnExit(false);
+    go.EnablePreSelect(false, false);
     go.DeselectAllBeforePostSelect = false;
     go.AcceptNothing(true);
     go.AddOptionToggle("Group",         ref groupToggle);
     go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
-    GetResult goResult;
-    do
+    while (true)
     {
-      goResult = go.GetMultiple(1, 0);
-      SnapshotPicks(go);
-      if (goResult == GetResult.Option)
+      var goRes = go.Get();
+      if (goRes == GetResult.Cancel)  return Result.Cancel;
+      if (goRes == GetResult.Nothing) break;
+      if (goRes == GetResult.Option)
       {
         _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
         SaveOptions();
+        continue;
       }
-    }
-    while (goResult == GetResult.Option);
-    if (go.CommandResult() != Result.Success)
-      return go.CommandResult();
+      if (goRes != GetResult.Object) continue;
 
-    if (go.ObjectsWerePreselected)
-    {
-      // Keep preselected highlighted; they're already in collectedRefs
-      foreach (var r in collectedRefs)
-        r.Object()?.Select(true);
-
-      go = new GetObject();
-      go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
-      go.GeometryFilter = ObjectType.Curve;
-      go.SubObjectSelect = false;
-      go.GroupSelect = false;
-      go.EnableClearObjectsOnEntry(false);
-      go.EnableUnselectObjectsOnExit(false);
-      go.DeselectAllBeforePostSelect = false;
-      go.EnablePreSelect(false, false);
-      go.AcceptNothing(true);
-      go.AddOptionToggle("Group",         ref groupToggle);
-      go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
-
-      do
+      var picked = go.Object(0);
+      var pid    = picked.ObjectId;
+      if (collectedIds.Contains(pid))
       {
-        goResult = go.GetMultiple(1, 0);
-        SnapshotPicks(go);
-        if (goResult == GetResult.Option)
-        {
-          _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
-          SaveOptions();
-        }
+        collectedIds.Remove(pid);
+        collectedMap.Remove(pid);
+        picked.Object()?.Select(false);
       }
-      while (goResult == GetResult.Option);
-      if (go.CommandResult() != Result.Success)
-        return go.CommandResult();
+      else
+      {
+        collectedIds.Add(pid);
+        collectedMap[pid] = picked;
+        picked.Object()?.Select(true);
+      }
     }
 
     // Collect perimeter curves — keep each with its own attributes
     var perimIds  = new HashSet<Guid>();
     var perimList = new List<(Curve Crv, ObjectAttributes Attr)>();
 
-    foreach (var r in collectedRefs)
+    foreach (var (id, r) in collectedMap)
     {
       if (r.Curve() is { } crv)
       {
-        perimIds.Add(r.ObjectId);
+        perimIds.Add(id);
         perimList.Add((crv.DuplicateCurve(), r.Object()?.Attributes?.Duplicate() ?? new ObjectAttributes()));
       }
     }
@@ -155,8 +141,7 @@ public sealed class vPart : Command
     }
 
     // Deselect source curves now that we have them captured
-    foreach (var r in collectedRefs)
-      r.Object()?.Select(false);
+    foreach (var r in collectedMap.Values) r.Object()?.Select(false);
     doc.Views.Redraw();
 
     // ── 2. View plane (needed for perimeter detection and containment testing) ──
