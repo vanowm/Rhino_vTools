@@ -39,6 +39,20 @@ public sealed class vPart : Command
     var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
+    // Accumulate picks across all GetMultiple calls — re-entering GetMultiple
+    // clears its internal list, so we snapshot after every call.
+
+    var collectedIds  = new HashSet<Guid>();
+    var collectedRefs = new List<ObjRef>();
+
+    void SnapshotPicks(GetObject g)
+    {
+      for (var i = 0; i < g.ObjectCount; i++)
+      {
+        var r = g.Object(i);
+        if (collectedIds.Add(r.ObjectId)) collectedRefs.Add(r);
+      }
+    }
 
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
@@ -56,6 +70,7 @@ public sealed class vPart : Command
     do
     {
       goResult = go.GetMultiple(1, 0);
+      SnapshotPicks(go);
       if (goResult == GetResult.Option)
       { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
     }
@@ -65,8 +80,9 @@ public sealed class vPart : Command
 
     if (go.ObjectsWerePreselected)
     {
-      for (var i = 0; i < go.ObjectCount; i++)
-        go.Object(i).Object()?.Select(true);
+      // Keep preselected highlighted; they're already in collectedRefs
+      foreach (var r in collectedRefs)
+        r.Object()?.Select(true);
 
       go = new GetObject();
       go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
@@ -84,6 +100,7 @@ public sealed class vPart : Command
       do
       {
         goResult = go.GetMultiple(1, 0);
+        SnapshotPicks(go);
         if (goResult == GetResult.Option)
         { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
       }
@@ -96,9 +113,8 @@ public sealed class vPart : Command
     var perimIds  = new HashSet<Guid>();
     var perimList = new List<(Curve Crv, ObjectAttributes Attr)>();
 
-    for (var i = 0; i < go.ObjectCount; i++)
+    foreach (var r in collectedRefs)
     {
-      var r = go.Object(i);
       if (r.Curve() is { } crv)
       {
         perimIds.Add(r.ObjectId);
