@@ -53,8 +53,13 @@ public sealed class vPart : Command
     go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
     GetResult goResult;
-    do { goResult = go.GetMultiple(1, 0); }
-    while (goResult == GetResult.Option);
+    do
+    {
+      goResult = go.GetMultiple(1, 0);
+      if (goResult == GetResult.Option)
+      { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
+    }
+    while (goResult == GetResult.Option && go.ObjectCount == 0);
     if (go.CommandResult() != Result.Success)
       return go.CommandResult();
 
@@ -76,8 +81,13 @@ public sealed class vPart : Command
       go.AddOptionToggle("Group",         ref groupToggle);
       go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
-      do { goResult = go.GetMultiple(1, 0); }
-      while (goResult == GetResult.Option);
+      do
+      {
+        goResult = go.GetMultiple(1, 0);
+        if (goResult == GetResult.Option)
+        { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
+      }
+      while (goResult == GetResult.Option && go.ObjectCount == 0);
       if (go.CommandResult() != Result.Success)
         return go.CommandResult();
     }
@@ -188,14 +198,16 @@ public sealed class vPart : Command
     };
 
     GetResult gpResult;
-    do { gpResult = gp.Get(); }
+    do
+    {
+      gpResult = gp.Get();
+      if (gpResult == GetResult.Option)
+      { _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue; }
+    }
     while (gpResult == GetResult.Option);
 
     if (gpResult != GetResult.Point)
       return Result.Cancel;
-
-    _group    = groupToggle.CurrentValue;
-    _joinPerim = joinPerimToggle.CurrentValue;
 
     // ── 8. Commit ─────────────────────────────────────────────────────────
 
