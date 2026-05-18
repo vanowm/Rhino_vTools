@@ -78,10 +78,13 @@ public sealed class vTrimOff : Command
 
     // For each input curve: split it at every crossing with the boundary,
     // then keep only the sub-segments whose midpoint lies inside or on the boundary.
-    var keepCurves = new List<Curve>();
+    // Each kept segment inherits the attributes (layer, color, etc.) of its source curve.
+    var keepPairs = new List<(Curve Curve, ObjectAttributes Attr)>();
 
-    foreach (var crv in curves)
+    for (var i = 0; i < curves.Count; i++)
     {
+      var crv = curves[i];
+      var srcAttr = objRefs[i].Object()?.Attributes?.Duplicate() ?? new ObjectAttributes();
       var splitParams = new SortedSet<double>();
 
       foreach (var bc in boundary)
@@ -107,7 +110,7 @@ public sealed class vTrimOff : Command
         // Curve does not cross the boundary — keep it only if it is entirely inside.
         var testPt = crv.PointAtNormalizedLength(0.5);
         if (IsInsideOrOn(testPt, boundary, plane, tol))
-          keepCurves.Add(crv);
+          keepPairs.Add((crv, srcAttr));
       }
       else
       {
@@ -118,23 +121,21 @@ public sealed class vTrimOff : Command
           if (seg.GetLength() < tol) continue; // skip degenerate zero-length artifacts
           var mid = seg.PointAtNormalizedLength(0.5);
           if (IsInsideOrOn(mid, boundary, plane, tol))
-            keepCurves.Add(seg);
+            keepPairs.Add((seg, srcAttr));
         }
       }
     }
 
-    if (keepCurves.Count == 0)
+    if (keepPairs.Count == 0)
     {
       RhinoApp.WriteLine("vTrimOff: no curves remain inside the boundary.");
       return Result.Nothing;
     }
 
-    var attr = objRefs[0].Object()?.Attributes?.Duplicate() ?? new ObjectAttributes();
-
     foreach (var objRef in objRefs)
       doc.Objects.Delete(objRef.ObjectId, true);
 
-    foreach (var crv in keepCurves)
+    foreach (var (crv, attr) in keepPairs)
       doc.Objects.AddCurve(crv, attr);
 
     doc.Views.Redraw();
