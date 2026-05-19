@@ -118,6 +118,9 @@ public sealed class vPart : Command
         continue;
       }
 
+      if (selRes == GetResult.Object)
+        continue; // AlreadySelectedObjectSelect causes per-click returns; loop until Enter
+
       if (go.CommandResult() != Result.Success)
       {
         for (var i = 0; i < go.ObjectCount; i++) go.Object(i).Object()?.Select(false);
