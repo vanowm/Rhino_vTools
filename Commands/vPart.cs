@@ -119,72 +119,69 @@ public sealed class vPart : Command
     // Keep them visually selected for the interactive phase
     foreach (var id in initialIds) doc.Objects.Select(id, true);
 
-    // Phase B: interactive selection
-    var go = new GetObject();
-    go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
-    go.GeometryFilter = ObjectType.Curve;
-    go.SubObjectSelect = false;
-    go.GroupSelect = false;
-    go.EnablePreSelect(false, false);       // never auto-accept; user drives everything
-    go.DeselectAllBeforePostSelect = false; // keep goPre objects highlighted
-    go.AcceptNothing(true);
-    go.EnableUnselectObjectsOnExit(false);
-    go.AddOptionToggle("Group",         ref groupToggle);
-    go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
-
-    // Accumulate picks across all iterations — go resets its pick list each GetMultiple call
+    // Phase B: interactive selection — single click per Get() so toggle is always reliable.
+    // GetMultiple can't report re-clicks on already-selected objects; single Get() always can.
     var collectedIds = new HashSet<Guid>(initialIds);
     var collectedMap = new Dictionary<Guid, ObjRef>(initialMap);
+    foreach (var id in collectedIds) doc.Objects.Select(id, true);
 
-    GetResult goRes;
     var goIteration = 0;
-    do
+    while (true)
     {
-      goRes = go.GetMultiple(0, 0);
-      L($"go iter {++goIteration}: result={goRes}  ObjectCount={go.ObjectCount}");
+      var go = new GetObject();
+      go.SetCommandPrompt($"Click curves to add/remove ({collectedIds.Count} selected). Press Enter when done");
+      go.GeometryFilter = ObjectType.Curve;
+      go.SubObjectSelect = false;
+      go.GroupSelect = false;
+      go.EnablePreSelect(false, false);
+      go.DeselectAllBeforePostSelect = false;
+      go.AcceptNothing(true);
+      go.EnableUnselectObjectsOnExit(false);
+      go.AddOptionToggle("Group",         ref groupToggle);
+      go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
-      // Detect deselects: Rhino removes the object from doc selection when user clicks an
-      // already-highlighted object, but does NOT report it in go.Object(i). Check doc state.
-      var nowDeselected = collectedIds
-        .Where(id => (doc.Objects.FindId(id)?.IsSelected(false) ?? 0) == 0)
-        .ToList();
-      foreach (var id in nowDeselected)
+      var res = go.Get();
+      L($"go iter {++goIteration}: result={res}");
+
+      if (res == GetResult.Cancel)
       {
-        collectedIds.Remove(id);
-        collectedMap.Remove(id);
-        L($"  deselect: {Short(id)}");
+        foreach (var id in collectedIds) doc.Objects.Select(id, false);
+        foreach (var id in initialIds)   doc.Objects.Select(id, false);
+        doc.Views.Redraw();
+        L("cancelled");
+        return Result.Cancel;
       }
 
-      // Add newly picked objects from this iteration
-      for (var i = 0; i < go.ObjectCount; i++)
-      {
-        var r   = go.Object(i);
-        var pid = r.ObjectId;
-        if (!collectedIds.Contains(pid))
-        {
-          collectedIds.Add(pid);
-          collectedMap[pid] = r;
-          L($"  new pick: {Short(pid)}");
-        }
-      }
+      if (res == GetResult.Nothing) break;   // Enter — done
 
-      if (goRes == GetResult.Option)
+      if (res == GetResult.Option)
       {
         _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
         SaveOptions();
-        // Re-highlight all still-collected objects for next iteration
-        foreach (var id in collectedIds) doc.Objects.Select(id, true);
         L($"  option changed: group={_group}  joinPerim={_joinPerim}  collected={collectedIds.Count}");
+        continue;
       }
-    } while (goRes == GetResult.Option);
 
-    if (goRes == GetResult.Cancel)
-    {
-      foreach (var id in collectedIds) doc.Objects.Select(id, false);
-      foreach (var id in initialIds)   doc.Objects.Select(id, false);
-      doc.Views.Redraw();
-      L("cancelled");
-      return Result.Cancel;
+      if (res == GetResult.Object)
+      {
+        var r   = go.Object(0);
+        var pid = r.ObjectId;
+        if (collectedIds.Contains(pid))
+        {
+          collectedIds.Remove(pid);
+          collectedMap.Remove(pid);
+          doc.Objects.Select(pid, false);
+          L($"  toggle-off: {Short(pid)}");
+        }
+        else
+        {
+          collectedIds.Add(pid);
+          collectedMap[pid] = r;
+          doc.Objects.Select(pid, true);
+          L($"  toggle-on: {Short(pid)}");
+        }
+        doc.Views.Redraw();
+      }
     }
 
     L($"final collection: {collectedIds.Count} curve(s)");
