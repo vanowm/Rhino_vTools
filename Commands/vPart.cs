@@ -82,78 +82,52 @@ public sealed class vPart : Command
     L($"  tol={tol:G4}  group={_group}  joinPerim={_joinPerim}");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
-    // Two-phase approach:
-    //   Phase A — goPre: one-shot GetMultiple that auto-accepts any already-
-    //     selected curves (Rhino's standard preselect behavior). Captured into
-    //     initialIds so the interactive phase can combine/toggle against them.
-    //   Phase B — go: interactive GetMultiple with EnablePreSelect(false, false)
-    //     so it NEVER auto-accepts, giving the user full control. Options use
-    //     the do-while(Option) pattern on the same instance. Objects in go's
-    //     list that were also in initialIds mean "user clicked a pre-selected
-    //     curve" → treated as a deselect.
+    // Dale's pattern (discourse.mcneel.com/t/41181): single GetObject instance with
+    // EnableClearObjectsOnEntry(false) so the accumulated list persists across
+    // GetMultiple calls. First call captures preselects via ObjectsWerePreselected,
+    // then preselect is disabled and the user adds/removes freely including the
+    // preselected objects — native Rhino toggle handles everything.
 
-    // Phase A: capture preselected curves
-    var goPre = new GetObject();
-    goPre.GeometryFilter = ObjectType.Curve;
-    goPre.SubObjectSelect = false;
-    goPre.GroupSelect = false;
-    goPre.EnablePreSelect(true, false);
-    goPre.EnablePostSelect(false);
-    goPre.EnableUnselectObjectsOnExit(false);
-    goPre.AcceptNothing(true);
-    goPre.GetMultiple(0, 0);
-    L($"goPre: result={goPre.CommandResult()}  ObjectCount={goPre.ObjectCount}");
+    var go = new GetObject();
+    go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
+    go.GeometryFilter = ObjectType.Curve;
+    go.SubObjectSelect = false;
+    go.GroupSelect = false;
+    go.EnableClearObjectsOnEntry(false);
+    go.EnableUnselectObjectsOnExit(false);
+    go.DeselectAllBeforePostSelect = false;
+    go.AcceptNothing(true);
 
-    var initialIds = new HashSet<Guid>();
-    var initialMap = new Dictionary<Guid, ObjRef>();
-    for (var i = 0; i < goPre.ObjectCount; i++)
+    var selIter = 0;
+    while (true)
     {
-      var r = goPre.Object(i);
-      if (initialIds.Add(r.ObjectId)) initialMap[r.ObjectId] = r;
-      L($"  goPre[{i}]: {Short(r.ObjectId)}");
-    }
-    // Keep them visually selected for the interactive phase
-    foreach (var id in initialIds) doc.Objects.Select(id, true);
+      go.GetMultiple(0, 0);
+      L($"sel iter {++selIter}: result={go.CommandResult()}  count={go.ObjectCount}  preselected={go.ObjectsWerePreselected}");
 
-    // Phase B: interactive selection — GetMultiple handles add/remove natively.
-    // Preselected objects remain highlighted (DeselectAllBeforePostSelect=false).
-    var goB = new GetObject();
-    goB.SetCommandPrompt("Select perimeter curves. Press Enter when done");
-    goB.GeometryFilter = ObjectType.Curve;
-    goB.SubObjectSelect = false;
-    goB.GroupSelect = false;
-    goB.EnablePreSelect(false, false);
-    goB.DeselectAllBeforePostSelect = false;
-    goB.EnableUnselectObjectsOnExit(false);
-    goB.AcceptNothing(true);
-    var bRes = goB.GetMultiple(0, 0);
-    L($"goB: result={bRes}  ObjectCount={goB.ObjectCount}");
+      if (go.CommandResult() != Result.Success)
+      {
+        for (var i = 0; i < go.ObjectCount; i++) go.Object(i).Object()?.Select(false);
+        doc.Views.Redraw();
+        L("cancelled");
+        return Result.Cancel;
+      }
 
-    if (bRes == GetResult.Cancel)
-    {
-      foreach (var id in initialIds) doc.Objects.Select(id, false);
-      doc.Views.Redraw();
-      L("cancelled");
-      return Result.Cancel;
+      if (go.ObjectsWerePreselected)
+      {
+        go.EnablePreSelect(false, true);
+        continue;
+      }
+
+      break;
     }
 
     var collectedIds = new HashSet<Guid>();
     var collectedMap = new Dictionary<Guid, ObjRef>();
-    for (var i = 0; i < goB.ObjectCount; i++)
+    for (var i = 0; i < go.ObjectCount; i++)
     {
-      var r = goB.Object(i);
+      var r = go.Object(i);
       if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
-      L($"  goB[{i}]: {Short(r.ObjectId)}");
-    }
-    // Include Phase A preselects that the user kept but goB may not have in its list
-    foreach (var (id, r) in initialMap)
-    {
-      if (!collectedIds.Contains(id) && (doc.Objects.FindId(id)?.IsSelected(false) ?? 0) > 0)
-      {
-        collectedIds.Add(id);
-        collectedMap[id] = r;
-        L($"  retained preselect: {Short(id)}");
-      }
+      L($"  sel[{i}]: {Short(r.ObjectId)}");
     }
 
     L($"final collection: {collectedIds.Count} curve(s)");
