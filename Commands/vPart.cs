@@ -87,6 +87,9 @@ public sealed class vPart : Command
     // AlreadySelectedObjectSelect = true lets the user re-click a deselected object
     // within the same session to add it back.
 
+    var groupToggle    = new OptionToggle(_group,    "No", "Yes");
+    var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
+
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
@@ -97,12 +100,22 @@ public sealed class vPart : Command
     go.AlreadySelectedObjectSelect = true;
     go.DeselectAllBeforePostSelect = false;
     go.AcceptNothing(true);
+    go.AddOptionToggle("Group",         ref groupToggle);
+    go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
     var selIter = 0;
     while (true)
     {
-      go.GetMultiple(0, 0);
-      L($"sel iter {++selIter}: result={go.CommandResult()}  count={go.ObjectCount}  preselected={go.ObjectsWerePreselected}");
+      var selRes = go.GetMultiple(0, 0);
+      L($"sel iter {++selIter}: result={selRes}  cmdResult={go.CommandResult()}  count={go.ObjectCount}  preselected={go.ObjectsWerePreselected}");
+
+      if (selRes == GetResult.Option)
+      {
+        _group = groupToggle.CurrentValue;
+        _joinPerim = joinPerimToggle.CurrentValue;
+        SaveOptions();
+        continue;
+      }
 
       if (go.CommandResult() != Result.Success)
       {
@@ -211,9 +224,6 @@ public sealed class vPart : Command
     var basePoint = bbox.IsValid ? bbox.Center : perimeter.PointAtStart;
 
     // ── 7. DynamicDraw preview + placement ────────────────────────────────
-
-    var groupToggle    = new OptionToggle(_group,    "No", "Yes");
-    var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
 
     // Precompute preview lists for both join states; DynamicDraw reads the toggle live.
     var currentColor = doc.Layers[doc.Layers.CurrentLayerIndex]?.Color ?? Color.Cyan;
