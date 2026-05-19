@@ -59,20 +59,45 @@ public sealed class vPart : Command
     var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
-    // Single GetObject instance with do-while(Option) loop.
-    // Rhino preserves the pick list across re-entries on the same instance.
-    // EnablePreSelect(true, false): captures pre-selected objects on the FIRST
-    //   call only (enableWhenNotEmpty=false skips preselect when list has picks).
-    // EnableUnselectObjectsOnExit(false): keeps objects highlighted when an option
-    //   fires, so the user sees no visual deselect flash between re-entries.
+    // Two-phase approach:
+    //   Phase A — goPre: one-shot GetMultiple that auto-accepts any already-
+    //     selected curves (Rhino's standard preselect behavior). Captured into
+    //     initialIds so the interactive phase can combine/toggle against them.
+    //   Phase B — go: interactive GetMultiple with EnablePreSelect(false, false)
+    //     so it NEVER auto-accepts, giving the user full control. Options use
+    //     the do-while(Option) pattern on the same instance. Objects in go's
+    //     list that were also in initialIds mean "user clicked a pre-selected
+    //     curve" → treated as a deselect.
 
+    // Phase A: capture preselected curves
+    var goPre = new GetObject();
+    goPre.GeometryFilter = ObjectType.Curve;
+    goPre.SubObjectSelect = false;
+    goPre.GroupSelect = false;
+    goPre.EnablePreSelect(true, false);
+    goPre.EnablePostSelect(false);
+    goPre.EnableUnselectObjectsOnExit(false);
+    goPre.AcceptNothing(true);
+    goPre.GetMultiple(0, 0);
+
+    var initialIds = new HashSet<Guid>();
+    var initialMap = new Dictionary<Guid, ObjRef>();
+    for (var i = 0; i < goPre.ObjectCount; i++)
+    {
+      var r = goPre.Object(i);
+      if (initialIds.Add(r.ObjectId)) initialMap[r.ObjectId] = r;
+    }
+    // Keep them visually selected for the interactive phase
+    foreach (var id in initialIds) doc.Objects.Select(id, true);
+
+    // Phase B: interactive selection
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = false;
-    go.EnablePreSelect(true, false);
-    go.DeselectAllBeforePostSelect = false;
+    go.EnablePreSelect(false, false);       // never auto-accept; user drives everything
+    go.DeselectAllBeforePostSelect = false; // keep goPre objects highlighted
     go.AcceptNothing(true);
     go.EnableUnselectObjectsOnExit(false);
     go.AddOptionToggle("Group",         ref groupToggle);
@@ -89,14 +114,30 @@ public sealed class vPart : Command
       }
     } while (goRes == GetResult.Option);
 
-    if (goRes == GetResult.Cancel) return Result.Cancel;
+    if (goRes == GetResult.Cancel)
+    {
+      foreach (var id in initialIds) doc.Objects.Select(id, false);
+      doc.Views.Redraw();
+      return Result.Cancel;
+    }
 
-    var collectedIds = new HashSet<Guid>();
-    var collectedMap = new Dictionary<Guid, ObjRef>();
+    // Build final collection: start from preselected, apply go's picks as toggles
+    var collectedIds = new HashSet<Guid>(initialIds);
+    var collectedMap = new Dictionary<Guid, ObjRef>(initialMap);
     for (var i = 0; i < go.ObjectCount; i++)
     {
-      var r = go.Object(i);
-      if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
+      var r   = go.Object(i);
+      var pid = r.ObjectId;
+      if (initialIds.Contains(pid))
+      {
+        // User clicked a preselected curve → deselect
+        collectedIds.Remove(pid);
+        collectedMap.Remove(pid);
+      }
+      else
+      {
+        if (collectedIds.Add(pid)) collectedMap[pid] = r;
+      }
     }
 
     // Collect perimeter curves — keep each with its own attributes
@@ -142,8 +183,8 @@ public sealed class vPart : Command
         var asmDir  = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
         var logsDir = Path.Combine(asmDir, "logs");
         Directory.CreateDirectory(logsDir);
-        var logPath = Path.Combine(logsDir, $"vPart_perim_{DateTime.Now:yyyyMMdd_HHmmss}.log");
-        File.WriteAllLines(logPath, perimLog);
+        var logPath = Path.Combine(logsDir, "vPart_perim.log");
+        File.WriteAllLines(logPath, perimLog); // overwritten on each run
         RhinoApp.WriteLine($"vPart: perimeter log → {logPath}");
       }
       catch { /* ignore log write failures */ }
