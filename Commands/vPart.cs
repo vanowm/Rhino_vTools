@@ -148,15 +148,17 @@ public sealed class vPart : Command
       {
         var r   = go.Object(i);
         var pid = r.ObjectId;
-        if (initialIds.Contains(pid))
+        if (collectedIds.Contains(pid))
         {
+          // Already collected — toggle off (deselect)
           collectedIds.Remove(pid);
           collectedMap.Remove(pid);
           L($"  toggle-deselect: {Short(pid)}");
         }
         else
         {
-          if (collectedIds.Add(pid)) collectedMap[pid] = r;
+          collectedIds.Add(pid);
+          collectedMap[pid] = r;
           L($"  new pick: {Short(pid)}");
         }
       }
