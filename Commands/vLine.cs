@@ -435,7 +435,7 @@ public sealed class vLine : Command
     getPoint.AddOptionToggle("AngleRef", ref angleRelative);
     var debugToggle = new OptionToggle(_debugMode, "Off", "On");
     getPoint.AddOptionToggle("Debug", ref debugToggle);
-    var idxUndo = canUndo ? getPoint.AddOption("Undo") : -1;
+    if (canUndo) getPoint.AcceptUndo(true);
 
     var mode = initialMode;
     Vector3d? parallelDir = null;
@@ -772,6 +772,12 @@ public sealed class vLine : Command
 
         var result = getPoint.Get();
 
+        if (result == GetResult.Undo)
+        {
+          var undoState = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
+          return SecondPointResult.Undo(bothSides.CurrentValue, chainModeIndex, undoState);
+        }
+
         if (result == GetResult.Point)
         {
           var clickedRaw = getPoint.Point();
@@ -942,12 +948,6 @@ public sealed class vLine : Command
           {
             chainModeIndex = ClampIndex(option.CurrentListOptionIndex, ChainModeValues.Length);
             continue;
-          }
-
-          if (canUndo && option.Index == idxUndo)
-          {
-            var undoState = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
-            return SecondPointResult.Undo(bothSides.CurrentValue, chainModeIndex, undoState);
           }
 
           continue;
