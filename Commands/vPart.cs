@@ -143,19 +143,24 @@ public sealed class vPart : Command
       goRes = go.GetMultiple(0, 0);
       L($"go iter {++goIteration}: result={goRes}  ObjectCount={go.ObjectCount}");
 
-      // Accumulate this iteration's picks immediately (before the list resets on next call)
+      // Detect deselects: Rhino removes the object from doc selection when user clicks an
+      // already-highlighted object, but does NOT report it in go.Object(i). Check doc state.
+      var nowDeselected = collectedIds
+        .Where(id => (doc.Objects.FindId(id)?.IsSelected(false) ?? 0) == 0)
+        .ToList();
+      foreach (var id in nowDeselected)
+      {
+        collectedIds.Remove(id);
+        collectedMap.Remove(id);
+        L($"  deselect: {Short(id)}");
+      }
+
+      // Add newly picked objects from this iteration
       for (var i = 0; i < go.ObjectCount; i++)
       {
         var r   = go.Object(i);
         var pid = r.ObjectId;
-        if (collectedIds.Contains(pid))
-        {
-          // Already collected — toggle off (deselect)
-          collectedIds.Remove(pid);
-          collectedMap.Remove(pid);
-          L($"  toggle-deselect: {Short(pid)}");
-        }
-        else
+        if (!collectedIds.Contains(pid))
         {
           collectedIds.Add(pid);
           collectedMap[pid] = r;
@@ -167,13 +172,16 @@ public sealed class vPart : Command
       {
         _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
         SaveOptions();
-        L($"  option changed: group={_group}  joinPerim={_joinPerim}");
+        // Re-highlight all still-collected objects for next iteration
+        foreach (var id in collectedIds) doc.Objects.Select(id, true);
+        L($"  option changed: group={_group}  joinPerim={_joinPerim}  collected={collectedIds.Count}");
       }
     } while (goRes == GetResult.Option);
 
     if (goRes == GetResult.Cancel)
     {
-      foreach (var id in initialIds) doc.Objects.Select(id, false);
+      foreach (var id in collectedIds) doc.Objects.Select(id, false);
+      foreach (var id in initialIds)   doc.Objects.Select(id, false);
       doc.Views.Redraw();
       L("cancelled");
       return Result.Cancel;
