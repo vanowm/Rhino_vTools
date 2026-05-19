@@ -537,10 +537,7 @@ public sealed class vPart : Command
         // All other types: test a representative point for containment
         var testPt = RepresentativePoint(geom);
         if (testPt.IsValid && IsInsideOrOn(testPt, boundary, plane, tol))
-        {
-          L($"  inside non-curve: type={obj.ObjectType} geom={geom.GetType().Name} id={Short(obj.Id)}");
           result.Add((geom.Duplicate()!, attr));
-        }
       }
     }
 
