@@ -82,19 +82,27 @@ public sealed class vPart : Command
     L($"  tol={tol:G4}  group={_group}  joinPerim={_joinPerim}");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
-    // Dale's pattern: single GetObject instance with EnableClearObjectsOnEntry(false)
-    // so the accumulated list persists across GetMultiple calls.
-    // AlreadySelectedObjectSelect = true lets the user re-click a deselected object
-    // within the same session to add it back.
+    // Pre-capture any already-selected curves from the document so we can include
+    // them without triggering GetObject's preselect double-call (which shows the
+    // prompt twice). Native preselect is disabled; DeselectAllBeforePostSelect=false
+    // keeps them visually highlighted during the interactive pass.
+    // AlreadySelectedObjectSelect = true lets the user re-click a deselected object.
 
     var groupToggle    = new OptionToggle(_group,    "No", "Yes");
     var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
+
+    var preObjRefs = doc.Objects.GetSelectedObjects(false, false)
+      .Where(o => o?.Geometry is Curve)
+      .Select(o => new ObjRef(doc, o.Id))
+      .ToList();
+    L($"pre-selected curves: {preObjRefs.Count}");
 
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = false;
+    go.EnablePreSelect(false, false);
     go.EnableClearObjectsOnEntry(false);
     go.EnableUnselectObjectsOnExit(false);
     go.AlreadySelectedObjectSelect = true;
@@ -107,7 +115,7 @@ public sealed class vPart : Command
     while (true)
     {
       var selRes = go.GetMultiple(0, 0);
-      L($"sel iter {++selIter}: result={selRes}  cmdResult={go.CommandResult()}  count={go.ObjectCount}  preselected={go.ObjectsWerePreselected}");
+      L($"sel iter {++selIter}: result={selRes}  cmdResult={go.CommandResult()}  count={go.ObjectCount}");
 
       if (selRes == GetResult.Option)
       {
@@ -120,22 +128,25 @@ public sealed class vPart : Command
       if (go.CommandResult() != Result.Success)
       {
         for (var i = 0; i < go.ObjectCount; i++) go.Object(i).Object()?.Select(false);
+        foreach (var r in preObjRefs) r.Object()?.Select(false);
         doc.Views.Redraw();
         L("cancelled");
         return Result.Cancel;
       }
 
-      if (go.ObjectsWerePreselected)
-      {
-        go.EnablePreSelect(false, false);
-        continue;
-      }
-
       break;
     }
 
+    // Merge pre-captured objects (still selected = not deselected by user)
+    // with objects selected through GetObject, deduplicated.
+    var currentlySelected = new HashSet<Guid>(
+      doc.Objects.GetSelectedObjects(false, false).Select(o => o.Id));
+
     var collectedIds = new HashSet<Guid>();
     var collectedMap = new Dictionary<Guid, ObjRef>();
+    foreach (var r in preObjRefs)
+      if (currentlySelected.Contains(r.ObjectId) && collectedIds.Add(r.ObjectId))
+        collectedMap[r.ObjectId] = r;
     for (var i = 0; i < go.ObjectCount; i++)
     {
       var r = go.Object(i);
