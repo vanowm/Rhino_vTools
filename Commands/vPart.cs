@@ -97,7 +97,6 @@ public sealed class vPart : Command
     go.GroupSelect = false;
     go.EnableClearObjectsOnEntry(false);
     go.EnableUnselectObjectsOnExit(false);
-    go.AlreadySelectedObjectSelect = true;
     go.DeselectAllBeforePostSelect = false;
     go.AcceptNothing(true);
     go.AddOptionToggle("Group",         ref groupToggle);
@@ -117,9 +116,6 @@ public sealed class vPart : Command
         SaveOptions();
         continue;
       }
-
-      if (selRes == GetResult.Object)
-        continue; // AlreadySelectedObjectSelect causes per-click returns; loop until Enter
 
       if (go.CommandResult() != Result.Success)
       {
