@@ -84,10 +84,8 @@ public sealed class vPart : Command
     // ── 1. Select perimeter curves ─────────────────────────────────────────
     // Dale's pattern: single GetObject instance with EnableClearObjectsOnEntry(false)
     // so the accumulated list persists across GetMultiple calls.
-    // Loop re-enters when the user DESELECTS something, because Rhino marks deselected
-    // objects as "excluded" within a session — a fresh GetMultiple call lets them be
-    // re-added. When the user presses Enter without removing anything (stable set),
-    // we confirm and exit.
+    // AlreadySelectedObjectSelect = true lets the user re-click a deselected object
+    // within the same session to add it back.
 
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
@@ -96,10 +94,10 @@ public sealed class vPart : Command
     go.GroupSelect = false;
     go.EnableClearObjectsOnEntry(false);
     go.EnableUnselectObjectsOnExit(false);
+    go.AlreadySelectedObjectSelect = true;
     go.DeselectAllBeforePostSelect = false;
     go.AcceptNothing(true);
 
-    var prevIds = new HashSet<Guid>();
     var selIter = 0;
     while (true)
     {
@@ -117,19 +115,6 @@ public sealed class vPart : Command
       if (go.ObjectsWerePreselected)
       {
         go.EnablePreSelect(false, false);
-        for (var i = 0; i < go.ObjectCount; i++) prevIds.Add(go.Object(i).ObjectId);
-        continue;
-      }
-
-      // Build current ID set and check for deselections.
-      // If prevIds is not a subset of currentIds, the user removed something.
-      // Loop back so the removed objects are available again as fresh post-selects.
-      var currentIds = new HashSet<Guid>();
-      for (var i = 0; i < go.ObjectCount; i++) currentIds.Add(go.Object(i).ObjectId);
-
-      if (!prevIds.IsSubsetOf(currentIds))
-      {
-        prevIds = currentIds;
         continue;
       }
 
