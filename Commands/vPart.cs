@@ -82,49 +82,27 @@ public sealed class vPart : Command
     L($"  tol={tol:G4}  group={_group}  joinPerim={_joinPerim}");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
-    // Two-phase selection:
-    // Phase A: preselect-only pass (PostSelect disabled) captures pre-selected
-    //          curves without requiring user input.
-    // Phase B: GetMultiple(1,-1) with AlreadySelectedObjectSelect = true for
-    //          immediate-return per-click. We manage collectedMap manually so
-    //          any object can be deselected and re-selected freely.
+    // Single GetObject with EnableClearObjectsOnEntry(false) so the accumulated
+    // list persists across calls — AlreadySelectedObjectSelect checks go's own
+    // list, not raw doc selection, so clearing the list between calls would
+    // prevent re-click detection entirely.
+    //
+    // GetMultiple(1,-1): immediate-return per user action (click or Enter).
+    // Preselects arrive on the first return (ObjectsWerePreselected=true); we
+    // capture them and call EnablePreSelect(false,true) to switch to interactive.
+    // Each subsequent click appends one object to go's list; AlreadySelectedObjectSelect
+    // causes a duplicate to be appended for already-accumulated objects, so the
+    // most-recently-clicked object is always go.Object(go.ObjectCount-1).
 
     var groupToggle    = new OptionToggle(_group,    "No", "Yes");
     var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
 
-    // Phase A ─ capture pre-selected curves (returns immediately, no user input)
-    var goP = new GetObject();
-    goP.GeometryFilter = ObjectType.Curve;
-    goP.SubObjectSelect = false;
-    goP.EnablePreSelect(true, false);
-    goP.EnablePostSelect(false);
-    goP.EnableUnselectObjectsOnExit(false);
-    goP.DeselectAllBeforePostSelect = false;
-    goP.AcceptNothing(true);
-    goP.GetMultiple(0, 0);
-
-    var objectsWerePreselected = false;
-    var collectedIds = new HashSet<Guid>();
-    var collectedMap = new Dictionary<Guid, ObjRef>();
-    if (goP.ObjectsWerePreselected)
-    {
-      objectsWerePreselected = true;
-      for (var i = 0; i < goP.ObjectCount; i++)
-      {
-        var r = goP.Object(i);
-        if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
-        L($"  pre[{i}]: {Short(r.ObjectId)}");
-      }
-    }
-    L($"pre-selected: {collectedIds.Count}");
-
-    // Phase B ─ interactive toggle selection, immediate return per click
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = false;
-    go.EnablePreSelect(false, false);
+    go.EnableClearObjectsOnEntry(false);
     go.EnableUnselectObjectsOnExit(false);
     go.AlreadySelectedObjectSelect = true;
     go.DeselectAllBeforePostSelect = false;
@@ -132,11 +110,15 @@ public sealed class vPart : Command
     go.AddOptionToggle("Group",         ref groupToggle);
     go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
+    var objectsWerePreselected = false;
+    var collectedIds = new HashSet<Guid>();
+    var collectedMap = new Dictionary<Guid, ObjRef>();
+
     var selIter = 0;
     while (true)
     {
       var selRes = go.GetMultiple(1, -1);
-      L($"sel iter {++selIter}: result={selRes}  cmdResult={go.CommandResult()}  count={go.ObjectCount}");
+      L($"sel iter {++selIter}: result={selRes}  cmdResult={go.CommandResult()}  count={go.ObjectCount}  preselected={go.ObjectsWerePreselected}");
 
       if (selRes == GetResult.Option)
       {
@@ -157,9 +139,25 @@ public sealed class vPart : Command
         return Result.Cancel;
       }
 
+      if (go.ObjectsWerePreselected)
+      {
+        objectsWerePreselected = true;
+        for (var i = 0; i < go.ObjectCount; i++)
+        {
+          var r = go.Object(i);
+          if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
+          L($"  pre[{i}]: {Short(r.ObjectId)}");
+        }
+        go.EnablePreSelect(false, true);
+        L($"pre-selected: {collectedIds.Count}");
+        continue;
+      }
+
       if (selRes == GetResult.Object && go.ObjectCount > 0)
       {
-        var r  = go.Object(0);
+        // go.Object(go.ObjectCount-1): new click appends; AlreadySelectedObjectSelect
+        // appends a duplicate — so the last entry is always the most-recently-clicked.
+        var r  = go.Object(go.ObjectCount - 1);
         var id = r.ObjectId;
         if (collectedIds.Contains(id))
         {
@@ -172,7 +170,6 @@ public sealed class vPart : Command
         {
           collectedIds.Add(id);
           collectedMap[id] = r;
-          doc.Objects.FindId(id)?.Select(true);
           L($"  added: {Short(id)}");
         }
       }
