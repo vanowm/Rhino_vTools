@@ -82,32 +82,61 @@ public sealed class vPart : Command
     L($"  tol={tol:G4}  group={_group}  joinPerim={_joinPerim}");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
-    // Dale's pattern: single GetObject instance with EnableClearObjectsOnEntry(false)
-    // so the accumulated list persists across GetMultiple calls.
-    // AlreadySelectedObjectSelect = true lets the user re-click a deselected object
-    // within the same session to add it back.
+    // Two-phase selection:
+    // Phase A: preselect-only pass (PostSelect disabled) captures pre-selected
+    //          curves without requiring user input.
+    // Phase B: GetMultiple(1,-1) with AlreadySelectedObjectSelect = true for
+    //          immediate-return per-click. We manage collectedMap manually so
+    //          any object can be deselected and re-selected freely.
 
     var groupToggle    = new OptionToggle(_group,    "No", "Yes");
     var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
 
+    // Phase A ─ capture pre-selected curves (returns immediately, no user input)
+    var goP = new GetObject();
+    goP.GeometryFilter = ObjectType.Curve;
+    goP.SubObjectSelect = false;
+    goP.EnablePreSelect(true, false);
+    goP.EnablePostSelect(false);
+    goP.EnableUnselectObjectsOnExit(false);
+    goP.DeselectAllBeforePostSelect = false;
+    goP.AcceptNothing(true);
+    goP.GetMultiple(0, 0);
+
+    var objectsWerePreselected = false;
+    var collectedIds = new HashSet<Guid>();
+    var collectedMap = new Dictionary<Guid, ObjRef>();
+    if (goP.ObjectsWerePreselected)
+    {
+      objectsWerePreselected = true;
+      for (var i = 0; i < goP.ObjectCount; i++)
+      {
+        var r = goP.Object(i);
+        if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
+        L($"  pre[{i}]: {Short(r.ObjectId)}");
+      }
+    }
+    L($"pre-selected: {collectedIds.Count}");
+
+    // Phase B ─ interactive toggle selection, immediate return per click
     var go = new GetObject();
     go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
     go.GroupSelect = false;
-    go.EnableClearObjectsOnEntry(false);
+    go.EnablePreSelect(false, false);
     go.EnableUnselectObjectsOnExit(false);
+    go.AlreadySelectedObjectSelect = true;
     go.DeselectAllBeforePostSelect = false;
     go.AcceptNothing(true);
     go.AddOptionToggle("Group",         ref groupToggle);
     go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
-    var objectsWerePreselected = false;
     var selIter = 0;
     while (true)
     {
-      var selRes = go.GetMultiple(0, 0);
-      L($"sel iter {++selIter}: result={selRes}  cmdResult={go.CommandResult()}  count={go.ObjectCount}  preselected={go.ObjectsWerePreselected}");
+      var selRes = go.GetMultiple(1, -1);
+      L($"sel iter {++selIter}: result={selRes}  cmdResult={go.CommandResult()}  count={go.ObjectCount}");
 
       if (selRes == GetResult.Option)
       {
@@ -117,31 +146,36 @@ public sealed class vPart : Command
         continue;
       }
 
+      if (selRes == GetResult.Nothing)
+        break; // Enter = confirm
+
       if (go.CommandResult() != Result.Success)
       {
-        for (var i = 0; i < go.ObjectCount; i++) go.Object(i).Object()?.Select(false);
+        foreach (var id in collectedIds) doc.Objects.FindId(id)?.Select(false);
         doc.Views.Redraw();
         L("cancelled");
         return Result.Cancel;
       }
 
-      if (go.ObjectsWerePreselected)
+      if (selRes == GetResult.Object && go.ObjectCount > 0)
       {
-        objectsWerePreselected = true;
-        go.EnablePreSelect(false, true);
-        continue;
+        var r  = go.Object(0);
+        var id = r.ObjectId;
+        if (collectedIds.Contains(id))
+        {
+          collectedIds.Remove(id);
+          collectedMap.Remove(id);
+          doc.Objects.FindId(id)?.Select(false);
+          L($"  removed: {Short(id)}");
+        }
+        else
+        {
+          collectedIds.Add(id);
+          collectedMap[id] = r;
+          doc.Objects.FindId(id)?.Select(true);
+          L($"  added: {Short(id)}");
+        }
       }
-
-      break;
-    }
-
-    var collectedIds = new HashSet<Guid>();
-    var collectedMap = new Dictionary<Guid, ObjRef>();
-    for (var i = 0; i < go.ObjectCount; i++)
-    {
-      var r = go.Object(i);
-      if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
-      L($"  sel[{i}]: {Short(r.ObjectId)}");
     }
 
     L($"final collection: {collectedIds.Count} curve(s)");
@@ -320,7 +354,7 @@ public sealed class vPart : Command
     // selection state is consistent regardless of pre/post-select mix.
     if (objectsWerePreselected)
     {
-      for (var i = 0; i < go.ObjectCount; i++) go.Object(i).Object()?.Select(false);
+      foreach (var id in collectedIds) doc.Objects.FindId(id)?.Select(false);
     }
 
     doc.Views.Redraw();
