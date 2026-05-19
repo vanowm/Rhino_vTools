@@ -81,10 +81,6 @@ public sealed class vPart : Command
     L($"=== vPart {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
     L($"  tol={tol:G4}  group={_group}  joinPerim={_joinPerim}");
 
-    // Options — declared early so they are visible at every stage
-    var groupToggle    = new OptionToggle(_group,    "No", "Yes");
-    var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
-
     // ── 1. Select perimeter curves ─────────────────────────────────────────
     // Two-phase approach:
     //   Phase A — goPre: one-shot GetMultiple that auto-accepts any already-
@@ -119,84 +115,44 @@ public sealed class vPart : Command
     // Keep them visually selected for the interactive phase
     foreach (var id in initialIds) doc.Objects.Select(id, true);
 
-    // Phase B: interactive selection — single click per Get() so toggle is always reliable.
-    // GetMultiple can't report re-clicks on already-selected objects; single Get() always can.
-    var collectedIds = new HashSet<Guid>(initialIds);
-    var collectedMap = new Dictionary<Guid, ObjRef>(initialMap);
-    foreach (var id in collectedIds) doc.Objects.Select(id, true);
+    // Phase B: interactive selection — GetMultiple handles add/remove natively.
+    // Preselected objects remain highlighted (DeselectAllBeforePostSelect=false).
+    var goB = new GetObject();
+    goB.SetCommandPrompt("Select perimeter curves. Press Enter when done");
+    goB.GeometryFilter = ObjectType.Curve;
+    goB.SubObjectSelect = false;
+    goB.GroupSelect = false;
+    goB.EnablePreSelect(false, false);
+    goB.DeselectAllBeforePostSelect = false;
+    goB.EnableUnselectObjectsOnExit(false);
+    goB.AcceptNothing(true);
+    var bRes = goB.GetMultiple(0, 0);
+    L($"goB: result={bRes}  ObjectCount={goB.ObjectCount}");
 
-    var goIteration = 0;
-    while (true)
+    if (bRes == GetResult.Cancel)
     {
-      var go = new GetObject();
-      go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
-      go.GeometryFilter = ObjectType.Curve;
-      go.SubObjectSelect = false;
-      go.GroupSelect = false;
-      go.EnablePreSelect(false, false);
-      go.DeselectAllBeforePostSelect = false;
-      go.AcceptNothing(true);
-      go.EnableUnselectObjectsOnExit(false);
-      go.AddOptionToggle("Group",         ref groupToggle);
-      go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
+      foreach (var id in initialIds) doc.Objects.Select(id, false);
+      doc.Views.Redraw();
+      L("cancelled");
+      return Result.Cancel;
+    }
 
-      var res = go.Get();
-      L($"go iter {++goIteration}: result={res}");
-
-      // Detect silent deselects: when user clicks an already-highlighted object Rhino
-      // deselects it from the doc and returns Nothing rather than Object. Catch it here.
-      var silentDeselects = collectedIds
-        .Where(id => (doc.Objects.FindId(id)?.IsSelected(false) ?? 0) == 0)
-        .ToList();
-      foreach (var id in silentDeselects)
+    var collectedIds = new HashSet<Guid>();
+    var collectedMap = new Dictionary<Guid, ObjRef>();
+    for (var i = 0; i < goB.ObjectCount; i++)
+    {
+      var r = goB.Object(i);
+      if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
+      L($"  goB[{i}]: {Short(r.ObjectId)}");
+    }
+    // Include Phase A preselects that the user kept but goB may not have in its list
+    foreach (var (id, r) in initialMap)
+    {
+      if (!collectedIds.Contains(id) && (doc.Objects.FindId(id)?.IsSelected(false) ?? 0) > 0)
       {
-        collectedIds.Remove(id);
-        collectedMap.Remove(id);
-        L($"  silent-deselect: {Short(id)}");
-      }
-
-      if (res == GetResult.Cancel)
-      {
-        foreach (var id in collectedIds) doc.Objects.Select(id, false);
-        foreach (var id in initialIds)   doc.Objects.Select(id, false);
-        doc.Views.Redraw();
-        L("cancelled");
-        return Result.Cancel;
-      }
-
-      if (res == GetResult.Nothing)
-      {
-        if (silentDeselects.Count > 0) { doc.Views.Redraw(); continue; } // deselect click — keep selecting
-        break;   // genuine Enter press — done
-      }
-
-      if (res == GetResult.Option)
-      {
-        _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
-        SaveOptions();
-        L($"  option changed: group={_group}  joinPerim={_joinPerim}  collected={collectedIds.Count}");
-        continue;
-      }
-
-      if (res == GetResult.Object)
-      {
-        var r   = go.Object(0);
-        var pid = r.ObjectId;
-        if (collectedIds.Contains(pid))
-        {
-          collectedIds.Remove(pid);
-          collectedMap.Remove(pid);
-          doc.Objects.Select(pid, false);
-          L($"  toggle-off: {Short(pid)}");
-        }
-        else
-        {
-          collectedIds.Add(pid);
-          collectedMap[pid] = r;
-          doc.Objects.Select(pid, true);
-          L($"  toggle-on: {Short(pid)}");
-        }
-        doc.Views.Redraw();
+        collectedIds.Add(id);
+        collectedMap[id] = r;
+        L($"  retained preselect: {Short(id)}");
       }
     }
 
@@ -282,12 +238,23 @@ public sealed class vPart : Command
 
     // ── 7. DynamicDraw preview + placement ────────────────────────────────
 
-    var previewItems = partItems.Select(p =>
-    {
-      var layer = doc.Layers[p.Attr.LayerIndex];
-      var color  = layer?.Color ?? Color.Cyan;
-      return (Geom: p.Geom.Duplicate()!, Color: color);
-    }).Where(p => p.Geom != null).ToList();
+    var groupToggle    = new OptionToggle(_group,    "No", "Yes");
+    var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
+
+    // Precompute preview lists for both join states; DynamicDraw reads the toggle live.
+    var currentColor = doc.Layers[doc.Layers.CurrentLayerIndex]?.Color ?? Color.Cyan;
+
+    var splitPreview = partItems
+      .Select(p => (Geom: p.Geom.Duplicate()!, Color: doc.Layers[p.Attr.LayerIndex]?.Color ?? Color.Cyan))
+      .Where(p => p.Geom != null)
+      .ToList();
+
+    var joinedPreview = new List<(GeometryBase Geom, Color Color)>();
+    joinedPreview.Add((perimeter!.Duplicate()!, currentColor));
+    foreach (var bridge in bridges)
+      joinedPreview.Add((bridge.Duplicate()!, currentColor));
+    foreach (var (geom, attr) in insideObjects)
+      joinedPreview.Add((geom.Duplicate()!, doc.Layers[attr.LayerIndex]?.Color ?? Color.Cyan));
 
     var gp = new GetPoint();
     gp.SetCommandPrompt("Pick placement point for Part");
@@ -296,7 +263,8 @@ public sealed class vPart : Command
     gp.DynamicDraw += (_, e) =>
     {
       var xform = Transform.Translation(e.CurrentPoint - basePoint);
-      foreach (var (geom, color) in previewItems)
+      var items = joinPerimToggle.CurrentValue ? joinedPreview : splitPreview;
+      foreach (var (geom, color) in items)
       {
         var draw = geom.Duplicate();
         if (draw == null) continue;
