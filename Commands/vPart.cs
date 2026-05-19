@@ -82,17 +82,10 @@ public sealed class vPart : Command
     L($"  tol={tol:G4}  group={_group}  joinPerim={_joinPerim}");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
-    // Single GetObject with EnableClearObjectsOnEntry(false) so the accumulated
-    // list persists across calls — AlreadySelectedObjectSelect checks go's own
-    // list, not raw doc selection, so clearing the list between calls would
-    // prevent re-click detection entirely.
-    //
-    // GetMultiple(1,-1): immediate-return per user action (click or Enter).
-    // Preselects arrive on the first return (ObjectsWerePreselected=true); we
-    // capture them and call EnablePreSelect(false,true) to switch to interactive.
-    // Each subsequent click appends one object to go's list; AlreadySelectedObjectSelect
-    // causes a duplicate to be appended for already-accumulated objects, so the
-    // most-recently-clicked object is always go.Object(go.ObjectCount-1).
+    // Dale's pattern: single GetObject instance with EnableClearObjectsOnEntry(false)
+    // so the accumulated list persists across GetMultiple calls.
+    // AlreadySelectedObjectSelect = true lets the user re-click a deselected object
+    // within the same session to add it back.
 
     var groupToggle    = new OptionToggle(_group,    "No", "Yes");
     var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
@@ -110,14 +103,10 @@ public sealed class vPart : Command
     go.AddOptionToggle("Group",         ref groupToggle);
     go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
-    var objectsWerePreselected = false;
-    var collectedIds = new HashSet<Guid>();
-    var collectedMap = new Dictionary<Guid, ObjRef>();
-
     var selIter = 0;
     while (true)
     {
-      var selRes = go.GetMultiple(1, -1);
+      var selRes = go.GetMultiple(0, 0);
       L($"sel iter {++selIter}: result={selRes}  cmdResult={go.CommandResult()}  count={go.ObjectCount}  preselected={go.ObjectsWerePreselected}");
 
       if (selRes == GetResult.Option)
@@ -128,12 +117,9 @@ public sealed class vPart : Command
         continue;
       }
 
-      if (selRes == GetResult.Nothing)
-        break; // Enter = confirm
-
       if (go.CommandResult() != Result.Success)
       {
-        foreach (var id in collectedIds) doc.Objects.FindId(id)?.Select(false);
+        for (var i = 0; i < go.ObjectCount; i++) go.Object(i).Object()?.Select(false);
         doc.Views.Redraw();
         L("cancelled");
         return Result.Cancel;
@@ -141,38 +127,20 @@ public sealed class vPart : Command
 
       if (go.ObjectsWerePreselected)
       {
-        objectsWerePreselected = true;
-        for (var i = 0; i < go.ObjectCount; i++)
-        {
-          var r = go.Object(i);
-          if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
-          L($"  pre[{i}]: {Short(r.ObjectId)}");
-        }
-        go.EnablePreSelect(false, true);
-        L($"pre-selected: {collectedIds.Count}");
+        go.EnablePreSelect(false, false);
         continue;
       }
 
-      if (selRes == GetResult.Object && go.ObjectCount > 0)
-      {
-        // go.Object(go.ObjectCount-1): new click appends; AlreadySelectedObjectSelect
-        // appends a duplicate — so the last entry is always the most-recently-clicked.
-        var r  = go.Object(go.ObjectCount - 1);
-        var id = r.ObjectId;
-        if (collectedIds.Contains(id))
-        {
-          collectedIds.Remove(id);
-          collectedMap.Remove(id);
-          doc.Objects.FindId(id)?.Select(false);
-          L($"  removed: {Short(id)}");
-        }
-        else
-        {
-          collectedIds.Add(id);
-          collectedMap[id] = r;
-          L($"  added: {Short(id)}");
-        }
-      }
+      break;
+    }
+
+    var collectedIds = new HashSet<Guid>();
+    var collectedMap = new Dictionary<Guid, ObjRef>();
+    for (var i = 0; i < go.ObjectCount; i++)
+    {
+      var r = go.Object(i);
+      if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
+      L($"  sel[{i}]: {Short(r.ObjectId)}");
     }
 
     L($"final collection: {collectedIds.Count} curve(s)");
@@ -346,14 +314,6 @@ public sealed class vPart : Command
 
     L($"committed: {addedIds.Count} object(s)  grouped={_group && addedIds.Count > 1}");
     L("=== done ===");
-
-    // Dale's pattern: deselect input objects if they were preselected so post-command
-    // selection state is consistent regardless of pre/post-select mix.
-    if (objectsWerePreselected)
-    {
-      foreach (var id in collectedIds) doc.Objects.FindId(id)?.Select(false);
-    }
-
     doc.Views.Redraw();
     return Result.Success;
   }
