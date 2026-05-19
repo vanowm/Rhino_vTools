@@ -96,6 +96,7 @@ public sealed class vLine : Command
 
     List<Point3d>? polylinePoints = null;
     Guid tempPolylineId = Guid.Empty;
+    var redoStack = new Stack<Point3d>();
 
     var continueChain = true;
     while (continueChain)
@@ -105,6 +106,7 @@ public sealed class vLine : Command
       var modeSeed = chainModeState == ModeSingle && (persistConstraintState || firstSegment) ? constraintModeState : null;
 
       var canUndo = chainModeState == ModePolyline && polylinePoints is { Count: >= 2 };
+      var canRedo = chainModeState == ModePolyline && redoStack.Count > 0;
       var secondResult = ResolveSecondPoint(
         doc,
         currentStart,
@@ -118,7 +120,8 @@ public sealed class vLine : Command
         angleState,
         angleRelativeState,
         lastSegmentVector,
-        canUndo);
+        canUndo,
+        canRedo);
 
       if (secondResult.State != null)
       {
@@ -143,6 +146,7 @@ public sealed class vLine : Command
       {
         if (polylinePoints is { Count: >= 2 })
         {
+          redoStack.Push(polylinePoints[^1]);
           polylinePoints.RemoveAt(polylinePoints.Count - 1);
           currentStart = polylinePoints[^1];
           DeleteObjectIfValid(doc, tempPolylineId);
@@ -166,6 +170,23 @@ public sealed class vLine : Command
         continue;
       }
 
+      if (secondResult.IsRedo && redoStack.TryPop(out var redoPoint))
+      {
+        polylinePoints ??= new List<Point3d> { currentStart };
+        polylinePoints.Add(redoPoint);
+        currentStart = redoPoint;
+        DeleteObjectIfValid(doc, tempPolylineId);
+        if (polylinePoints.Count >= 2)
+        {
+          tempPolylineId = doc.Objects.AddPolyline(new Polyline(polylinePoints));
+          lastSegmentVector = polylinePoints[^1] - polylinePoints[^2];
+        }
+        doc.Views.Redraw();
+        continueChain = true;
+        SavePersistedOptions();
+        continue;
+      }
+
       if (!secondResult.HasPoint)
       {
         if (tempPolylineId != Guid.Empty)
@@ -180,6 +201,7 @@ public sealed class vLine : Command
 
       if (selectedChainMode == ModePolyline)
       {
+        redoStack.Clear();
         polylinePoints ??= new List<Point3d> { currentStart };
         var prevPoints = new List<Point3d>(polylinePoints);
         polylinePoints.Add(endPoint);
@@ -402,7 +424,8 @@ public sealed class vLine : Command
     double initialAngle,
     bool initialAngleRelative,
     Vector3d? referenceVector,
-    bool canUndo = false)
+    bool canUndo = false,
+    bool canRedo = false)
   {
     var getPoint = new GetPoint();
     getPoint.SetBasePoint(startPoint, true);
@@ -436,6 +459,7 @@ public sealed class vLine : Command
     var debugToggle = new OptionToggle(_debugMode, "Off", "On");
     getPoint.AddOptionToggle("Debug", ref debugToggle);
     if (canUndo) getPoint.AcceptUndo(true);
+    if (canRedo) getPoint.AcceptString(true);
 
     var mode = initialMode;
     Vector3d? parallelDir = null;
@@ -778,6 +802,16 @@ public sealed class vLine : Command
           return SecondPointResult.Undo(bothSides.CurrentValue, chainModeIndex, undoState);
         }
 
+        if (result == GetResult.String)
+        {
+          if (canRedo && getPoint.StringResult().Trim().Equals("r", StringComparison.OrdinalIgnoreCase))
+          {
+            var redoState = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
+            return SecondPointResult.Redo(bothSides.CurrentValue, chainModeIndex, redoState);
+          }
+          continue;
+        }
+
         if (result == GetResult.Point)
         {
           var clickedRaw = getPoint.Point();
@@ -969,7 +1003,8 @@ public sealed class vLine : Command
             angleOption.CurrentValue,
             angleRelative.CurrentValue,
             referenceVector,
-            canUndo);
+            canUndo,
+            canRedo);
         }
 
         var fallbackState = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
@@ -1658,6 +1693,7 @@ public sealed class vLine : Command
     ConstraintState? State)
   {
     public bool IsUndo { get; init; } = false;
+    public bool IsRedo { get; init; } = false;
 
     public static SecondPointResult WithPoint(Point3d point, bool bothSides, int chainMode, ConstraintState state)
       => new(true, point, bothSides, chainMode, state);
@@ -1667,5 +1703,8 @@ public sealed class vLine : Command
 
     public static SecondPointResult Undo(bool bothSides, int chainMode, ConstraintState state)
       => new(false, Point3d.Unset, bothSides, chainMode, state) { IsUndo = true };
+
+    public static SecondPointResult Redo(bool bothSides, int chainMode, ConstraintState state)
+      => new(false, Point3d.Unset, bothSides, chainMode, state) { IsRedo = true };
   }
 }
