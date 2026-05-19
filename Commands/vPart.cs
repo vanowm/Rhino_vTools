@@ -103,6 +103,7 @@ public sealed class vPart : Command
     go.AddOptionToggle("Group",         ref groupToggle);
     go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
+    var objectsWerePreselected = false;
     var selIter = 0;
     while (true)
     {
@@ -127,7 +128,8 @@ public sealed class vPart : Command
 
       if (go.ObjectsWerePreselected)
       {
-        go.EnablePreSelect(false, false);
+        objectsWerePreselected = true;
+        go.EnablePreSelect(false, true);
         continue;
       }
 
@@ -314,6 +316,14 @@ public sealed class vPart : Command
 
     L($"committed: {addedIds.Count} object(s)  grouped={_group && addedIds.Count > 1}");
     L("=== done ===");
+
+    // Dale's pattern: deselect input objects if they were preselected so post-command
+    // selection state is consistent regardless of pre/post-select mix.
+    if (objectsWerePreselected)
+    {
+      for (var i = 0; i < go.ObjectCount; i++) go.Object(i).Object()?.Select(false);
+    }
+
     doc.Views.Redraw();
     return Result.Success;
   }
