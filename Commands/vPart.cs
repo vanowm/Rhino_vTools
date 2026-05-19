@@ -34,6 +34,30 @@ public sealed class vPart : Command
   private static bool _group    = false;
   private static bool _joinPerim = false;
 
+  // ── Logging ────────────────────────────────────────────────────────────
+  private static StreamWriter? _log;
+
+  private static void OpenLog()
+  {
+    try
+    {
+      _log?.Dispose();
+      _log = null;
+      var asmDir  = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
+      var logsDir = Path.Combine(asmDir, "logs");
+      Directory.CreateDirectory(logsDir);
+      _log = new StreamWriter(Path.Combine(logsDir, "vPart_perim.log"), append: false) { AutoFlush = true };
+    }
+    catch { }
+  }
+
+  private static void L(string m)
+  {
+    try { _log?.WriteLine($"{DateTime.Now:HH:mm:ss.fff}  {m}"); } catch { }
+  }
+
+  private static string Short(Guid id) => id.ToString()[..8];
+
   private static void LoadOptions() =>
     vToolsOptionStore.Read<int>(SectionName, section =>
     {
@@ -53,6 +77,9 @@ public sealed class vPart : Command
   {
     LoadOptions();
     var tol = doc.ModelAbsoluteTolerance;
+    OpenLog();
+    L($"=== vPart {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
+    L($"  tol={tol:G4}  group={_group}  joinPerim={_joinPerim}");
 
     // Options — declared early so they are visible at every stage
     var groupToggle    = new OptionToggle(_group,    "No", "Yes");
@@ -79,6 +106,7 @@ public sealed class vPart : Command
     goPre.EnableUnselectObjectsOnExit(false);
     goPre.AcceptNothing(true);
     goPre.GetMultiple(0, 0);
+    L($"goPre: result={goPre.CommandResult()}  ObjectCount={goPre.ObjectCount}");
 
     var initialIds = new HashSet<Guid>();
     var initialMap = new Dictionary<Guid, ObjRef>();
@@ -86,6 +114,7 @@ public sealed class vPart : Command
     {
       var r = goPre.Object(i);
       if (initialIds.Add(r.ObjectId)) initialMap[r.ObjectId] = r;
+      L($"  goPre[{i}]: {Short(r.ObjectId)}");
     }
     // Keep them visually selected for the interactive phase
     foreach (var id in initialIds) doc.Objects.Select(id, true);
@@ -104,20 +133,28 @@ public sealed class vPart : Command
     go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
     GetResult goRes;
+    var goIteration = 0;
     do
     {
       goRes = go.GetMultiple(0, 0);
+      L($"go iter {++goIteration}: result={goRes}  ObjectCount={go.ObjectCount}");
       if (goRes == GetResult.Option)
       {
         _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
         SaveOptions();
+        L($"  option changed: group={_group}  joinPerim={_joinPerim}");
       }
     } while (goRes == GetResult.Option);
+
+    L($"go final picks ({go.ObjectCount}):");
+    for (var i = 0; i < go.ObjectCount; i++)
+      L($"  go[{i}]: {Short(go.Object(i).ObjectId)}");
 
     if (goRes == GetResult.Cancel)
     {
       foreach (var id in initialIds) doc.Objects.Select(id, false);
       doc.Views.Redraw();
+      L("cancelled");
       return Result.Cancel;
     }
 
@@ -133,12 +170,16 @@ public sealed class vPart : Command
         // User clicked a preselected curve → deselect
         collectedIds.Remove(pid);
         collectedMap.Remove(pid);
+        L($"  toggle-deselect: {Short(pid)}");
       }
       else
       {
         if (collectedIds.Add(pid)) collectedMap[pid] = r;
+        L($"  new pick: {Short(pid)}");
       }
     }
+    L($"final collection: {collectedIds.Count} curve(s)");
+    foreach (var id in collectedIds) L($"  collected: {Short(id)}");
 
     // Collect perimeter curves — keep each with its own attributes
     var perimIds  = new HashSet<Guid>();
@@ -153,9 +194,11 @@ public sealed class vPart : Command
       }
     }
 
+    L($"perimList: {perimList.Count} curve(s)");
     if (perimList.Count == 0)
     {
       RhinoApp.WriteLine("vPart: no curves selected.");
+      L("EXIT: no curves");
       return Result.Nothing;
     }
 
@@ -176,28 +219,19 @@ public sealed class vPart : Command
 
     var perimLog = new List<string>();
     var (perimeter, bridges) = BuildClosedPerimeter(perimList.Select(p => p.Crv).ToList(), plane, tol, perimLog);
-    if (perimLog.Count > 0)
-    {
-      try
-      {
-        var asmDir  = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
-        var logsDir = Path.Combine(asmDir, "logs");
-        Directory.CreateDirectory(logsDir);
-        var logPath = Path.Combine(logsDir, "vPart_perim.log");
-        File.WriteAllLines(logPath, perimLog); // overwritten on each run
-        RhinoApp.WriteLine($"vPart: perimeter log → {logPath}");
-      }
-      catch { /* ignore log write failures */ }
-    }
+    L($"BuildClosedPerimeter: {(perimeter != null ? "OK" : "FAILED")}  bridges={bridges.Count}");
+    foreach (var entry in perimLog) L($"  perim: {entry}");
     if (perimeter == null)
     {
       RhinoApp.WriteLine("vPart: could not form a closed perimeter from selected curves.");
+      L("EXIT: no closed perimeter");
       return Result.Nothing;
     }
 
     // ── 4. Collect inside objects (all visible types, trimmed for curves) ──
 
     var insideObjects = CollectInsideObjects(doc, perimIds, perimeter, plane, tol);
+    L($"insideObjects: {insideObjects.Count}");
 
     // ── 5. Assemble Part items ─────────────────────────────────────────────────────
     //  • Original perimeter curves trimmed to the closed boundary — each on its own layer
@@ -212,6 +246,7 @@ public sealed class vPart : Command
     foreach (var bridge in bridges)
       partItems.Add((bridge, currentLayerAttr.Duplicate()));
     partItems.AddRange(insideObjects);
+    L($"partItems: {partItems.Count} ({perimList.Count} perim + {bridges.Count} bridges + {insideObjects.Count} inside)");
 
     // ── 6. Base point = bounding box center of perimeter ─────────────────
 
@@ -258,7 +293,11 @@ public sealed class vPart : Command
     while (gpResult == GetResult.Option);
 
     if (gpResult != GetResult.Point)
+    {
+      L($"EXIT: placement cancelled (gpResult={gpResult})");
       return Result.Cancel;
+    }
+    L($"placement point: {gp.Point()}");
 
     // ── 8. Commit ─────────────────────────────────────────────────────────
 
@@ -299,6 +338,8 @@ public sealed class vPart : Command
       }
     }
 
+    L($"committed: {addedIds.Count} object(s)  grouped={_group && addedIds.Count > 1}");
+    L("=== done ===");
     doc.Views.Redraw();
     return Result.Success;
   }
