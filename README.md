@@ -1,4 +1,4 @@
-# vTools  ·  v26.5.18.1742
+# vTools  ·  v26.5.19.1928
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -16,7 +16,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vOffset](#voffset-flow) *(26.4.27.2125)* — runs built-in Offset in a continuous loop, clearing selection after each run
   - [vOrient2pt](#vorient2pt-flow) *(26.4.24.934)* — orients objects from a source two-point frame to a target two-point frame
   - [vOrient3pt](#vorient3pt-flow) *(26.4.24.934)* — orients objects from a source three-point frame to a target three-point frame; intermediate points are optional (Enter at src2 = 1-point translate, Enter at src3 = 2-point orient)
-  - [vPart](#vpart-flow) *(26.5.18.1742)* — captures a closed perimeter from selected curves (gaps are bridged automatically), collects all visible curves inside the perimeter (trimmed at the boundary), and lets the user place the resulting Part with a full preview
+  - [vPart](#vpart-flow) *(26.5.19.1928)* — captures a closed perimeter from selected curves (gaps are bridged automatically), collects all visible objects inside the perimeter (curves trimmed at the boundary; other types included whole), and lets the user place the resulting Part with a full preview
   - [vPerpendicularTo](#vperpendicularto-flow) *(26.5.5.757)* — rotates curve A about its nearest endpoint so it is perpendicular to curve B in the active CPlane
   - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.4.27.2109)* — places points projected onto the closest surface normal evaluation point
   - [vRectangle](#vrectangle-flow) *(26.4.27.2125)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
@@ -27,7 +27,8 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vTextFlip](#vtextflip-flow) *(26.4.27.2125)* — flips or rotates annotation text around its object plane
   - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.4.24.1712)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
   - [vTrim](#vtrim-flow) *(26.4.24.1633)* — trims and extends curves with auto-cutter detection and join
-  - [vTrimOff](#vtrimoff-flow) *(26.5.18.849)* — trims selected curves to the outer boundary of the enclosed region they collectively form; protruding ends are removed automatically
+  - [vTrimOff](#vtrimoff-flow) *(26.5.19.1928)* — trims selected curves to the outer boundary of the enclosed region they collectively form; protruding ends are removed automatically
+  - [vUnrollSrf](#vunrollsrf-flow) *(26.5.19.1928)* — runs the built-in UnrollSrf command and automatically selects all newly created flat objects on completion; TextDot labels placed on the original surface are excluded from the selection
   - [vUzipParts](#vuzipparts-flow) *(26.4.24.934)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
   - [vUzipCenter](#vuzipcenter-flow) *(26.5.1.2200)* — offsets a U-shape's three curves inward, fillets the inside corners, and produces a single joined open curve
 - Shared command configuration file: vTools.config.json
@@ -72,7 +73,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vPart](#vpart-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUzipParts](#vuzipparts-flow), [vUzipCenter](#vuzipcenter-flow).
+Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vPart](#vpart-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzipParts](#vuzipparts-flow), [vUzipCenter](#vuzipcenter-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -216,10 +217,15 @@ Hidden keywords while editing:
 
 1. Select the outer perimeter curves (preselect or postselect; a single closed curve is also valid).
 1. The command joins the selected curves into a closed loop.  If endpoints do not quite meet (gaps ≤ 200× model tolerance), straight-line bridge segments are inserted automatically.
-1. All visible curves in the document that are fully or partly inside the closed perimeter are collected automatically (excluding the selected perimeter curves).  Curves that cross the perimeter are split; only the inside segments are kept.
-1. A full DynamicDraw preview of the Part (perimeter + trimmed inside curves) follows the cursor, each curve drawn in its original layer color.
+1. All visible objects inside the closed perimeter are collected automatically (excluding the selected perimeter curves).  Curves that cross the perimeter are split; only the inside segments are kept.  Non-curve objects (text, dots, points, etc.) are included whole when their representative point falls inside.
+1. A full DynamicDraw preview of the Part (perimeter + inside objects) follows the cursor, each object drawn in its original layer color.
 1. Pick the placement point to commit.  The Part is added as new objects at that location; originals are not deleted.
 1. Press Esc to cancel without adding anything.
+
+Options (available during both curve selection and placement):
+
+- `Group`: when `Yes`, all output objects are placed into a single Rhino group.
+- `JoinPerimeter`: when `Yes`, perimeter segments are joined into a single curve instead of being kept as individual segments.
 
 ### vPointNormalToSurface flow
 
@@ -315,6 +321,13 @@ Hidden keywords while editing:
 1. The command finds all enclosed regions formed by the selected curves and computes their combined outer boundary.
 1. The original selected curves are replaced by the trimmed boundary curves; protruding ends that extend outside the enclosed region are discarded.
 1. Uses the active CPlane for planar region detection.
+
+### vUnrollSrf flow
+
+1. Optionally preselect a surface or polysurface to unroll.
+1. Run `vUnrollSrf`.  The built-in `_UnrollSrf` command runs interactively with all its standard prompts and options.
+1. After `UnrollSrf` completes, all newly created flat objects are automatically selected.  TextDot labels placed on the original 3D surface by Rhino are not selected.
+1. Press Enter to repeat `vUnrollSrf`.
 
 ### vUzipParts flow
 
