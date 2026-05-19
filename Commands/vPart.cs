@@ -129,7 +129,7 @@ public sealed class vPart : Command
     while (true)
     {
       var go = new GetObject();
-      go.SetCommandPrompt($"Click curves to add/remove ({collectedIds.Count} selected). Press Enter when done");
+      go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
       go.GeometryFilter = ObjectType.Curve;
       go.SubObjectSelect = false;
       go.GroupSelect = false;
@@ -143,6 +143,18 @@ public sealed class vPart : Command
       var res = go.Get();
       L($"go iter {++goIteration}: result={res}");
 
+      // Detect silent deselects: when user clicks an already-highlighted object Rhino
+      // deselects it from the doc and returns Nothing rather than Object. Catch it here.
+      var silentDeselects = collectedIds
+        .Where(id => (doc.Objects.FindId(id)?.IsSelected(false) ?? 0) == 0)
+        .ToList();
+      foreach (var id in silentDeselects)
+      {
+        collectedIds.Remove(id);
+        collectedMap.Remove(id);
+        L($"  silent-deselect: {Short(id)}");
+      }
+
       if (res == GetResult.Cancel)
       {
         foreach (var id in collectedIds) doc.Objects.Select(id, false);
@@ -152,7 +164,11 @@ public sealed class vPart : Command
         return Result.Cancel;
       }
 
-      if (res == GetResult.Nothing) break;   // Enter — done
+      if (res == GetResult.Nothing)
+      {
+        if (silentDeselects.Count > 0) { doc.Views.Redraw(); continue; } // deselect click — keep selecting
+        break;   // genuine Enter press — done
+      }
 
       if (res == GetResult.Option)
       {
