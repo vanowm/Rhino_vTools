@@ -490,7 +490,8 @@ public sealed class vPart : Command
     {
       ObjectTypeFilter = ObjectType.AnyObject,
       VisibleFilter    = true,
-      DeletedObjects   = false
+      DeletedObjects   = false,
+      IncludeGrips     = false
     };
 
     foreach (var obj in doc.Objects.GetObjectList(settings))
