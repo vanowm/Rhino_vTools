@@ -59,56 +59,44 @@ public sealed class vPart : Command
     var joinPerimToggle = new OptionToggle(_joinPerim, "No", "Yes");
 
     // ── 1. Select perimeter curves ─────────────────────────────────────────
-    // GetMultiple snapshot loop:
-    // - On each iteration we select all collected objects so GetMultiple sees them
-    //   as pre-selected; the user can click them again to deselect (native toggle).
-    // - When an option changes we snapshot the current pick list and loop back.
-    // - EnablePreSelect(true, false): capture already-selected objects at start,
-    //   but don't re-accept preselect on re-enterable iterations.
+    // Single GetObject instance with do-while(Option) loop.
+    // Rhino preserves the pick list across re-entries on the same instance.
+    // EnablePreSelect(true, false): captures pre-selected objects on the FIRST
+    //   call only (enableWhenNotEmpty=false skips preselect when list has picks).
+    // EnableUnselectObjectsOnExit(false): keeps objects highlighted when an option
+    //   fires, so the user sees no visual deselect flash between re-entries.
 
-    var collectedIds = new HashSet<Guid>();
-    var collectedMap = new Dictionary<Guid, ObjRef>();
+    var go = new GetObject();
+    go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
+    go.GeometryFilter = ObjectType.Curve;
+    go.SubObjectSelect = false;
+    go.GroupSelect = false;
+    go.EnablePreSelect(true, false);
+    go.DeselectAllBeforePostSelect = false;
+    go.AcceptNothing(true);
+    go.EnableUnselectObjectsOnExit(false);
+    go.AddOptionToggle("Group",         ref groupToggle);
+    go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
-    while (true)
+    GetResult goRes;
+    do
     {
-      // Restore visual selection for all currently collected objects
-      foreach (var id in collectedIds) doc.Objects.Select(id, true);
-
-      var go = new GetObject();
-      go.SetCommandPrompt("Select perimeter curves. Press Enter when done");
-      go.GeometryFilter = ObjectType.Curve;
-      go.SubObjectSelect = false;
-      go.GroupSelect = false;
-      go.EnablePreSelect(true, false);
-      go.DeselectAllBeforePostSelect = false;
-      go.AcceptNothing(true);
-      go.AddOptionToggle("Group",         ref groupToggle);
-      go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
-
-      var goRes = go.GetMultiple(0, 0);
-
-      // Snapshot whatever GetMultiple has, regardless of why it returned
-      collectedIds.Clear();
-      collectedMap.Clear();
-      for (var i = 0; i < go.ObjectCount; i++)
-      {
-        var r = go.Object(i);
-        if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
-      }
-
-      if (goRes == GetResult.Cancel)
-      {
-        foreach (var id in collectedIds) doc.Objects.Select(id, false);
-        doc.Views.Redraw();
-        return Result.Cancel;
-      }
+      goRes = go.GetMultiple(0, 0);
       if (goRes == GetResult.Option)
       {
         _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
         SaveOptions();
-        continue;
       }
-      break; // GetResult.Nothing = Enter
+    } while (goRes == GetResult.Option);
+
+    if (goRes == GetResult.Cancel) return Result.Cancel;
+
+    var collectedIds = new HashSet<Guid>();
+    var collectedMap = new Dictionary<Guid, ObjRef>();
+    for (var i = 0; i < go.ObjectCount; i++)
+    {
+      var r = go.Object(i);
+      if (collectedIds.Add(r.ObjectId)) collectedMap[r.ObjectId] = r;
     }
 
     // Collect perimeter curves — keep each with its own attributes
