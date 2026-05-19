@@ -132,12 +132,35 @@ public sealed class vPart : Command
     go.AddOptionToggle("Group",         ref groupToggle);
     go.AddOptionToggle("JoinPerimeter", ref joinPerimToggle);
 
+    // Accumulate picks across all iterations — go resets its pick list each GetMultiple call
+    var collectedIds = new HashSet<Guid>(initialIds);
+    var collectedMap = new Dictionary<Guid, ObjRef>(initialMap);
+
     GetResult goRes;
     var goIteration = 0;
     do
     {
       goRes = go.GetMultiple(0, 0);
       L($"go iter {++goIteration}: result={goRes}  ObjectCount={go.ObjectCount}");
+
+      // Accumulate this iteration's picks immediately (before the list resets on next call)
+      for (var i = 0; i < go.ObjectCount; i++)
+      {
+        var r   = go.Object(i);
+        var pid = r.ObjectId;
+        if (initialIds.Contains(pid))
+        {
+          collectedIds.Remove(pid);
+          collectedMap.Remove(pid);
+          L($"  toggle-deselect: {Short(pid)}");
+        }
+        else
+        {
+          if (collectedIds.Add(pid)) collectedMap[pid] = r;
+          L($"  new pick: {Short(pid)}");
+        }
+      }
+
       if (goRes == GetResult.Option)
       {
         _group = groupToggle.CurrentValue; _joinPerim = joinPerimToggle.CurrentValue;
@@ -145,10 +168,6 @@ public sealed class vPart : Command
         L($"  option changed: group={_group}  joinPerim={_joinPerim}");
       }
     } while (goRes == GetResult.Option);
-
-    L($"go final picks ({go.ObjectCount}):");
-    for (var i = 0; i < go.ObjectCount; i++)
-      L($"  go[{i}]: {Short(go.Object(i).ObjectId)}");
 
     if (goRes == GetResult.Cancel)
     {
@@ -158,26 +177,6 @@ public sealed class vPart : Command
       return Result.Cancel;
     }
 
-    // Build final collection: start from preselected, apply go's picks as toggles
-    var collectedIds = new HashSet<Guid>(initialIds);
-    var collectedMap = new Dictionary<Guid, ObjRef>(initialMap);
-    for (var i = 0; i < go.ObjectCount; i++)
-    {
-      var r   = go.Object(i);
-      var pid = r.ObjectId;
-      if (initialIds.Contains(pid))
-      {
-        // User clicked a preselected curve → deselect
-        collectedIds.Remove(pid);
-        collectedMap.Remove(pid);
-        L($"  toggle-deselect: {Short(pid)}");
-      }
-      else
-      {
-        if (collectedIds.Add(pid)) collectedMap[pid] = r;
-        L($"  new pick: {Short(pid)}");
-      }
-    }
     L($"final collection: {collectedIds.Count} curve(s)");
     foreach (var id in collectedIds) L($"  collected: {Short(id)}");
 
