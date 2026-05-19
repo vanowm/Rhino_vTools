@@ -496,6 +496,7 @@ public sealed class vPart : Command
 
     foreach (var obj in doc.Objects.GetObjectList(settings))
     {
+      if (obj.ObjectType == ObjectType.Grip) continue;
       if (excludeIds.Contains(obj.Id)) continue;
       var geom = obj.Geometry;
       if (geom == null) continue;
@@ -536,7 +537,10 @@ public sealed class vPart : Command
         // All other types: test a representative point for containment
         var testPt = RepresentativePoint(geom);
         if (testPt.IsValid && IsInsideOrOn(testPt, boundary, plane, tol))
+        {
+          L($"  inside non-curve: type={obj.ObjectType} geom={geom.GetType().Name} id={Short(obj.Id)}");
           result.Add((geom.Duplicate()!, attr));
+        }
       }
     }
 
