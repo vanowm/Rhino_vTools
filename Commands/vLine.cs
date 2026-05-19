@@ -104,6 +104,7 @@ public sealed class vLine : Command
       // Endpoint constraint options are single-use in multi-segment modes; only Single mode inherits.
       var modeSeed = chainModeState == ModeSingle && (persistConstraintState || firstSegment) ? constraintModeState : null;
 
+      var canUndo = chainModeState == ModePolyline && polylinePoints is { Count: >= 2 };
       var secondResult = ResolveSecondPoint(
         doc,
         currentStart,
@@ -116,7 +117,8 @@ public sealed class vLine : Command
         angleLockState,
         angleState,
         angleRelativeState,
-        lastSegmentVector);
+        lastSegmentVector,
+        canUndo);
 
       if (secondResult.State != null)
       {
@@ -135,6 +137,33 @@ public sealed class vLine : Command
         _angleLock = angleLockState;
         _angle = angleState;
         _angleRelative = angleRelativeState;
+      }
+
+      if (secondResult.IsUndo)
+      {
+        if (polylinePoints is { Count: >= 2 })
+        {
+          polylinePoints.RemoveAt(polylinePoints.Count - 1);
+          currentStart = polylinePoints[^1];
+          DeleteObjectIfValid(doc, tempPolylineId);
+          if (polylinePoints.Count >= 2)
+          {
+            tempPolylineId = doc.Objects.AddPolyline(new Polyline(polylinePoints));
+          }
+          else
+          {
+            tempPolylineId = Guid.Empty;
+            polylinePoints = null;
+            firstSegment = true;
+          }
+          lastSegmentVector = polylinePoints is { Count: >= 2 }
+            ? polylinePoints[^1] - polylinePoints[^2]
+            : null;
+          doc.Views.Redraw();
+        }
+        continueChain = true;
+        SavePersistedOptions();
+        continue;
       }
 
       if (!secondResult.HasPoint)
@@ -372,7 +401,8 @@ public sealed class vLine : Command
     bool initialAngleLock,
     double initialAngle,
     bool initialAngleRelative,
-    Vector3d? referenceVector)
+    Vector3d? referenceVector,
+    bool canUndo = false)
   {
     var getPoint = new GetPoint();
     getPoint.SetBasePoint(startPoint, true);
@@ -405,6 +435,7 @@ public sealed class vLine : Command
     getPoint.AddOptionToggle("AngleRef", ref angleRelative);
     var debugToggle = new OptionToggle(_debugMode, "Off", "On");
     getPoint.AddOptionToggle("Debug", ref debugToggle);
+    var idxUndo = canUndo ? getPoint.AddOption("Undo") : -1;
 
     var mode = initialMode;
     Vector3d? parallelDir = null;
@@ -913,6 +944,12 @@ public sealed class vLine : Command
             continue;
           }
 
+          if (canUndo && option.Index == idxUndo)
+          {
+            var undoState = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
+            return SecondPointResult.Undo(bothSides.CurrentValue, chainModeIndex, undoState);
+          }
+
           continue;
         }
 
@@ -931,7 +968,8 @@ public sealed class vLine : Command
             angleLock.CurrentValue,
             angleOption.CurrentValue,
             angleRelative.CurrentValue,
-            referenceVector);
+            referenceVector,
+            canUndo);
         }
 
         var fallbackState = new ConstraintState(mode, persistConstraint.CurrentValue, priorityIndex, lengthOption.CurrentValue, angleLock.CurrentValue, angleOption.CurrentValue, angleRelative.CurrentValue);
@@ -1619,10 +1657,15 @@ public sealed class vLine : Command
     int ChainMode,
     ConstraintState? State)
   {
+    public bool IsUndo { get; init; } = false;
+
     public static SecondPointResult WithPoint(Point3d point, bool bothSides, int chainMode, ConstraintState state)
       => new(true, point, bothSides, chainMode, state);
 
     public static SecondPointResult None(bool bothSides, int chainMode, ConstraintState state)
       => new(false, Point3d.Unset, bothSides, chainMode, state);
+
+    public static SecondPointResult Undo(bool bothSides, int chainMode, ConstraintState state)
+      => new(false, Point3d.Unset, bothSides, chainMode, state) { IsUndo = true };
   }
 }
