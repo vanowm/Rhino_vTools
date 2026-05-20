@@ -225,6 +225,12 @@ public sealed class vTextAligned : Command
           activeTextId = chosenTextId.Value;
           UpdateSettingsFromTextObject(textObj, ref _text, ref _height);
           optHeight.CurrentValue = _height;
+
+          // Move the selected text to the current active layer.
+          var layerAttr = obj.Attributes.Duplicate();
+          layerAttr.LayerIndex = doc.Layers.CurrentLayerIndex;
+          doc.Objects.ModifyAttributes(chosenTextId.Value, layerAttr, true);
+
           activeMoveStartGeo = DupTextGeometry(doc, chosenTextId.Value);
           SavePersistedOptions();
           RhinoApp.WriteLine("vTextAligned: active text selected.");

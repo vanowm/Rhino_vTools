@@ -1,4 +1,4 @@
-# vTools  ·  v26.5.19.1928
+# vTools  ·  v26.5.19.1937
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -19,6 +19,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vPart](#vpart-flow) *(26.5.19.1928)* — captures a closed perimeter from selected curves (gaps are bridged automatically), collects all visible objects inside the perimeter (curves trimmed at the boundary; other types included whole), and lets the user place the resulting Part with a full preview
   - [vPerpendicularTo](#vperpendicularto-flow) *(26.5.5.757)* — rotates curve A about its nearest endpoint so it is perpendicular to curve B in the active CPlane
   - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.4.27.2109)* — places points projected onto the closest surface normal evaluation point
+  - [vPointTrace](#vpointtrace-flow) *(26.4.24.934)* — maps arc-length positions from a source curve onto a destination curve: pick points along the source and a corresponding point is placed on the destination at the same proportional arc-length position
   - [vRectangle](#vrectangle-flow) *(26.4.27.2125)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
   - [vSplitAtCorners](#vsplitatcorners-flow) *(26.4.27.2125)* — splits curves at detected corners with interactive per-corner toggle preview
@@ -28,9 +29,10 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.4.24.1712)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
   - [vTrim](#vtrim-flow) *(26.4.24.1633)* — trims and extends curves with auto-cutter detection and join
   - [vTrimOff](#vtrimoff-flow) *(26.5.19.1928)* — trims selected curves to the outer boundary of the enclosed region they collectively form; protruding ends are removed automatically
-  - [vUnrollSrf](#vunrollsrf-flow) *(26.5.19.1928)* — runs the built-in UnrollSrf command and automatically selects all newly created flat objects on completion; TextDot labels placed on the original surface are excluded from the selection
-  - [vUzipParts](#vuzipparts-flow) *(26.4.24.934)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
+  - [vUnrollSrf](#vunrollsrf-flow) *(26.5.19.1937)* — runs the built-in UnrollSrf command and automatically selects all newly created flat objects on completion; TextDot labels are included only when their position touches a newly created flat object (3D-surface correspondence labels are excluded)
+  - [vUzip](#vuzip-flow) *(26.4.24.934)* — full U-zip workflow in one command: selects three U-shape arm curves, computes the inward-offset center curve with fillet, and optionally produces glass, vis, and parts output with label and tail settings
   - [vUzipCenter](#vuzipcenter-flow) *(26.5.1.2200)* — offsets a U-shape's three curves inward, fillets the inside corners, and produces a single joined open curve
+  - [vUzipParts](#vuzipparts-flow) *(26.4.24.934)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
 
@@ -73,25 +75,10 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vPart](#vpart-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzipParts](#vuzipparts-flow), [vUzipCenter](#vuzipcenter-flow).
+Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
-
-### vDiamonds flow
-
-1. Run `vDiamonds`.
-1. Adjust options while previewing the pattern:
-
-    - `Width` / `Height`: single-diamond cell width and height. Accept decimal, fraction (`3+1/8`), or type `heightxwidth` directly at the placement prompt (e.g. `2x3`).
-    - `CountWidth` / `CountHeight`: number of diamond cells across/tall; decimals allowed (`3.5` = 3 full + half cell).
-    - `BySize`: enter a target bounding box size as `widthxheight`. Diamonds are counted by `floor(box/cell)` and centered with equal margins. Does not change `CountWidth`/`CountHeight`. Enter `0` to revert to count mode.
-    - `Boundary=Yes/No`: show/hide the CUT1 bounding rectangle.
-    - `Size=Yes/No`: show/hide the size label (e.g. `2 x 2`), fitted to bbox width.
-    - `Count=Yes/No`: show/hide the count label (e.g. `(3 x 3)`), fitted to bbox width independently.
-
-1. Current bounding box dimensions print to command history on every preview update.
-1. Pick the placement point to commit. All objects are grouped. Output layers: `PLOT` (diamond lines), `CUT1` (boundary rect), `Reference` (labels).
 
 ### vChamfer flow
 
@@ -113,6 +100,21 @@ Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-fl
     - `All`: one spline through all selected curves.
 
 1. Confirm to create interpolated curve output and select results.
+
+### vDiamonds flow
+
+1. Run `vDiamonds`.
+1. Adjust options while previewing the pattern:
+
+    - `Width` / `Height`: single-diamond cell width and height. Accept decimal, fraction (`3+1/8`), or type `heightxwidth` directly at the placement prompt (e.g. `2x3`).
+    - `CountWidth` / `CountHeight`: number of diamond cells across/tall; decimals allowed (`3.5` = 3 full + half cell).
+    - `BySize`: enter a target bounding box size as `widthxheight`. Diamonds are counted by `floor(box/cell)` and centered with equal margins. Does not change `CountWidth`/`CountHeight`. Enter `0` to revert to count mode.
+    - `Boundary=Yes/No`: show/hide the CUT1 bounding rectangle.
+    - `Size=Yes/No`: show/hide the size label (e.g. `2 x 2`), fitted to bbox width.
+    - `Count=Yes/No`: show/hide the count label (e.g. `(3 x 3)`), fitted to bbox width independently.
+
+1. Current bounding box dimensions print to command history on every preview update.
+1. Pick the placement point to commit. All objects are grouped. Output layers: `PLOT` (diamond lines), `CUT1` (boundary rect), `Reference` (labels).
 
 ### vFitBox flow
 
@@ -227,12 +229,32 @@ Options (available during both curve selection and placement):
 - `Group`: when `Yes`, all output objects are placed into a single Rhino group.
 - `JoinPerimeter`: when `Yes`, perimeter segments are joined into a single curve instead of being kept as individual segments.
 
+### vPerpendicularTo flow
+
+1. Pick **curve A** — the curve to rotate.
+1. Pick **curve B** — the reference curve (not moved).
+
+Behavior:
+
+- The nearest endpoint pair between A and B is found automatically.
+- Curve A is rotated about its near endpoint in the active CPlane by the angle needed to make it perpendicular to B's tangent at B's near endpoint.
+- Of the two possible perpendicular directions, the one requiring the smaller rotation is chosen.
+
 ### vPointNormalToSurface flow
 
 1. Run `vPointNormalToSurface`.
 1. Select a target surface or polysurface face.
 1. Pick points in space.
 1. A point is placed on the closest evaluated surface location (normal evaluation point), with live preview from picked point to on-surface point.
+1. Press Enter to finish.
+
+### vPointTrace flow
+
+1. Run `vPointTrace`.
+1. Click the source curve near the end you want to treat as the start.
+1. Click the destination curve near the end you want to treat as the start.
+1. Pick points constrained to the source curve; a corresponding point is added on the destination at the same arc-length fraction.
+1. A green dot previews the destination point while moving along the source.
 1. Press Enter to finish.
 
 ### vRectangle flow
@@ -269,6 +291,19 @@ Options (available during both curve selection and placement):
     - `MinLength`: minimum resulting segment length to keep.
     - `ClearManual`: remove all manually added split points.
     - `ClearAll`: restore all removed auto-corners and remove all manual points.
+
+### vTangent flow
+
+1. Pick **S1** — click near the end of the subject curve you want aligned to D1.
+1. Pick **D1** — the required driver curve; the tangent at the click point is used.
+1. Pick **S2** — click the other end of the same subject curve (for a second alignment).
+1. Pick **D2** — an optional second driver curve; press Enter to skip.
+
+Behavior:
+
+- With D1 only: the subject curve is translated and rotated rigidly so the S1-end tangent matches the D1 tangent at the pick point.
+- With D1 and D2: an additional twist about the D1 tangent axis is applied to minimize the angular error between the S2-end tangent and D2 (or its reverse, whichever needs less rotation).
+- The subject curve shape is not changed — only its position and orientation.
 
 ### vTextAligned flow
 
@@ -326,19 +361,28 @@ Options (available during both curve selection and placement):
 
 1. Optionally preselect a surface or polysurface to unroll.
 1. Run `vUnrollSrf`.  The built-in `_UnrollSrf` command runs interactively with all its standard prompts and options.
-1. After `UnrollSrf` completes, all newly created flat objects are automatically selected.  TextDot labels placed on the original 3D surface by Rhino are not selected.
+1. After `UnrollSrf` completes, all newly created flat objects are automatically selected.  TextDot labels are included only when their position touches a newly created flat object; TextDots placed on the original 3D surface by Rhino as correspondence labels are not selected.
 1. Press Enter to repeat `vUnrollSrf`.
 
-### vUzipParts flow
+### vUzip flow
 
-1. Select the center curve.
-1. Adjust runtime options in the command prompt.
+1. Optionally preselect up to three U-shape arm curves before running.
+1. Run `vUzip`.
+1. Select the three U-shape curves (left arm, right arm, bottom).  Adjust options while selecting:
 
-    - `Label`: text used when naming generated output.
-    - `Tail`: tail distance used when building end curves.
+    - `Left` / `Right` / `Bottom`: inward offset distances for each arm.  Accepts decimal, fraction (`2 3/8`, `2-3/8`), or `z`/`zipper` keyword.
+    - `Radius`: fillet radius at the two inside corners.
+    - `Glass`: `Yes/No` — compute and show glass offset curves.
+    - `Vis`: `Yes/No` — compute and show vis offset curves.
+    - `Parts`: `Yes/No` — enable the parts-output pipeline.
+    - `Label` *(when Parts=Yes)*: text label for generated part groups.
+    - `Tail` *(when Parts=Yes)*: tail length for end curves.
+    - `Options`: opens the full options dialog for layer names, colors, and additional offset values.
 
-1. Pick placement point for generated groups, or cancel placement to remove generated objects.
-1. While picking the placement point, the `Label` and `Tail` options remain available. Changing either triggers a full rebuild of all parts before placement continues.
+1. A cyan preview of the computed center curve is shown live.
+1. When `Parts=No`: press Enter to accept, or click a boundary curve to trim/extend the ends.
+1. When `Parts=Yes`: select boundary curves to trim/extend end caps; press Enter to accept.
+1. The center curve (and optionally glass, vis, and parts output) is committed to the document.
 
 ### vUzipCenter flow
 
@@ -358,29 +402,16 @@ Options (available during both curve selection and placement):
 1. Press Enter to accept and add the result curve to the document.
 1. Options are saved to `vTools.config.json` under the `vUzipCenter` section.
 
-### vTangent flow
+### vUzipParts flow
 
-1. Pick **S1** — click near the end of the subject curve you want aligned to D1.
-1. Pick **D1** — the required driver curve; the tangent at the click point is used.
-1. Pick **S2** — click the other end of the same subject curve (for a second alignment).
-1. Pick **D2** — an optional second driver curve; press Enter to skip.
+1. Select the center curve.
+1. Adjust runtime options in the command prompt.
 
-Behavior:
+    - `Label`: text used when naming generated output.
+    - `Tail`: tail distance used when building end curves.
 
-- With D1 only: the subject curve is translated and rotated rigidly so the S1-end tangent matches the D1 tangent at the pick point.
-- With D1 and D2: an additional twist about the D1 tangent axis is applied to minimize the angular error between the S2-end tangent and D2 (or its reverse, whichever needs less rotation).
-- The subject curve shape is not changed — only its position and orientation.
-
-### vPerpendicularTo flow
-
-1. Pick **curve A** — the curve to rotate.
-1. Pick **curve B** — the reference curve (not moved).
-
-Behavior:
-
-- The nearest endpoint pair between A and B is found automatically.
-- Curve A is rotated about its near endpoint in the active CPlane by the angle needed to make it perpendicular to B's tangent at B's near endpoint.
-- Of the two possible perpendicular directions, the one requiring the smaller rotation is chosen.
+1. Pick placement point for generated groups, or cancel placement to remove generated objects.
+1. While picking the placement point, the `Label` and `Tail` options remain available. Changing either triggers a full rebuild of all parts before placement continues.
 
 ## Configuration
 
