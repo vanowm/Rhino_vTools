@@ -21,11 +21,13 @@ public sealed class vTextAligned : Command
   private const string HeightKey = "height";
   private const string OffsetKey = "offset";
   private const string Rotate90Key = "rotate90";
+  private const string BothSidesKey = "bothSides";
 
   private static string _text = "Text";
   private static double _height = 5.0;
   private static double _offset;
   private static int _rotate90;
+  private static bool _bothSides;
 
   /// <summary>
   /// Rhino command name.
@@ -49,6 +51,7 @@ public sealed class vTextAligned : Command
 
     var optHeight = new OptionDouble(_height, RhinoMath.ZeroTolerance, 1e9);
     var optOffset = new OptionDouble(_offset);
+    var optBothSides = new OptionToggle(_bothSides, "No", "Yes");
 
     while (true)
     {
@@ -68,6 +71,7 @@ public sealed class vTextAligned : Command
       var idxHeight = getter.AddOptionDouble("Height", ref optHeight);
       var idxOffset = getter.AddOptionDouble("Offset", ref optOffset);
       var idxRotate = getter.AddOption("Rotate");
+      var idxBothSides = getter.AddOptionToggle("BothSides", ref optBothSides);
 
       var result = getter.Get();
       var commandResult = getter.CommandResult();
@@ -107,6 +111,7 @@ public sealed class vTextAligned : Command
 
         _height = Math.Max(optHeight.CurrentValue, RhinoMath.ZeroTolerance);
         _offset = optOffset.CurrentValue;
+        _bothSides = optBothSides.CurrentValue;
 
         if (activeTextId.HasValue)
         {
@@ -275,7 +280,7 @@ public sealed class vTextAligned : Command
       var upAxis = getter.View()?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
       var previewTemplateTextId = getter.PreviewTemplateTextId;
 
-      if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, _height, _rotate90, upAxis, out var plane, out _, sideSignHint: 0, sideDeadband: 0.0, previewTemplateTextId))
+      if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, _height, _rotate90, upAxis, out var plane, out var primarySideSign, sideSignHint: 0, sideDeadband: 0.0, previewTemplateTextId))
       {
         RhinoApp.WriteLine("vTextAligned: could not compute text plane.");
         continue;
@@ -316,6 +321,35 @@ public sealed class vTextAligned : Command
 
       _ = ForceTextObjectHeight(doc, newId, _height);
 
+      if (_bothSides)
+      {
+        // Compute the opposite-side cursor by mirroring across the curve along the side-base vector.
+        var tanVec = curveToUse.TangentAt(t);
+        var normVec = upAxis;
+        if (!normVec.Unitize()) normVec = Vector3d.ZAxis;
+        tanVec.Unitize();
+        var sideBaseVec = Vector3d.CrossProduct(normVec, tanVec);
+        if (sideBaseVec.Unitize())
+        {
+          var curvePoint = curveToUse.PointAt(t);
+          var oppCursor = curvePoint - sideBaseVec * (primarySideSign * 1000.0);
+          if (BuildPlaneFromCurve(doc, curveToUse, t, oppCursor, _offset, _height,
+                NormalizeRotate(_rotate90 + 2), upAxis,
+                out var oppPlane, out _, sideSignHint: 0, sideDeadband: 0.0, previewTemplateTextId))
+          {
+            var secEntity = BuildTextEntity(doc, _text, _height, oppPlane);
+            var secId = doc.Objects.AddText(secEntity);
+            if (secId != Guid.Empty)
+            {
+              _ = ForceTextObjectHeight(doc, secId, _height);
+              var secGeo = DupTextGeometry(doc, secId);
+              if (secGeo != null)
+                undoStack.Push(TextAction.CreateAdd(secId, secGeo));
+            }
+          }
+        }
+      }
+
       var addedGeo = DupTextGeometry(doc, newId);
       if (addedGeo != null)
       {
@@ -350,13 +384,18 @@ public sealed class vTextAligned : Command
         if (vToolsOptionStore.TryGetDouble(section, Rotate90Key, out var persistedRotate))
           rotate90 = NormalizeRotate((int)Math.Round(persistedRotate, MidpointRounding.AwayFromZero));
 
-        return (text, height, offset, rotate90);
+        var bothSides = _bothSides;
+        if (vToolsOptionStore.TryGetBool(section, BothSidesKey, out var persistedBothSides))
+          bothSides = persistedBothSides;
+
+        return (text, height, offset, rotate90, bothSides);
       });
 
     _text = values.text;
     _height = Math.Max(values.height, RhinoMath.ZeroTolerance);
     _offset = values.offset;
     _rotate90 = NormalizeRotate(values.rotate90);
+    _bothSides = values.bothSides;
   }
 
   private static void SavePersistedOptions()
@@ -369,6 +408,7 @@ public sealed class vTextAligned : Command
         section[HeightKey] = _height;
         section[OffsetKey] = _offset;
         section[Rotate90Key] = _rotate90;
+        section[BothSidesKey] = _bothSides ? 1.0 : 0.0;
       });
   }
 
