@@ -552,6 +552,7 @@ public sealed class vTrim : Command
       preview.HoverExtendMode = lastShiftState;
       var modeLocked = false;
       var lockedExtendMode = lastShiftState;
+      var shiftReleaseTicks = 0;
       string? lastPrompt = null;
 
       void RefreshPrompt()
@@ -601,13 +602,33 @@ public sealed class vTrim : Command
         }
 
         var currentShift = ShiftPressed();
-        if (currentShift == lastShiftState)
-          return;
+        if (currentShift)
+        {
+          shiftReleaseTicks = 0;
+          if (lastShiftState)
+            return;
 
-        lastShiftState = currentShift;
-        preview.HoverExtendMode = currentShift;
-        RefreshPrompt();
-        doc.Views.Redraw();
+          lastShiftState = true;
+          preview.HoverExtendMode = true;
+          RefreshPrompt();
+          doc.Views.Redraw();
+        }
+        else
+        {
+          if (!lastShiftState) { shiftReleaseTicks = 0; return; }
+
+          // Debounce: require 2 consecutive shift-up reads (~60 ms) before flipping
+          // to trim, so single-frame ShiftPressed() glitches don't cause twitching.
+          shiftReleaseTicks++;
+          if (shiftReleaseTicks < 2)
+            return;
+
+          shiftReleaseTicks = 0;
+          lastShiftState = false;
+          preview.HoverExtendMode = false;
+          RefreshPrompt();
+          doc.Views.Redraw();
+        }
       }
 
       RhinoApp.Idle += OnIdleShiftRefresh;
@@ -977,9 +998,8 @@ public sealed class vTrim : Command
       _lastHoverObjectId = hoverObj?.Id;
       _lastHoverPoint = hoverPoint;
 
-      var shiftNow = false;
-      try { shiftNow = e.ShiftKeyDown; } catch { }
-      _preview.SetHover(hoverObj, hoverCurve, hoverPoint, shiftNow);
+      // HoverExtendMode is owned by the shift timer — do not overwrite it here.
+      _preview.SetHover(hoverObj, hoverCurve, hoverPoint, _preview.HoverExtendMode);
       _doc.Views.Redraw();
 
       base.OnMouseMove(e);
