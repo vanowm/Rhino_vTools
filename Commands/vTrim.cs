@@ -922,6 +922,9 @@ public sealed class vTrim : Command
 
     protected override void OnMouseDown(MouseCallbackEventArgs e)
     {
+      // Only capture left-click; middle/right are pan/zoom and must not trigger modeLocked.
+      try { if (e.MouseButton != Rhino.UI.MouseButton.Left) { base.OnMouseDown(e); return; } } catch { }
+
       var shiftDown = ShiftPressed();
       try
       {
