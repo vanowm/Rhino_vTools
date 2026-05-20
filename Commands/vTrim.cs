@@ -751,11 +751,9 @@ public sealed class vTrim : Command
           pickPoint = targetCurve.PointAtStart;
       }
 
-      var pickedExtendMode = modeLocked ? lockedExtendMode : lastShiftState;
+      // Single source of truth: the extend mode the preview was showing is what gets executed.
+      var pickedExtendMode = preview.HoverExtendMode;
       var clickHover = hover.LastClick;
-
-      if (clickHover.HasCapture)
-        pickedExtendMode = clickHover.ExtendMode;
 
       // Use click-time hover object/point first so execution matches preview even with nearby-object disambiguation.
       if (clickHover.HasCapture && clickHover.ObjectId.HasValue)
@@ -775,7 +773,6 @@ public sealed class vTrim : Command
         if (preview.HoverObjectId.HasValue && preview.HoverObjectId.Value == targetObj.Id && hoverPoint.IsValid)
         {
           pickPoint = hoverPoint;
-          pickedExtendMode = preview.HoverExtendMode;
         }
       }
 
@@ -913,6 +910,8 @@ public sealed class vTrim : Command
       {
       }
 
+      _preview.HoverExtendMode = shiftDown;
+
       LastClick = new HoverClickCapture
       {
         HasCapture = true,
@@ -965,7 +964,9 @@ public sealed class vTrim : Command
       _lastHoverObjectId = hoverObj?.Id;
       _lastHoverPoint = hoverPoint;
 
-      _preview.SetHover(hoverObj, hoverCurve, hoverPoint, _preview.HoverExtendMode);
+      var shiftNow = false;
+      try { shiftNow = e.ShiftKeyDown; } catch { }
+      _preview.SetHover(hoverObj, hoverCurve, hoverPoint, shiftNow);
       _doc.Views.Redraw();
 
       base.OnMouseMove(e);
