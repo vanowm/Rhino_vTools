@@ -58,7 +58,7 @@ public sealed class vTextAligned : Command
       var curveCache = CollectCurveObjects(doc);
       var textIds = CollectTextIds(doc);
 
-      var getter = new MainPointGetter(doc, _text, _height, _offset, _rotate90, curveCache, textIds, activeCurveId, activeTextId, curveIsLocked);
+      var getter = new MainPointGetter(doc, _text, _height, _offset, _rotate90, _bothSides, curveCache, textIds, activeCurveId, activeTextId, curveIsLocked);
 
       getter.SetCommandPrompt(curveIsLocked && activeCurveId.HasValue
         ? "Curve locked. Click to set text position, or click text to switch active text. Enter to finish"
@@ -1047,6 +1047,7 @@ public sealed class vTextAligned : Command
     private readonly Guid? _activeCurveId;
     private readonly Guid? _activeTextId;
     private readonly bool _curveIsLocked;
+    private readonly bool _bothSides;
 
     private int _lastSideSign;
 
@@ -1056,6 +1057,7 @@ public sealed class vTextAligned : Command
       double height,
       double offset,
       int rotate90,
+      bool bothSides,
       List<CurveObjectCacheItem> curveCache,
       List<Guid> textIds,
       Guid? activeCurveId,
@@ -1073,6 +1075,7 @@ public sealed class vTextAligned : Command
       _activeCurveId = activeCurveId;
       _activeTextId = activeTextId;
       _curveIsLocked = curveIsLocked;
+      _bothSides = bothSides;
 
       SnapTolerance = Math.Max(doc.ModelAbsoluteTolerance * 3.0, 0.25);
       HoverSnapTolerance = Math.Max(doc.ModelAbsoluteTolerance * 2.0, SnapTolerance * 0.35);
@@ -1082,6 +1085,7 @@ public sealed class vTextAligned : Command
     public CurveHit? HoverCurve { get; private set; }
     public TextHit? HoverText { get; private set; }
     public Plane? PreviewPlane { get; private set; }
+    public Plane? PreviewPlaneOpp { get; private set; }
     public Guid? PreviewTemplateTextId { get; }
     public Point3d? LastCursorPoint { get; private set; }
 
@@ -1114,6 +1118,7 @@ public sealed class vTextAligned : Command
         HoverCurve = null;
 
       PreviewPlane = null;
+      PreviewPlaneOpp = null;
 
       if (!_curveIsLocked || !_activeCurveId.HasValue)
         return;
@@ -1148,6 +1153,29 @@ public sealed class vTextAligned : Command
         PreviewPlane = plane;
         if (sideSign is 1 or -1)
           _lastSideSign = sideSign;
+
+        if (_bothSides && sideSign is 1 or -1)
+        {
+          var tanVec = curveToUse.TangentAt(t);
+          var normVec = upAxis;
+          if (!normVec.Unitize()) normVec = Vector3d.ZAxis;
+          tanVec.Unitize();
+          var sideBaseVec = Vector3d.CrossProduct(normVec, tanVec);
+          if (sideBaseVec.Unitize())
+          {
+            var curvePoint = curveToUse.PointAt(t);
+            var oppCursor = curvePoint - sideBaseVec * (sideSign * 1000.0);
+            if (BuildPlaneFromCurve(
+                  _doc, curveToUse, t, oppCursor,
+                  _offset, _height, NormalizeRotate(_rotate90 + 2),
+                  upAxis, out var oppPlane, out _,
+                  sideSignHint: 0, sideDeadband: 0.0,
+                  PreviewTemplateTextId))
+            {
+              PreviewPlaneOpp = oppPlane;
+            }
+          }
+        }
       }
     }
 
@@ -1204,28 +1232,7 @@ public sealed class vTextAligned : Command
         {
           try
           {
-            TextEntity previewGeo;
-            if (PreviewTemplateTextId.HasValue)
-            {
-              var templateObj = _doc.Objects.FindId(PreviewTemplateTextId.Value);
-              if (templateObj?.Geometry is TextEntity template)
-              {
-                previewGeo = template.Duplicate() as TextEntity ?? BuildTextEntity(_doc, _text, _height, PreviewPlane.Value);
-                previewGeo.Plane = PreviewPlane.Value;
-                SetTextEntityValue(previewGeo, _text);
-                previewGeo.TextHeight = _height;
-              }
-              else
-              {
-                previewGeo = BuildTextEntity(_doc, _text, _height, PreviewPlane.Value);
-              }
-            }
-            else
-            {
-              previewGeo = BuildTextEntity(_doc, _text, _height, PreviewPlane.Value);
-            }
-
-            e.Display.DrawAnnotation(previewGeo, System.Drawing.Color.Cyan);
+            e.Display.DrawAnnotation(BuildPreviewText(PreviewPlane.Value), System.Drawing.Color.Cyan);
           }
           catch
           {
@@ -1233,7 +1240,35 @@ public sealed class vTextAligned : Command
         }
       }
 
+      if (PreviewPlaneOpp.HasValue)
+      {
+        try
+        {
+          e.Display.DrawAnnotation(BuildPreviewText(PreviewPlaneOpp.Value), System.Drawing.Color.Cyan);
+        }
+        catch
+        {
+        }
+      }
+
       base.OnDynamicDraw(e);
+    }
+
+    private TextEntity BuildPreviewText(Plane plane)
+    {
+      if (PreviewTemplateTextId.HasValue)
+      {
+        var templateObj = _doc.Objects.FindId(PreviewTemplateTextId.Value);
+        if (templateObj?.Geometry is TextEntity template)
+        {
+          var geo = template.Duplicate() as TextEntity ?? BuildTextEntity(_doc, _text, _height, plane);
+          geo.Plane = plane;
+          SetTextEntityValue(geo, _text);
+          geo.TextHeight = _height;
+          return geo;
+        }
+      }
+      return BuildTextEntity(_doc, _text, _height, plane);
     }
   }
 }

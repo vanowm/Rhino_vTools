@@ -383,12 +383,16 @@ public sealed class vChamfer : Command
     conduit.Enabled = true;
     doc.Views.Redraw();
 
+    bool pointActive = false;
+
     try
     {
       while (true)
       {
         var get = new GetPoint();
-        get.SetCommandPrompt("Press Enter to apply chamfer; pick a point to place at Length distance from point");
+        get.SetCommandPrompt(pointActive
+          ? "Chamfer placed at point — Enter to apply"
+          : "Press Enter to apply chamfer; pick a point to place at Length distance from point");
         get.AcceptNothing(true);
         get.AcceptNumber(true, false);
         get.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
@@ -396,6 +400,7 @@ public sealed class vChamfer : Command
         get.AddOptionToggle("Trim", ref trimOpt);
         var joinOpt = new OptionToggle(_join, "No", "Yes");
         if (_trim) get.AddOptionToggle("Join", ref joinOpt);
+        int idxClearPoint = pointActive ? get.AddOption("ClearPoint") : -1;
 
         var res = get.Get();
 
@@ -440,18 +445,29 @@ public sealed class vChamfer : Command
             continue;
           }
 
+          pointActive = true;
           UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
           doc.Views.Redraw();
-          break; // apply immediately
+          continue;
         }
 
         if (res == GetResult.Nothing)
           break;
 
+        if (res == GetResult.Option && idxClearPoint >= 0 && get.Option()?.Index == idxClearPoint)
+        {
+          pointActive = false;
+          if (ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length, cplane,
+                out ptA, out ptB, out tA, out tB))
+            UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
+          doc.Views.Redraw();
+          continue;
+        }
+
         if (res == GetResult.Number)
         {
           var v = get.Number();
-          if (v > 0) _length = v;
+          if (v > 0) { _length = v; pointActive = false; }
         }
         else if (res == GetResult.Option)
         {
@@ -464,6 +480,7 @@ public sealed class vChamfer : Command
             doc.Views.Redraw();
             HandleLengthSubprompt();
             conduit.Enabled = true;
+            pointActive = false;
           }
         }
 
