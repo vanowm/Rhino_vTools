@@ -387,8 +387,8 @@ public sealed class vChamfer : Command
     {
       while (true)
       {
-        var get = new GetOption();
-        get.SetCommandPrompt("Press Enter to apply chamfer");
+        var get = new GetPoint();
+        get.SetCommandPrompt("Press Enter to apply chamfer; pick a point to place at Length distance from point");
         get.AcceptNothing(true);
         get.AcceptNumber(true, false);
         get.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
@@ -401,6 +401,49 @@ public sealed class vChamfer : Command
 
         if (res == GetResult.Cancel)
           return Result.Cancel;
+
+        if (res == GetResult.Point)
+        {
+          var pickedPt = get.Point();
+
+          // The chamfer line is always perpendicular to the corner bisector, and its
+          // bisector-distance from the corner scales linearly with cut-length.
+          // Derive that scale factor from the current valid chamfer geometry, then
+          // solve for the cut-length that places the chamfer at _length distance
+          // perpendicular to the picked point.
+          var infLine  = new Line(ptA, ptB);
+          var foot     = infLine.ClosestPoint(corner, false);
+          double dCur  = corner.DistanceTo(foot);
+          var bisDir   = foot - corner;
+          if (dCur < 1e-12 || !bisDir.Unitize())
+          {
+            RhinoApp.WriteLine("vChamfer: degenerate corner geometry, cannot use point-based placement.");
+            continue;
+          }
+
+          double d1   = dCur / _length;                   // bisector-dist per unit of cut-length
+          double dP   = (pickedPt - corner) * bisDir;     // projection of point onto bisector
+          double dNew = dP - _length;                     // desired chamfer bisector-dist
+
+          if (dNew <= 1e-12)
+          {
+            RhinoApp.WriteLine($"vChamfer: picked point is closer to corner than Length ({_length:0.##}); move it farther out.");
+            continue;
+          }
+
+          double newCutLength = dNew / d1;
+
+          if (!ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, newCutLength, cplane,
+                out ptA, out ptB, out tA, out tB))
+          {
+            RhinoApp.WriteLine("vChamfer: point-based chamfer exceeds available curve length.");
+            continue;
+          }
+
+          UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
+          doc.Views.Redraw();
+          break; // apply immediately
+        }
 
         if (res == GetResult.Nothing)
           break;
