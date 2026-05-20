@@ -942,8 +942,14 @@ public sealed class vTrim : Command
       Point3d bestPoint = Point3d.Unset;
       double? bestD2 = null;
 
+      // bbox early-reject margin: pick tolerance + 8px safety for perspective distortion
+      var bboxMargin = pickTol + 8.0;
+
       foreach (var (obj, curve) in EnumerateDocCurves(_doc))
       {
+        if (!CurveBboxNearCursor(curve, viewport, vpPoint, bboxMargin))
+          continue;
+
         var sample = CurveBestScreenPick(curve, viewport, vpPoint);
         if (!sample.Point.IsValid || !sample.DistanceSquared.HasValue)
           continue;
@@ -960,6 +966,13 @@ public sealed class vTrim : Command
       var hoverObj = bestD2.HasValue && bestD2.Value <= tol2 ? bestObj : null;
       var hoverCurve = hoverObj != null ? bestCurve : null;
       var hoverPoint = hoverObj != null ? bestPoint : Point3d.Unset;
+
+      // Skip redraw when still nothing is hovered — no visual state changed.
+      if (hoverObj == null && _lastHoverObjectId == null)
+      {
+        base.OnMouseMove(e);
+        return;
+      }
 
       _lastHoverObjectId = hoverObj?.Id;
       _lastHoverPoint = hoverPoint;
@@ -1003,7 +1016,7 @@ public sealed class vTrim : Command
     var parameters = new List<double>();
     try
     {
-      var div = curve.DivideByCount(96, true);
+      var div = curve.DivideByCount(32, true);
       if (div != null)
         parameters.AddRange(div.Select(v => (double)v));
     }
@@ -1013,9 +1026,9 @@ public sealed class vTrim : Command
 
     if (parameters.Count == 0)
     {
-      for (var i = 0; i <= 96; i++)
+      for (var i = 0; i <= 32; i++)
       {
-        var t = d0 + ((d1 - d0) * (i / 96.0));
+        var t = d0 + ((d1 - d0) * (i / 32.0));
         parameters.Add(t);
       }
     }
@@ -1135,6 +1148,41 @@ public sealed class vTrim : Command
       Point = bestPoint,
       DistanceSquared = d2
     };
+  }
+
+  /// <summary>
+  /// Returns true if the curve's world bounding box projects to a screen region
+  /// that overlaps the cursor position within <paramref name="marginPx"/> pixels.
+  /// Conservative: passes curves that cannot be cheaply ruled out.
+  /// </summary>
+  private static bool CurveBboxNearCursor(Curve curve, Rhino.Display.RhinoViewport viewport, RhinoPoint2d vpPoint, double marginPx)
+  {
+    BoundingBox bbox;
+    try { bbox = curve.GetBoundingBox(false); }
+    catch { return true; }
+    if (!bbox.IsValid)
+      return true;
+
+    var minX = double.MaxValue;
+    var minY = double.MaxValue;
+    var maxX = double.MinValue;
+    var maxY = double.MinValue;
+
+    foreach (var corner in bbox.GetCorners())
+    {
+      try
+      {
+        var sc = viewport.WorldToClient(corner);
+        if (sc.X < minX) minX = sc.X;
+        if (sc.Y < minY) minY = sc.Y;
+        if (sc.X > maxX) maxX = sc.X;
+        if (sc.Y > maxY) maxY = sc.Y;
+      }
+      catch { return true; }
+    }
+
+    return vpPoint.X >= minX - marginPx && vpPoint.X <= maxX + marginPx
+        && vpPoint.Y >= minY - marginPx && vpPoint.Y <= maxY + marginPx;
   }
 
   private static (Point3d? Start, Point3d? End) LineEndpoints(Curve curve)
