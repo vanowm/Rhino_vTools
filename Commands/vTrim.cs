@@ -965,7 +965,7 @@ public sealed class vTrim : Command
       _lastHoverObjectId = hoverObj?.Id;
       _lastHoverPoint = hoverPoint;
 
-      _preview.SetHover(hoverObj, hoverCurve, hoverPoint, ShiftPressed());
+      _preview.SetHover(hoverObj, hoverCurve, hoverPoint, _preview.HoverExtendMode);
       _doc.Views.Redraw();
 
       base.OnMouseMove(e);
