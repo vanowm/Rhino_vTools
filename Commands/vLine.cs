@@ -71,13 +71,17 @@ public sealed class vLine : Command
     LoadPersistedOptions();
 
     var startResult = ResolveFirstPoint(doc, initialBothSides: false, initialChainMode: _chainMode);
+    _chainMode = startResult.ChainMode;
     if (startResult.DelegatedToNative)
     {
       LaunchNativeLineMode();
       return Result.Success;
     }
     if (!startResult.HasPoint)
+    {
+      SavePersistedOptions();
       return Result.Cancel;
+    }
 
     var currentStart = startResult.Point;
     var firstSegment = true;
