@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using Rhino;
 using Rhino.Commands;
@@ -45,6 +46,19 @@ public sealed class vBiminiParts : Command
   // ── Persisted state ─────────────────────────────────────────────────────────
 
   private static double _pipeSize = 1.0;  // 1.0 or 1.25 inches
+
+  // ── Debug logging ──────────────────────────────────────────────────────────
+
+  private static StreamWriter? _log;
+
+  private static string GetLogPath()
+  {
+    var dir = Path.Combine(Path.GetDirectoryName(typeof(vBiminiParts).Assembly.Location)!, "logs");
+    Directory.CreateDirectory(dir);
+    return Path.Combine(dir, $"vBiminiParts_{DateTime.Now:yyMMdd_HHmmss}.txt");
+  }
+
+  private static void L(string s) { _log?.WriteLine(s); }
 
   public override string EnglishName => "vBiminiParts";
 
@@ -168,11 +182,14 @@ public sealed class vBiminiParts : Command
 
     var plotAttr = MakeAttr(plotIdx);
     var cut1Attr = MakeAttr(cut1Idx);
-    var stage1Ids = new HashSet<Guid>();
-    foreach (var s in finSegs)  { var id = doc.Objects.AddCurve(s, plotAttr); if (id != Guid.Empty) stage1Ids.Add(id); }
-    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) stage1Ids.Add(id); }
+    var finIds  = new HashSet<Guid>();
+    var seamIds = new HashSet<Guid>();
+    foreach (var s in finSegs)  { var id = doc.Objects.AddCurve(s, plotAttr); if (id != Guid.Empty) finIds.Add(id); }
+    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) seamIds.Add(id); }
+    // Exclude original selected curves + seam segments (seam boundary is added explicitly as facing edges).
+    // Do NOT exclude finIds — finished curves inside the facing area must be collected into the facings.
     var excludeInterior = new HashSet<Guid>(selIds);
-    excludeInterior.UnionWith(stage1Ids);
+    excludeInterior.UnionWith(seamIds);
 
     // Classify segments as Top / Bottom / Left / Right
     var finParts  = Classify(finSegs,  centroid);
@@ -197,6 +214,12 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
 
+    var logPath = GetLogPath();
+    _log = new StreamWriter(logPath, false, System.Text.Encoding.UTF8) { AutoFlush = true };
+    L($"vBiminiParts log — {DateTime.Now}");
+    L($"tol={doc.ModelAbsoluteTolerance}  selIds={selIds.Count}  seamIds={seamIds.Count}  finIds={finIds.Count}  excludeInterior={excludeInterior.Count}");
+    RhinoApp.WriteLine($"vBiminiParts: log → {logPath}");
+
     BuildFacingParts(doc, seamParts, centroid, cut1Idx, excludeInterior, tol);
 
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
@@ -205,6 +228,8 @@ public sealed class vBiminiParts : Command
       BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, tol);
 
     doc.Views.Redraw();
+    _log?.Dispose();
+    _log = null;
     return Result.Success;
   }
 
@@ -306,6 +331,11 @@ public sealed class vBiminiParts : Command
       }
       if (closedBoundary != null)
         interiorObjects = CollectInsideObjects(doc, excludeIds, closedBoundary, Plane.WorldXY, tol);
+      L($"  {label}: facingCurves={facingCurves.Count}  boundaryFormed={closedBoundary != null}  excludeIds={excludeIds.Count}  interiorFound={interiorObjects.Count}");
+      if (closedBoundary == null)
+        L($"  {label}: joined?.Length={joined?.Length}  joined[0].IsClosed={(joined?.Length > 0 ? joined![0].IsClosed.ToString() : "n/a")}");
+      foreach (var (g, a) in interiorObjects)
+        L($"    interior: {g.GetType().Name}  layer={a.LayerIndex}");
     }
 
     // 5. Move the whole facing outward so the nearest edge (innerEdge) ends up
