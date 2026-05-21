@@ -36,6 +36,7 @@ public sealed class vBiminiParts : Command
   private const double MainPktSmall    = 4.0;   // main pocket depth, pipe ≤ 1"
   private const double MainPktLarge    = 5.0;   // main pocket depth, pipe 1-1/4"
   private const double CornerAngleDeg  = 30.0;  // minimum kink angle to split at (degrees)
+  private const double FacingMoveOut   = 5.0;   // gap between moved facing and bimini seam edge
 
   private const string LayerPlot       = "PLOT";
   private const string LayerCut1       = "CUT1";
@@ -192,7 +193,7 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
 
-    BuildFacingParts(doc, seamParts, finParts, centroid, plotIdx, tol);
+    BuildFacingParts(doc, seamParts, centroid, cut1Idx, tol);
 
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
@@ -229,26 +230,22 @@ public sealed class vBiminiParts : Command
 
   // ── Stage 4: Facing parts ───────────────────────────────────────────────────
 
-  private static void BuildFacingParts(RhinoDoc doc, Parts seam, Parts fin,
-                                        Point3d centroid, int plotIdx, double tol)
+  private static void BuildFacingParts(RhinoDoc doc, Parts seam,
+                                        Point3d centroid, int cut1Idx, double tol)
   {
-    var extendTargets = new List<GeometryBase>();
-    if (seam.Top    != null) extendTargets.Add(seam.Top);
-    if (seam.Bottom != null) extendTargets.Add(seam.Bottom);
-
     if (seam.Left != null)
-      BuildOneFacing(doc, seam.Left, extendTargets, centroid, plotIdx, tol, "FacingP");
+      BuildOneFacing(doc, seam.Left, seam.Top, seam.Bottom, centroid, cut1Idx, tol, "FacingP");
 
     if (seam.Right != null)
-      BuildOneFacing(doc, seam.Right, extendTargets, centroid, plotIdx, tol, "FacingS");
+      BuildOneFacing(doc, seam.Right, seam.Top, seam.Bottom, centroid, cut1Idx, tol, "FacingS");
   }
 
   private static void BuildOneFacing(RhinoDoc doc, Curve seamSide,
-                                      List<GeometryBase> extendTo,
-                                      Point3d centroid, int plotIdx, double tol,
+                                      Curve? seamTop, Curve? seamBot,
+                                      Point3d centroid, int cut1Idx, double tol,
                                       string label)
   {
-    // Offset seam side 3" toward centroid → inner facing edge
+    // 1. Offset seam side 3" toward centroid → inner facing edge (CUT1)
     var innerEdge = OffsetToward(seamSide, centroid, FacingInset, tol);
     if (innerEdge == null)
     {
@@ -256,7 +253,10 @@ public sealed class vBiminiParts : Command
       return;
     }
 
-    // Extend inner edge at both ends to meet the seam top/bottom curves
+    // 2. Extend inner edge at both ends to meet seam top/bottom
+    var extendTo = new List<GeometryBase>();
+    if (seamTop != null) extendTo.Add(seamTop);
+    if (seamBot != null) extendTo.Add(seamBot);
     if (extendTo.Count > 0)
     {
       var e1 = innerEdge.Extend(CurveEnd.Start, CurveExtensionStyle.Smooth, extendTo);
@@ -265,9 +265,64 @@ public sealed class vBiminiParts : Command
       if (e2 != null) innerEdge = e2;
     }
 
-    var attr = MakeAttr(plotIdx);
+    // 3. Trim seamTop and seamBot to only the facing portion
+    //    (between where seamSide endpoint meets them and where innerEdge meets them)
+    var connTol       = tol * 20.0;
+    var facingCurves  = new List<Curve> { innerEdge, seamSide.DuplicateCurve() };
+    if (seamTop != null) TryAddTrimmedSeam(facingCurves, innerEdge, seamSide, seamTop, connTol);
+    if (seamBot != null) TryAddTrimmedSeam(facingCurves, innerEdge, seamSide, seamBot, connTol);
+
+    // 4. Move the whole facing FacingMoveOut inches outward (away from bimini)
+    var outDir = seamSide.PointAtNormalizedLength(0.5) - centroid;
+    outDir.Unitize();
+    var xf   = Transform.Translation(outDir * FacingMoveOut);
+    var attr = MakeAttr(cut1Idx);
     attr.Name = label;
-    doc.Objects.AddCurve(innerEdge, attr);
+    foreach (var c in facingCurves)
+    {
+      var copy = c.DuplicateCurve();
+      copy.Transform(xf);
+      doc.Objects.AddCurve(copy, attr);
+    }
+  }
+
+  /// <summary>
+  /// Trims <paramref name="topBot"/> to the segment spanning from where
+  /// <paramref name="seamSide"/> meets it to where <paramref name="innerEdge"/> meets it,
+  /// then appends the trimmed piece to <paramref name="result"/>.
+  /// </summary>
+  private static void TryAddTrimmedSeam(List<Curve> result,
+                                         Curve innerEdge, Curve seamSide,
+                                         Curve topBot, double tol)
+  {
+    var tInner = NearestEndpointParam(innerEdge, topBot, tol);
+    if (!tInner.HasValue) return;
+
+    var tSide = NearestEndpointParam(seamSide, topBot, tol);
+    if (!tSide.HasValue) return;
+
+    var lo = Math.Min(tInner.Value, tSide.Value);
+    var hi = Math.Max(tInner.Value, tSide.Value);
+    if (hi - lo < RhinoMath.ZeroTolerance) return;
+
+    var trimmed = topBot.Trim(lo, hi);
+    if (trimmed != null) result.Add(trimmed);
+  }
+
+  /// <summary>
+  /// Returns the parameter on <paramref name="onCurve"/> of the endpoint of
+  /// <paramref name="source"/> (start or end) that lies within <paramref name="tol"/>,
+  /// or null if neither endpoint qualifies.
+  /// </summary>
+  private static double? NearestEndpointParam(Curve source, Curve onCurve, double tol)
+  {
+    foreach (var pt in new[] { source.PointAtStart, source.PointAtEnd })
+    {
+      onCurve.ClosestPoint(pt, out var t);
+      if (pt.DistanceTo(onCurve.PointAt(t)) < tol)
+        return t;
+    }
+    return null;
   }
 
   // ── Stage 5: Main pocket ────────────────────────────────────────────────────
