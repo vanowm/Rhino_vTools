@@ -406,7 +406,11 @@ public sealed class vLine : Command
         }
 
         if (option.Index == chainModeOptionIndex)
+        {
           chainModeIndex = ClampIndex(option.CurrentListOptionIndex, ChainModeValues.Length);
+          _chainMode = chainModeIndex;
+          SavePersistedOptions();
+        }
 
         continue;
       }
@@ -973,21 +977,38 @@ public sealed class vLine : Command
           if (option.Index == idxPriority)
           {
             priorityIndex = ClampIndex(option.CurrentListOptionIndex, PriorityValues.Length);
+            _priority = priorityIndex;
+            SavePersistedOptions();
             continue;
           }
 
           if (option.Index == idxLength)
+          {
+            _length = lengthOption.CurrentValue;
+            SavePersistedOptions();
             continue;
+          }
 
           if (option.Index == idxAngle)
+          {
+            _angle = angleOption.CurrentValue;
+            SavePersistedOptions();
             continue;
+          }
 
           if (option.Index == idxChainMode)
           {
             chainModeIndex = ClampIndex(option.CurrentListOptionIndex, ChainModeValues.Length);
+            _chainMode = chainModeIndex;
+            SavePersistedOptions();
             continue;
           }
 
+          // Catches OptionToggle changes: PersistConstraint, AngleLock, AngleRef.
+          _persistConstraint = persistConstraint.CurrentValue;
+          _angleLock = angleLock.CurrentValue;
+          _angleRelative = angleRelative.CurrentValue;
+          SavePersistedOptions();
           continue;
         }
 
