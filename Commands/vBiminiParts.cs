@@ -1,0 +1,522 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
+using Rhino;
+using Rhino.Commands;
+using Rhino.DocObjects;
+using Rhino.Geometry;
+using Rhino.Input;
+using Rhino.Input.Custom;
+
+namespace vTools.Commands;
+
+/// <summary>
+/// Generates bimini pattern parts (Finished/Seam boundary, FacingP/FacingS, main/secondary pockets)
+/// from a selected closed boundary curve (or a set of open curves that form one).
+///
+/// Workflow:
+///   Stage 1 — select boundary; detect or create Finished (PLOT) and Seam (CUT1) curves;
+///             break both at corners → 4 segments each.
+///   Stage 2 — pick 1–2 Main pocket curve(s).
+///   Stage 3 — pick 0–2 Secondary pocket curve(s) (skipped if 2 Main selected).
+///   Stage 4 — create FacingP / FacingS from side seam segments offset 3" inward.
+///   Stage 5 — create Main pocket: zipper offset, side offsets, perpendicular lines.
+/// </summary>
+public sealed class vBiminiParts : Command
+{
+  // ── Constants ───────────────────────────────────────────────────────────────
+
+  private const string SectionName     = "vBiminiParts";
+  private const string PipeSizeKey     = "pipeSize";
+
+  private const double SeamAllowance   = 0.5;   // seam offset from finished (inches)
+  private const double FacingInset     = 3.0;   // facing: inset from seam side toward center
+  private const double SidePktOutward  = 2.5;   // main pocket: side seam outward offset
+  private const double MainPktSmall    = 4.0;   // main pocket depth, pipe ≤ 1"
+  private const double MainPktLarge    = 5.0;   // main pocket depth, pipe 1-1/4"
+  private const double CornerAngleDeg  = 30.0;  // minimum kink angle to split at (degrees)
+
+  private const string LayerPlot       = "PLOT";
+  private const string LayerCut1       = "CUT1";
+
+  // ── Persisted state ─────────────────────────────────────────────────────────
+
+  private static double _pipeSize = 1.0;  // 1.0 or 1.25 inches
+
+  public override string EnglishName => "vBiminiParts";
+
+  // ── Persistence ─────────────────────────────────────────────────────────────
+
+  private static void LoadOptions()
+  {
+    vToolsOptionStore.Read<int>(SectionName, section =>
+    {
+      if (vToolsOptionStore.TryGetDouble(section, PipeSizeKey, out var ps)) _pipeSize = ps;
+      return 0;
+    });
+  }
+
+  private static void SaveOptions() =>
+    vToolsOptionStore.Update(SectionName, section => { section[PipeSizeKey] = _pipeSize; });
+
+  // ── Command ──────────────────────────────────────────────────────────────────
+
+  protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+  {
+    LoadOptions();
+    var tol = doc.ModelAbsoluteTolerance;
+
+    // ── Stage 1: Select bimini boundary ─────────────────────────────────────
+
+    var go = new GetObject();
+    go.SetCommandPrompt("Select bimini boundary curves");
+    go.GeometryFilter = ObjectType.Curve;
+    go.SubObjectSelect = false;
+    go.GroupSelect = true;
+    go.EnablePreSelect(true, true);
+    go.AcceptNothing(false);
+
+    // PipeSize option — current value shown via toggle label
+    var pipeToggle = new OptionToggle(_pipeSize >= 1.25, "1inch", "1_25inch");
+    go.AddOptionToggle("PipeSize", ref pipeToggle);
+
+    while (true)
+    {
+      var r = go.GetMultiple(1, 0);
+      if (r == GetResult.Option) continue;
+      if (r != GetResult.Object) return Result.Cancel;
+      break;
+    }
+
+    _pipeSize = pipeToggle.CurrentValue ? 1.25 : 1.0;
+    SaveOptions();
+
+    var selIds    = new HashSet<Guid>(Enumerable.Range(0, go.ObjectCount).Select(i => go.Object(i).ObjectId));
+    var rawCurves = Enumerable.Range(0, go.ObjectCount)
+                              .Select(i => go.Object(i).Curve())
+                              .Where(c => c != null)
+                              .Cast<Curve>()
+                              .ToList();
+
+    if (rawCurves.Count == 0) return Result.Cancel;
+
+    // Join into one closed curve
+    Curve boundary;
+    if (rawCurves.Count == 1 && rawCurves[0].IsClosed)
+    {
+      boundary = rawCurves[0].DuplicateCurve();
+    }
+    else
+    {
+      var joined = Curve.JoinCurves(rawCurves, tol);
+      if (joined == null || joined.Length != 1 || !joined[0].IsClosed)
+      {
+        RhinoApp.WriteLine("vBiminiParts: selected curves do not form a single closed boundary.");
+        return Result.Failure;
+      }
+      boundary = joined[0];
+    }
+
+    // Centroid drives offset direction
+    var amp = AreaMassProperties.Compute(boundary);
+    if (amp == null)
+    {
+      RhinoApp.WriteLine("vBiminiParts: cannot compute boundary centroid.");
+      return Result.Failure;
+    }
+    var centroid = amp.Centroid;
+
+    // Determine Finished vs Seam
+    // If a curve exists 0.5" inward from boundary → that is Finished, boundary is Seam.
+    // Otherwise → boundary is Finished, offset 0.5" outward is Seam.
+    Curve finishedCrv, seamCrv;
+    var inwardCandidate = OffsetToward(boundary, centroid, SeamAllowance, tol);
+    if (inwardCandidate != null)
+    {
+      var existingFin = FindNearCurve(doc, inwardCandidate, selIds, tol * 20.0);
+      if (existingFin != null)
+      {
+        seamCrv     = boundary.DuplicateCurve();
+        finishedCrv = existingFin.DuplicateCurve();
+      }
+      else
+      {
+        finishedCrv = boundary.DuplicateCurve();
+        seamCrv     = OffsetAway(boundary, centroid, SeamAllowance, tol)
+                      ?? boundary.DuplicateCurve();
+      }
+    }
+    else
+    {
+      finishedCrv = boundary.DuplicateCurve();
+      seamCrv     = OffsetAway(boundary, centroid, SeamAllowance, tol)
+                    ?? boundary.DuplicateCurve();
+    }
+
+    // Ensure layers exist
+    var plotIdx = EnsureLayer(doc, LayerPlot, Color.FromArgb(15, 138, 138));
+    var cut1Idx = EnsureLayer(doc, LayerCut1, Color.FromArgb(204, 51, 51));
+
+    // Break both curves at corners → 4 open segments each
+    var finSegs  = BreakAtCorners(finishedCrv, CornerAngleDeg);
+    var seamSegs = BreakAtCorners(seamCrv,     CornerAngleDeg);
+
+    RhinoApp.WriteLine($"vBiminiParts: finished segments = {finSegs.Count}, seam segments = {seamSegs.Count}");
+
+    var plotAttr = MakeAttr(plotIdx);
+    var cut1Attr = MakeAttr(cut1Idx);
+    foreach (var s in finSegs)  doc.Objects.AddCurve(s, plotAttr);
+    foreach (var s in seamSegs) doc.Objects.AddCurve(s, cut1Attr);
+
+    // Classify segments as Top / Bottom / Left / Right
+    var finParts  = Classify(finSegs,  centroid);
+    var seamParts = Classify(seamSegs, centroid);
+
+    // ── Stage 2: Main pocket curve selection ────────────────────────────────
+
+    var mainCurves = PickPocketCurves("Click on Main pocket curve(s)", 2);
+
+    // ── Stage 3: Secondary pocket curve selection ────────────────────────────
+
+    List<Curve> secCurves;
+    if (mainCurves.Count >= 2)
+    {
+      secCurves = new List<Curve>();
+    }
+    else
+    {
+      var maxSec = mainCurves.Count == 0 ? 2 : 1;
+      secCurves = PickPocketCurves($"Click on Secondary pocket curve(s) (max {maxSec})", maxSec);
+    }
+
+    // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
+
+    BuildFacingParts(doc, seamParts, finParts, centroid, plotIdx, tol);
+
+    // ── Stage 5: Main pocket geometry ───────────────────────────────────────
+
+    if (mainCurves.Count > 0)
+      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, tol);
+
+    doc.Views.Redraw();
+    return Result.Success;
+  }
+
+  // ── Pocket curve picker ─────────────────────────────────────────────────────
+
+  private static List<Curve> PickPocketCurves(string prompt, int maxCount)
+  {
+    var gm = new GetObject();
+    gm.SetCommandPrompt(prompt + ". Press Enter to skip");
+    gm.GeometryFilter = ObjectType.Curve;
+    gm.SubObjectSelect = false;
+    gm.AcceptNothing(true);
+    gm.EnablePreSelect(false, false);
+    gm.EnableClearObjectsOnEntry(false);
+    gm.AlreadySelectedObjectSelect = true;
+
+    var list = new List<Curve>();
+    var res  = gm.GetMultiple(0, maxCount);
+    if (res == GetResult.Object)
+      for (var i = 0; i < gm.ObjectCount; i++)
+      {
+        var c = gm.Object(i).Curve();
+        if (c != null) list.Add(c.DuplicateCurve());
+      }
+    return list;
+  }
+
+  // ── Stage 4: Facing parts ───────────────────────────────────────────────────
+
+  private static void BuildFacingParts(RhinoDoc doc, Parts seam, Parts fin,
+                                        Point3d centroid, int plotIdx, double tol)
+  {
+    var extendTargets = new List<GeometryBase>();
+    if (seam.Top    != null) extendTargets.Add(seam.Top);
+    if (seam.Bottom != null) extendTargets.Add(seam.Bottom);
+
+    if (seam.Left != null)
+      BuildOneFacing(doc, seam.Left, extendTargets, centroid, plotIdx, tol, "FacingP");
+
+    if (seam.Right != null)
+      BuildOneFacing(doc, seam.Right, extendTargets, centroid, plotIdx, tol, "FacingS");
+  }
+
+  private static void BuildOneFacing(RhinoDoc doc, Curve seamSide,
+                                      List<GeometryBase> extendTo,
+                                      Point3d centroid, int plotIdx, double tol,
+                                      string label)
+  {
+    // Offset seam side 3" toward centroid → inner facing edge
+    var innerEdge = OffsetToward(seamSide, centroid, FacingInset, tol);
+    if (innerEdge == null)
+    {
+      RhinoApp.WriteLine($"vBiminiParts: {label} — offset failed.");
+      return;
+    }
+
+    // Extend inner edge at both ends to meet the seam top/bottom curves
+    if (extendTo.Count > 0)
+    {
+      var e1 = innerEdge.Extend(CurveEnd.Start, CurveExtensionStyle.Smooth, extendTo);
+      if (e1 != null) innerEdge = e1;
+      var e2 = innerEdge.Extend(CurveEnd.End, CurveExtensionStyle.Smooth, extendTo);
+      if (e2 != null) innerEdge = e2;
+    }
+
+    var attr = MakeAttr(plotIdx);
+    attr.Name = label;
+    doc.Objects.AddCurve(innerEdge, attr);
+  }
+
+  // ── Stage 5: Main pocket ────────────────────────────────────────────────────
+
+  private static void BuildMainPocket(RhinoDoc doc, List<Curve> mainCurves,
+                                       Parts seam, Parts fin,
+                                       Point3d centroid, int cut1Idx, double tol)
+  {
+    double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
+
+    var sideFinTargets = new List<GeometryBase>();
+    if (fin.Left  != null) sideFinTargets.Add(fin.Left);
+    if (fin.Right != null) sideFinTargets.Add(fin.Right);
+
+    foreach (var mc in mainCurves)
+    {
+      // Find which seam segment is closest to this pocket curve
+      var adjSeam = ClosestOf(mc, seam.Top, seam.Bottom, seam.Left, seam.Right);
+      if (adjSeam == null) continue;
+
+      // 1. Offset adjacent seam toward centroid → zipper (main pocket inner edge)
+      var zipper = OffsetToward(adjSeam, centroid, pocketDepth, tol);
+      if (zipper == null) continue;
+
+      // 2. Extend zipper ends smoothly to reach the side finished curves
+      if (sideFinTargets.Count > 0)
+      {
+        var e1 = zipper.Extend(CurveEnd.Start, CurveExtensionStyle.Smooth, sideFinTargets);
+        if (e1 != null) zipper = e1;
+        var e2 = zipper.Extend(CurveEnd.End, CurveExtensionStyle.Smooth, sideFinTargets);
+        if (e2 != null) zipper = e2;
+      }
+      doc.Objects.AddCurve(zipper, MakeAttr(cut1Idx));
+
+      // 3. Offset each side seam curve 2.5" away from centroid (outward)
+      var offLeft  = seam.Left  != null ? OffsetAway(seam.Left,  centroid, SidePktOutward, tol) : null;
+      var offRight = seam.Right != null ? OffsetAway(seam.Right, centroid, SidePktOutward, tol) : null;
+      if (offLeft  != null) doc.Objects.AddCurve(offLeft,  MakeAttr(cut1Idx));
+      if (offRight != null) doc.Objects.AddCurve(offRight, MakeAttr(cut1Idx));
+
+      // 4. Perpendicular lines from each zipper end to the offset side curves
+      //    Left side connects to left offset; right side to right offset
+      DrawPerpLine(doc, zipper.PointAtStart, offLeft  ?? offRight, cut1Idx, tol);
+      DrawPerpLine(doc, zipper.PointAtEnd,   offRight ?? offLeft,  cut1Idx, tol);
+
+      // 5. TODO: Mirror end sections of main seam curve at each zipper end
+      //    Requires intersection of main finished curve with finished side curve
+      //    to define the mirror plane origin point.
+    }
+  }
+
+  private static void DrawPerpLine(RhinoDoc doc, Point3d from, Curve? side, int layerIdx, double tol)
+  {
+    if (side == null) return;
+    side.ClosestPoint(from, out var t);
+    var foot = side.PointAt(t);
+    if (from.DistanceTo(foot) < tol) return;
+    doc.Objects.AddCurve(new Line(from, foot).ToNurbsCurve(), MakeAttr(layerIdx));
+  }
+
+  // ── Geometry utilities ──────────────────────────────────────────────────────
+
+  private static int EnsureLayer(RhinoDoc doc, string name, Color color)
+  {
+    var idx = doc.Layers.FindByFullPath(name, RhinoMath.UnsetIntIndex);
+    if (idx >= 0) return idx;
+    return doc.Layers.Add(new Layer { Name = name, Color = color });
+  }
+
+  private static ObjectAttributes MakeAttr(int layerIdx) =>
+    new ObjectAttributes { LayerIndex = layerIdx };
+
+  /// <summary>Offsets <paramref name="crv"/> by <paramref name="dist"/> toward <paramref name="target"/>.</summary>
+  private static Curve? OffsetToward(Curve crv, Point3d target, double dist, double tol)
+  {
+    var a = TryOffset(crv,  dist, tol);
+    var b = TryOffset(crv, -dist, tol);
+    return PickByDistance(a, b, target, closer: true);
+  }
+
+  /// <summary>Offsets <paramref name="crv"/> by <paramref name="dist"/> away from <paramref name="target"/>.</summary>
+  private static Curve? OffsetAway(Curve crv, Point3d target, double dist, double tol)
+  {
+    var a = TryOffset(crv,  dist, tol);
+    var b = TryOffset(crv, -dist, tol);
+    return PickByDistance(a, b, target, closer: false);
+  }
+
+  private static Curve? TryOffset(Curve crv, double dist, double tol)
+  {
+    var pieces = crv.Offset(Plane.WorldXY, dist, tol, CurveOffsetCornerStyle.Sharp);
+    if (pieces == null || pieces.Length == 0) return null;
+    if (pieces.Length == 1) return pieces[0];
+    var joined = Curve.JoinCurves(pieces, tol);
+    return joined?.Length > 0 ? joined[0] : null;
+  }
+
+  private static Curve? PickByDistance(Curve? a, Curve? b, Point3d target, bool closer)
+  {
+    if (a == null) return b;
+    if (b == null) return a;
+    var da = CurveCentroid(a).DistanceTo(target);
+    var db = CurveCentroid(b).DistanceTo(target);
+    return closer ? (da <= db ? a : b) : (da >= db ? a : b);
+  }
+
+  private static Point3d CurveCentroid(Curve c) =>
+    AreaMassProperties.Compute(c)?.Centroid ?? c.PointAtNormalizedLength(0.5);
+
+  /// <summary>
+  /// Returns the first doc curve (not in <paramref name="excludeIds"/>) whose points
+  /// are all within <paramref name="threshold"/> of <paramref name="target"/>.
+  /// Used to detect a pre-existing Finished curve inside the selected boundary.
+  /// </summary>
+  private static Curve? FindNearCurve(RhinoDoc doc, Curve target, HashSet<Guid> excludeIds, double threshold)
+  {
+    const int samples = 20;
+    var pts = Enumerable.Range(0, samples)
+                        .Select(i => target.PointAtNormalizedLength(i / (double)(samples - 1)))
+                        .ToArray();
+
+    foreach (var ro in doc.Objects.GetObjectList(ObjectType.Curve))
+    {
+      if (ro == null || excludeIds.Contains(ro.Id)) continue;
+      var c = ro.Geometry as Curve;
+      if (c == null || !c.IsClosed) continue;
+      if (pts.All(pt =>
+      {
+        c.ClosestPoint(pt, out var t);
+        return pt.DistanceTo(c.PointAt(t)) < threshold;
+      }))
+        return c;
+    }
+    return null;
+  }
+
+  /// <summary>
+  /// Splits a closed curve at every G1-discontinuity that exceeds <paramref name="angleDeg"/>.
+  /// </summary>
+  private static List<Curve> BreakAtCorners(Curve crv, double angleDeg)
+  {
+    var dom = crv.Domain;
+    var eps = Math.Max((dom.T1 - dom.T0) * 1e-6, RhinoMath.ZeroTolerance * 10.0);
+    var cps = new List<double>();
+
+    var seek = dom.T0 + eps;
+    while (crv.GetNextDiscontinuity(Continuity.G1_continuous, seek, dom.T1, out var t))
+    {
+      if (IsSharpCorner(crv, t, angleDeg, dom, eps)) cps.Add(t);
+      seek = t + eps;
+      if (seek >= dom.T1) break;
+    }
+
+    // Closed-curve seam is never reported by GetNextDiscontinuity — test explicitly
+    if (crv.IsClosed && IsSharpCorner(crv, dom.T0, angleDeg, dom, eps))
+      cps.Add(dom.T0);
+
+    if (cps.Count == 0)
+      return new List<Curve> { crv.DuplicateCurve() };
+
+    cps = cps.Distinct().OrderBy(v => v).ToList();
+    var split = crv.Split(cps.ToArray());
+    return split != null && split.Length > 0
+           ? new List<Curve>(split)
+           : new List<Curve> { crv.DuplicateCurve() };
+  }
+
+  private static bool IsSharpCorner(Curve crv, double t, double angleDeg, Interval dom, double eps)
+  {
+    Vector3d tA, tB;
+    if (crv.IsClosed && Math.Abs(t - dom.T0) < eps * 10)
+    {
+      tA = crv.TangentAt(dom.T1 - eps);
+      tB = crv.TangentAt(dom.T0 + eps);
+    }
+    else
+    {
+      tA = crv.TangentAt(Math.Max(dom.T0, t - eps));
+      tB = crv.TangentAt(Math.Min(dom.T1, t + eps));
+    }
+    if (!tA.Unitize() || !tB.Unitize()) return false;
+    var dot = Math.Max(-1.0, Math.Min(1.0, tA * tB));
+    return RhinoMath.ToDegrees(Math.Acos(dot)) >= angleDeg;
+  }
+
+  // ── Segment classification ──────────────────────────────────────────────────
+
+  private sealed class Parts
+  {
+    public Curve? Top, Bottom, Left, Right;
+  }
+
+  /// <summary>
+  /// Classifies up to 4 segments as Top / Bottom / Left / Right using their
+  /// bounding-box orientation relative to <paramref name="centroid"/>.
+  /// Horizontal segments (wider than tall) → Top or Bottom.
+  /// Vertical segments (taller than wide) → Left or Right.
+  /// </summary>
+  private static Parts Classify(List<Curve> segs, Point3d centroid)
+  {
+    var p = new Parts();
+    if (segs.Count == 0) return p;
+
+    var items = segs.Select(s =>
+    {
+      var bb = s.GetBoundingBox(false);
+      return (Curve: s, BBox: bb, Mid: s.PointAtNormalizedLength(0.5));
+    }).ToList();
+
+    if (segs.Count == 4)
+    {
+      foreach (var item in items)
+      {
+        double w = item.BBox.Max.X - item.BBox.Min.X;
+        double h = item.BBox.Max.Y - item.BBox.Min.Y;
+        if (w >= h)  // horizontal → Top / Bottom
+        {
+          if (item.Mid.Y >= centroid.Y) p.Top    ??= item.Curve;
+          else                          p.Bottom ??= item.Curve;
+        }
+        else         // vertical → Left / Right
+        {
+          if (item.Mid.X <= centroid.X) p.Left   ??= item.Curve;
+          else                          p.Right  ??= item.Curve;
+        }
+      }
+    }
+    else
+    {
+      // Generic fallback for unexpected segment counts
+      var byY = items.OrderByDescending(i => i.Mid.Y).ToList();
+      p.Top    = byY[0].Curve;
+      p.Bottom = byY[^1].Curve;
+      var mid  = byY.Skip(1).Take(byY.Count - 2).OrderBy(i => i.Mid.X).ToList();
+      p.Left   = mid.Count > 0 ? mid[0].Curve   : null;
+      p.Right  = mid.Count > 1 ? mid[^1].Curve  : null;
+    }
+
+    return p;
+  }
+
+  /// <summary>Returns the candidate whose midpoint is closest to <paramref name="reference"/>'s midpoint.</summary>
+  private static Curve? ClosestOf(Curve reference, params Curve?[] candidates)
+  {
+    var mid = reference.PointAtNormalizedLength(0.5);
+    return candidates
+           .Where(c => c != null)
+           .Select(c => c!)
+           .OrderBy(c => { c.ClosestPoint(mid, out var t); return mid.DistanceTo(c.PointAt(t)); })
+           .FirstOrDefault();
+  }
+}
