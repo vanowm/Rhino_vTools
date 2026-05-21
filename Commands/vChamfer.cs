@@ -100,7 +100,7 @@ public sealed class vChamfer : Command
       if (res == GetResult.Number)
       {
         var v = go.Number();
-        if (v > 0) _length = v;
+        if (v > 0) { _length = v; SaveOptions(); }
         continue;
       }
 
@@ -108,6 +108,7 @@ public sealed class vChamfer : Command
       {
         _trim = trimToggle.CurrentValue;
         if (_trim) _join = joinTogglePick.CurrentValue;
+        SaveOptions();
         if (go.Option()?.EnglishName == "Length")
           HandleLengthSubprompt();
       }
@@ -123,7 +124,10 @@ public sealed class vChamfer : Command
     {
       var raw = gs.StringResult().Trim();
       if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0)
+      {
         _length = v;
+        SaveOptions();
+      }
     }
   }
 
@@ -467,12 +471,13 @@ public sealed class vChamfer : Command
         if (res == GetResult.Number)
         {
           var v = get.Number();
-          if (v > 0) { _length = v; pointActive = false; }
+          if (v > 0) { _length = v; pointActive = false; SaveOptions(); }
         }
         else if (res == GetResult.Option)
         {
           _trim = trimOpt.CurrentValue;
           if (_trim) _join = joinOpt.CurrentValue;
+          SaveOptions();
 
           if (get.Option()?.EnglishName == "Length")
           {
