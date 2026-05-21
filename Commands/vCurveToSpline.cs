@@ -152,6 +152,7 @@ public sealed class vCurveToSpline : Command
             joinMode = JoinModes[Math.Max(0, Math.Min(_joinModeIndex, JoinModes.Length - 1))];
             preview.SetJoinMode(joinMode);
             doc.Views.Redraw();
+            SavePersistedOptions();
           }
           continue;
         }

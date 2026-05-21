@@ -103,6 +103,12 @@ public sealed class vSplitAtCorners : Command
               manualCorners.Clear();
               removedAutoCorners.Clear();
             }
+            else if (opt.Index == idxAngle || opt.Index == idxMinLen)
+            {
+              _angleDeg = angleOpt.CurrentValue;
+              _minLength = minLenOpt.CurrentValue;
+              SavePersistedOptions();
+            }
           }
           continue;
         }
