@@ -272,11 +272,19 @@ public sealed class vFitBox : Command
       }
 
       if (result == GetResult.Option)
+      {
+        _angleStepDeg = Clamp(angleOption.CurrentValue, MinAngleStepDeg, MaxAngleStepDeg);
+        _rotate = rotateToggle.CurrentValue;
+        _fitMode = NormalizeFitMode(fitToggle.CurrentValue ? "area" : "height");
+        SavePersistedOptions();
         continue;
+      }
 
       if (result == GetResult.Number)
       {
         angleOption.CurrentValue = Clamp(go.Number(), MinAngleStepDeg, MaxAngleStepDeg);
+        _angleStepDeg = angleOption.CurrentValue;
+        SavePersistedOptions();
         continue;
       }
 

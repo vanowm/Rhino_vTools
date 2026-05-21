@@ -207,9 +207,17 @@ public sealed class vRectangle : Command
         if (opt != null)
         {
           if (opt.Index == idxWidth)
+          {
             w = widthOpt.CurrentValue;
+            _width = w;
+            SavePersistedOptions();
+          }
           else if (opt.Index == idxHeight)
+          {
             h = heightOpt.CurrentValue;
+            _height = h;
+            SavePersistedOptions();
+          }
         }
 
         if (w <= 0.0 || h <= 0.0)
