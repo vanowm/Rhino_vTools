@@ -6,6 +6,7 @@ using Rhino;
 using Rhino.Commands;
 using Rhino.DocObjects;
 using Rhino.Geometry;
+using Rhino.Geometry.Intersect;
 using Rhino.Input;
 using Rhino.Input.Custom;
 
@@ -167,8 +168,11 @@ public sealed class vBiminiParts : Command
 
     var plotAttr = MakeAttr(plotIdx);
     var cut1Attr = MakeAttr(cut1Idx);
-    foreach (var s in finSegs)  doc.Objects.AddCurve(s, plotAttr);
-    foreach (var s in seamSegs) doc.Objects.AddCurve(s, cut1Attr);
+    var stage1Ids = new HashSet<Guid>();
+    foreach (var s in finSegs)  { var id = doc.Objects.AddCurve(s, plotAttr); if (id != Guid.Empty) stage1Ids.Add(id); }
+    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) stage1Ids.Add(id); }
+    var excludeInterior = new HashSet<Guid>(selIds);
+    excludeInterior.UnionWith(stage1Ids);
 
     // Classify segments as Top / Bottom / Left / Right
     var finParts  = Classify(finSegs,  centroid);
@@ -193,7 +197,7 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
 
-    BuildFacingParts(doc, seamParts, centroid, cut1Idx, tol);
+    BuildFacingParts(doc, seamParts, centroid, cut1Idx, excludeInterior, tol);
 
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
@@ -231,18 +235,20 @@ public sealed class vBiminiParts : Command
   // ── Stage 4: Facing parts ───────────────────────────────────────────────────
 
   private static void BuildFacingParts(RhinoDoc doc, Parts seam,
-                                        Point3d centroid, int cut1Idx, double tol)
+                                        Point3d centroid, int cut1Idx,
+                                        HashSet<Guid> excludeIds, double tol)
   {
     if (seam.Left != null)
-      BuildOneFacing(doc, seam.Left, seam.Top, seam.Bottom, centroid, cut1Idx, tol, "FacingP");
+      BuildOneFacing(doc, seam.Left, seam.Top, seam.Bottom, centroid, cut1Idx, excludeIds, tol, "FacingP");
 
     if (seam.Right != null)
-      BuildOneFacing(doc, seam.Right, seam.Top, seam.Bottom, centroid, cut1Idx, tol, "FacingS");
+      BuildOneFacing(doc, seam.Right, seam.Top, seam.Bottom, centroid, cut1Idx, excludeIds, tol, "FacingS");
   }
 
   private static void BuildOneFacing(RhinoDoc doc, Curve seamSide,
                                       Curve? seamTop, Curve? seamBot,
-                                      Point3d centroid, int cut1Idx, double tol,
+                                      Point3d centroid, int cut1Idx,
+                                      HashSet<Guid> excludeIds, double tol,
                                       string label)
   {
     // 1. Offset seam side 3" toward centroid → inner facing edge (CUT1)
@@ -267,22 +273,52 @@ public sealed class vBiminiParts : Command
 
     // 3. Trim seamTop and seamBot to only the facing portion
     //    (between where seamSide endpoint meets them and where innerEdge meets them)
-    var connTol       = tol * 20.0;
-    var facingCurves  = new List<Curve> { innerEdge, seamSide.DuplicateCurve() };
+    var connTol      = tol * 20.0;
+    var facingCurves = new List<Curve> { innerEdge, seamSide.DuplicateCurve() };
     if (seamTop != null) TryAddTrimmedSeam(facingCurves, innerEdge, seamSide, seamTop, connTol);
     if (seamBot != null) TryAddTrimmedSeam(facingCurves, innerEdge, seamSide, seamBot, connTol);
 
-    // 4. Move the whole facing FacingMoveOut inches outward (away from bimini)
+    // 4. Collect objects inside the facing boundary (before move)
+    var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
+    var joined = Curve.JoinCurves(facingCurves, connTol);
+    if (joined?.Length == 1 && joined[0].IsClosed)
+      interiorObjects = CollectInsideObjects(doc, excludeIds, joined[0], Plane.WorldXY, tol);
+
+    // 5. Move the whole facing outward so the nearest edge (innerEdge) ends up
+    //    FacingMoveOut inches clear of the bimini seam (total = FacingMoveOut + FacingInset)
     var outDir = seamSide.PointAtNormalizedLength(0.5) - centroid;
     outDir.Unitize();
-    var xf   = Transform.Translation(outDir * FacingMoveOut);
+    var xf   = Transform.Translation(outDir * (FacingMoveOut + FacingInset));
     var attr = MakeAttr(cut1Idx);
     attr.Name = label;
+    var addedIds = new List<Guid>();
     foreach (var c in facingCurves)
     {
       var copy = c.DuplicateCurve();
       copy.Transform(xf);
-      doc.Objects.AddCurve(copy, attr);
+      var id = doc.Objects.AddCurve(copy, attr);
+      if (id != Guid.Empty) addedIds.Add(id);
+    }
+    foreach (var (geom, geomAttr) in interiorObjects)
+    {
+      var copy = geom.Duplicate()!;
+      copy.Transform(xf);
+      geomAttr.RemoveFromAllGroups();
+      var id = AddObjectToDoc(doc, copy, geomAttr);
+      if (id != Guid.Empty) addedIds.Add(id);
+    }
+
+    // 6. Group all facing objects together
+    if (addedIds.Count > 1)
+    {
+      var grpIdx = doc.Groups.Add();
+      foreach (var id in addedIds)
+      {
+        var obj = doc.Objects.FindId(id);
+        if (obj == null) continue;
+        obj.Attributes.AddToGroup(grpIdx);
+        obj.CommitChanges();
+      }
     }
   }
 
@@ -578,5 +614,109 @@ public sealed class vBiminiParts : Command
            .Select(c => c!)
            .OrderBy(c => { c.ClosestPoint(mid, out var t); return mid.DistanceTo(c.PointAt(t)); })
            .FirstOrDefault();
+  }
+
+  // ── Interior object collection ──────────────────────────────────────────────
+
+  private static List<(GeometryBase Geom, ObjectAttributes Attr)> CollectInsideObjects(
+    RhinoDoc doc, HashSet<Guid> excludeIds, Curve perimeter, Plane plane, double tol)
+  {
+    var result   = new List<(GeometryBase, ObjectAttributes)>();
+    var boundary = new List<Curve> { perimeter };
+
+    var settings = new ObjectEnumeratorSettings
+    {
+      ObjectTypeFilter = ObjectType.AnyObject,
+      VisibleFilter    = true,
+      DeletedObjects   = false,
+      IncludeGrips     = false
+    };
+
+    foreach (var obj in doc.Objects.GetObjectList(settings))
+    {
+      if (obj.ObjectType == ObjectType.Grip) continue;
+      if (excludeIds.Contains(obj.Id)) continue;
+      var geom = obj.Geometry;
+      if (geom == null) continue;
+
+      var attr = obj.Attributes.Duplicate();
+
+      if (geom is Curve crv)
+      {
+        var splitParams = new SortedSet<double>();
+        var events = Intersection.CurveCurve(crv, perimeter, tol, tol);
+        if (events != null)
+          foreach (var ev in events)
+          {
+            if (ev.IsOverlap) { splitParams.Add(ev.OverlapA.T0); splitParams.Add(ev.OverlapA.T1); }
+            else               splitParams.Add(ev.ParameterA);
+          }
+
+        if (splitParams.Count == 0)
+        {
+          if (IsInsideOrOn(crv.PointAtNormalizedLength(0.5), boundary, plane, tol))
+            result.Add((crv.DuplicateCurve(), attr));
+        }
+        else
+        {
+          var segments = crv.Split(splitParams);
+          if (segments == null) continue;
+          foreach (var seg in segments)
+          {
+            if (seg.GetLength() < tol) continue;
+            if (IsInsideOrOn(seg.PointAtNormalizedLength(0.5), boundary, plane, tol))
+              result.Add((seg, attr));
+          }
+        }
+      }
+      else
+      {
+        var testPt = RepresentativePoint(geom);
+        if (testPt.IsValid && IsInsideOrOn(testPt, boundary, plane, tol))
+          result.Add((geom.Duplicate()!, attr));
+      }
+    }
+
+    return result;
+  }
+
+  private static Point3d RepresentativePoint(GeometryBase geom)
+  {
+    switch (geom)
+    {
+      case TextEntity te:              return te.Plane.Origin;
+      case TextDot td:                 return td.Point;
+      case Rhino.Geometry.Point pt:    return pt.Location;
+      default:
+        var bb = geom.GetBoundingBox(true);
+        return bb.IsValid ? bb.Center : Point3d.Unset;
+    }
+  }
+
+  private static bool IsInsideOrOn(Point3d pt, List<Curve> closed, Plane plane, double tol)
+  {
+    if (!pt.IsValid) return false;
+    foreach (var c in closed)
+    {
+      var r = c.Contains(pt, plane, tol);
+      if (r == PointContainment.Inside || r == PointContainment.Coincident)
+        return true;
+    }
+    return false;
+  }
+
+  private static Guid AddObjectToDoc(RhinoDoc doc, GeometryBase geom, ObjectAttributes attr)
+  {
+    switch (geom)
+    {
+      case Curve c:                       return doc.Objects.AddCurve(c, attr);
+      case TextEntity te:                 return doc.Objects.AddText(te, attr);
+      case TextDot td:                    return doc.Objects.AddTextDot(td, attr);
+      case Rhino.Geometry.Point pt:       return doc.Objects.AddPoint(pt.Location, attr);
+      case Hatch h:                       return doc.Objects.AddHatch(h, attr);
+      case Brep b:                        return doc.Objects.AddBrep(b, attr);
+      case Mesh m:                        return doc.Objects.AddMesh(m, attr);
+      default:                            return doc.Objects.Add(geom, attr);
+    }
   }
 }
