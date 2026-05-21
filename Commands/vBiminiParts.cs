@@ -143,14 +143,14 @@ public sealed class vBiminiParts : Command
       else
       {
         finishedCrv = boundary.DuplicateCurve();
-        seamCrv     = OffsetAway(boundary, centroid, SeamAllowance, tol)
+        seamCrv     = OffsetToward(boundary, centroid, SeamAllowance, tol)
                       ?? boundary.DuplicateCurve();
       }
     }
     else
     {
       finishedCrv = boundary.DuplicateCurve();
-      seamCrv     = OffsetAway(boundary, centroid, SeamAllowance, tol)
+      seamCrv     = OffsetToward(boundary, centroid, SeamAllowance, tol)
                     ?? boundary.DuplicateCurve();
     }
 
