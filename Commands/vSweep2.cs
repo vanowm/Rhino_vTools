@@ -16,12 +16,10 @@ namespace vTools.Commands;
 public sealed class vSweep2 : Command
 {
   private const string SectionName = "vSweep2";
-  private const string LayerKey    = "layer";
-  private const string ClosedKey   = "closed";
+  private const string LayerKey = "layer";
 
   // Persisted between runs (statics are fine — command is a singleton).
-  private static string _layer  = string.Empty; // empty = use current layer
-  private static bool   _closed = false;
+  private static string _layer = string.Empty; // empty = use current layer
 
   public override string EnglishName => "vSweep2";
 
@@ -29,21 +27,17 @@ public sealed class vSweep2 : Command
 
   private static void LoadOptions()
   {
-    var vals = vToolsOptionStore.Read(SectionName, section =>
+    _layer = vToolsOptionStore.Read(SectionName, section =>
     {
-      vToolsOptionStore.TryGetString(section, LayerKey,  out var layer);
-      vToolsOptionStore.TryGetBool(  section, ClosedKey, out var closed);
-      return (layer, closed);
+      vToolsOptionStore.TryGetString(section, LayerKey, out var layer);
+      return layer;
     });
-    _layer  = vals.layer;
-    _closed = vals.closed;
   }
 
   private static void SaveOptions() =>
     vToolsOptionStore.Update(SectionName, section =>
     {
-      section[LayerKey]  = _layer;
-      section[ClosedKey] = _closed ? 1.0 : 0.0;
+      section[LayerKey] = _layer;
     });
 
   // ── Layer helpers ──────────────────────────────────────────────────────────
@@ -143,22 +137,20 @@ public sealed class vSweep2 : Command
       go.EnablePreSelect(false, true);
       go.AcceptNothing(true);
       go.AddOption("Layer", LayerDisplay);
-      var closedToggle = new OptionToggle(_closed, "No", "Yes");
-      go.AddOptionToggle("Closed", ref closedToggle);
+      go.AddOption("Current");
 
       var r = go.Get();
 
       if (r == GetResult.Cancel || go.CommandResult() != Result.Success)
         return Result.Cancel;
 
-      var prevClosedSec = _closed;
-      _closed = closedToggle.CurrentValue;
-      if (_closed != prevClosedSec) SaveOptions();
-
       if (r == GetResult.Option)
       {
-        if (go.Option()?.EnglishName == "Layer")
+        var optName = go.Option()?.EnglishName;
+        if (optName == "Layer")
           HandleLayerSubprompt(doc, mode);
+        else if (optName == "Current")
+        { _layer = string.Empty; SaveOptions(); }
         continue;
       }
 
@@ -185,7 +177,6 @@ public sealed class vSweep2 : Command
     {
       SweepTolerance        = doc.ModelAbsoluteTolerance,
       AngleToleranceRadians = doc.ModelAngleToleranceRadians,
-      ClosedSweep           = _closed,
     };
 
     var results = sweeper.PerformSweep(rail1, rail2, sections);
@@ -223,22 +214,20 @@ public sealed class vSweep2 : Command
       go.SubObjectSelect = false;
       go.EnablePreSelect(true, true);
       go.AddOption("Layer", LayerDisplay);
-      var closedToggle = new OptionToggle(_closed, "No", "Yes");
-      go.AddOptionToggle("Closed", ref closedToggle);
+      go.AddOption("Current");
 
       var r = go.Get();
 
       if (r == GetResult.Cancel || go.CommandResult() != Result.Success)
         return null;
 
-      var prevClosedRail = _closed;
-      _closed = closedToggle.CurrentValue;
-      if (_closed != prevClosedRail) SaveOptions();
-
       if (r == GetResult.Option)
       {
-        if (go.Option()?.EnglishName == "Layer")
+        var optName = go.Option()?.EnglishName;
+        if (optName == "Layer")
           HandleLayerSubprompt(doc, mode);
+        else if (optName == "Current")
+        { _layer = string.Empty; SaveOptions(); }
         continue;
       }
 

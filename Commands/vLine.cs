@@ -264,6 +264,7 @@ public sealed class vLine : Command
           }
 
           currentStart = newStartResult.Point;
+          chainModeState = newStartResult.ChainMode;
           firstSegment = true;
           lastSegmentVector = null;
           continueChain = true;
