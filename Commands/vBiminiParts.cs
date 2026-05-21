@@ -458,10 +458,58 @@ public sealed class vBiminiParts : Command
       DrawPerpLine(doc, zipper.PointAtStart, offLeft  ?? offRight, cut1Idx, tol);
       DrawPerpLine(doc, zipper.PointAtEnd,   offRight ?? offLeft,  cut1Idx, tol);
 
-      // 5. TODO: Mirror end sections of main seam curve at each zipper end
-      //    Requires intersection of main finished curve with finished side curve
-      //    to define the mirror plane origin point.
+      // 5. Mirror end sections of adjSeam at each corner.
+      //    Mirror axis = finished side curve; origin = where adjFin meets that side.
+      var adjFin = ClosestOf(adjSeam, fin.Top, fin.Bottom, fin.Left, fin.Right);
+      if (adjFin != null)
+      {
+        if (fin.Left  != null) { var c = FindSharedEndpoint(adjFin, fin.Left);  if (c.IsValid) AddMirroredEnd(doc, adjSeam, fin.Left,  c, pocketDepth, cut1Idx); }
+        if (fin.Right != null) { var c = FindSharedEndpoint(adjFin, fin.Right); if (c.IsValid) AddMirroredEnd(doc, adjSeam, fin.Right, c, pocketDepth, cut1Idx); }
+      }
     }
+  }
+
+  /// <summary>
+  /// Mirrors a section of <paramref name="adjSeam"/> (length = <paramref name="depth"/>)
+  /// from the end nearest to <paramref name="cornerPt"/> across the line of
+  /// <paramref name="finSide"/> at <paramref name="cornerPt"/>.
+  /// </summary>
+  private static void AddMirroredEnd(RhinoDoc doc, Curve adjSeam, Curve finSide,
+                                      Point3d cornerPt, double depth, int cut1Idx)
+  {
+    var totalLen  = adjSeam.GetLength();
+    var isAtStart = adjSeam.PointAtStart.DistanceTo(cornerPt)
+                    <= adjSeam.PointAtEnd.DistanceTo(cornerPt);
+
+    Curve? section;
+    if (isAtStart)
+    {
+      if (!adjSeam.LengthParameter(Math.Min(depth, totalLen * 0.5), out var tEnd)) return;
+      section = adjSeam.Trim(adjSeam.Domain.T0, tEnd);
+    }
+    else
+    {
+      if (!adjSeam.LengthParameter(Math.Max(totalLen - depth, totalLen * 0.5), out var tStart)) return;
+      section = adjSeam.Trim(tStart, adjSeam.Domain.T1);
+    }
+    if (section == null) return;
+
+    var sideDir      = finSide.PointAtEnd - finSide.PointAtStart;
+    sideDir.Unitize();
+    var mirrorNormal = new Vector3d(-sideDir.Y, sideDir.X, 0);
+    var mirrored     = section.DuplicateCurve();
+    mirrored.Transform(Transform.Mirror(new Plane(cornerPt, mirrorNormal)));
+    doc.Objects.AddCurve(mirrored, MakeAttr(cut1Idx));
+  }
+
+  /// <summary>Returns the shared endpoint of two curves (within 0.5"), or <see cref="Point3d.Unset"/>.</summary>
+  private static Point3d FindSharedEndpoint(Curve a, Curve b)
+  {
+    foreach (var pa in new[] { a.PointAtStart, a.PointAtEnd })
+      foreach (var pb in new[] { b.PointAtStart, b.PointAtEnd })
+        if (pa.DistanceTo(pb) < 0.5)
+          return pa;
+    return Point3d.Unset;
   }
 
   private static void DrawPerpLine(RhinoDoc doc, Point3d from, Curve? side, int layerIdx, double tol)
