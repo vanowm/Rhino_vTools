@@ -369,8 +369,13 @@ public sealed class vBiminiParts : Command
   {
     if (a == null) return b;
     if (b == null) return a;
-    var da = CurveCentroid(a).DistanceTo(target);
-    var db = CurveCentroid(b).DistanceTo(target);
+    // Use minimum distance from target to each curve (ClosestPoint), not area centroid.
+    // For a closed curve that encloses the target, the inner offset has a smaller
+    // minimum distance and the outer offset has a larger one.
+    a.ClosestPoint(target, out var ta);
+    b.ClosestPoint(target, out var tb);
+    var da = a.PointAt(ta).DistanceTo(target);
+    var db = b.PointAt(tb).DistanceTo(target);
     return closer ? (da <= db ? a : b) : (da >= db ? a : b);
   }
 
