@@ -273,16 +273,40 @@ public sealed class vBiminiParts : Command
 
     // 3. Trim seamTop and seamBot to only the facing portion
     //    (between where seamSide endpoint meets them and where innerEdge meets them)
-    var connTol      = tol * 20.0;
+    var connTol      = Math.Max(tol * 200, 0.1);
     var facingCurves = new List<Curve> { innerEdge, seamSide.DuplicateCurve() };
     if (seamTop != null) TryAddTrimmedSeam(facingCurves, innerEdge, seamSide, seamTop, connTol);
     if (seamBot != null) TryAddTrimmedSeam(facingCurves, innerEdge, seamSide, seamBot, connTol);
 
     // 4. Collect objects inside the facing boundary (before move)
     var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
-    var joined = Curve.JoinCurves(facingCurves, connTol);
-    if (joined?.Length == 1 && joined[0].IsClosed)
-      interiorObjects = CollectInsideObjects(doc, excludeIds, joined[0], Plane.WorldXY, tol);
+    {
+      var boundaryTol = Math.Max(tol * 200, 0.1);
+      Curve? closedBoundary = null;
+      var joined = Curve.JoinCurves(facingCurves.Select(c => c.DuplicateCurve()).ToArray(), boundaryTol);
+      if (joined?.Length == 1 && joined[0].IsClosed)
+      {
+        closedBoundary = joined[0];
+      }
+      else
+      {
+        // Fallback: connect innerEdge and seamSide with straight lines at the corners
+        var ieS    = innerEdge.PointAtStart;
+        var ieE    = innerEdge.PointAtEnd;
+        var ssFlip = seamSide.PointAtEnd.DistanceTo(ieE) < seamSide.PointAtStart.DistanceTo(ieE);
+        var ssCopy = seamSide.DuplicateCurve();
+        if (ssFlip) ssCopy.Reverse();
+        var pc = new PolyCurve();
+        pc.Append(innerEdge.DuplicateCurve());
+        pc.Append(new LineCurve(ieE, ssCopy.PointAtStart));
+        pc.Append(ssCopy);
+        pc.Append(new LineCurve(ssCopy.PointAtEnd, ieS));
+        if (pc.IsClosed || pc.MakeClosed(boundaryTol))
+          closedBoundary = pc;
+      }
+      if (closedBoundary != null)
+        interiorObjects = CollectInsideObjects(doc, excludeIds, closedBoundary, Plane.WorldXY, tol);
+    }
 
     // 5. Move the whole facing outward so the nearest edge (innerEdge) ends up
     //    FacingMoveOut inches clear of the bimini seam (total = FacingMoveOut + FacingInset)
