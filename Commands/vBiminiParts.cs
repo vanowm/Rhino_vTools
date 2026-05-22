@@ -231,7 +231,7 @@ public sealed class vBiminiParts : Command
     }
     L($"mainCandidates (top/bottom only): {mainCandidates.Count}");
 
-    var mainPicks = PickPocketCurves("Click ON the Main pocket seam", 2, doc, mainCandidates);
+    var mainPicks = PickPocketCurves("Click ON the Main pocket seam", 2, doc, mainCandidates, mainCandidateIds);
 
     // Color side seams after picker so they don't appear highlighted during selection
     SetDocObjectColor(doc, seamSegs, seamDocIds, seamParts.Left,  Color.Magenta);
@@ -248,7 +248,7 @@ public sealed class vBiminiParts : Command
     else
     {
       var maxSec = mainPicks.Count == 0 ? 2 : 1;
-      secPicks = PickPocketCurves("Click ON the Secondary pocket seam", maxSec, doc, mainCandidates);
+      secPicks = PickPocketCurves("Click ON the Secondary pocket seam", maxSec, doc, mainCandidates, mainCandidateIds);
     }
 
     L($"mainPicks={mainPicks.Count}  secPicks={secPicks.Count}");
@@ -279,12 +279,17 @@ public sealed class vBiminiParts : Command
   private const double PickSnapTol = 1.0;
 
   private static List<(Curve Curve, Point3d Center)> PickPocketCurves(string prompt, int maxCount,
-                                                                        RhinoDoc doc, List<Curve> candidates)
+                                                                        RhinoDoc doc, List<Curve> candidates,
+                                                                        List<Guid> candidateIds)
   {
     var list       = new List<(Curve, Point3d)>();
     var pickedIdxs = new HashSet<int>();
 
     L($"PickPocketCurves: prompt=\"{prompt}\"  maxCount={maxCount}  candidates={candidates.Count}");
+
+    // Clear any pre-existing selection so picked seams stand out clearly
+    doc.Objects.UnselectAll();
+    doc.Views.Redraw();
 
     for (var i = 0; i < maxCount; i++)
     {
@@ -319,6 +324,11 @@ public sealed class vBiminiParts : Command
         pickedIdxs.Add(bestIdx);
         list.Add((candidates[bestIdx].DuplicateCurve(), pt));
         L($"  pick {i}: confirmed idx={bestIdx}  pt={pt}");
+
+        // Highlight the confirmed seam so the user can visually verify the pick
+        if (bestIdx < candidateIds.Count && candidateIds[bestIdx] != Guid.Empty)
+          doc.Objects.Select(candidateIds[bestIdx], true);
+        doc.Views.Redraw();
         break;
       }
       nextPick:;
@@ -501,6 +511,15 @@ public sealed class vBiminiParts : Command
       var adjSeam = ClosestOf(mc, seam.Top, seam.Bottom, seam.Left, seam.Right);
       if (adjSeam == null) { L($"  mc: no adjSeam"); continue; }
 
+      // Dedup: delete any previously created pocket objects for this same seam
+      var seamMid = adjSeam.PointAtNormalizedLength(0.5);
+      var seamKey = $"{seamMid.X:F2},{seamMid.Y:F2}";
+      var toDelete = doc.Objects
+          .Where(o => o.Attributes.GetUserString("vBiminiPkt") == seamKey)
+          .Select(o => o.Id).ToList();
+      if (toDelete.Count > 0) { L($"  mc: deleting {toDelete.Count} existing pocket objects for key={seamKey}"); }
+      foreach (var delId in toDelete) doc.Objects.Delete(delId, true);
+
       var zipperRaw = OffsetToward(adjSeam, centroid, pocketDepth, tol);
       if (zipperRaw == null) { L($"  mc: zipperRaw offset failed"); continue; }
 
@@ -545,6 +564,13 @@ public sealed class vBiminiParts : Command
         if (id != Guid.Empty) addedIds.Add(id);
       }
 
+      // Add confirmation point at the pick location (transformed with the pocket)
+      var ptPos = pktCenter;
+      ptPos.Transform(xf);
+      var ptId = doc.Objects.AddPoint(ptPos, MakeAttr(cut1Idx));
+      if (ptId != Guid.Empty) addedIds.Add(ptId);
+      L($"  mc: pick point added at {ptPos}");
+
       foreach (var (geom, geomAttr) in interiorObjects)
       {
         var copy = geom.Duplicate()!;
@@ -554,16 +580,15 @@ public sealed class vBiminiParts : Command
         if (id != Guid.Empty) addedIds.Add(id);
       }
 
-      if (addedIds.Count > 1)
+      // Group all objects and tag them for dedup on re-run
+      var grpIdx = addedIds.Count > 1 ? doc.Groups.Add() : -1;
+      foreach (var id in addedIds)
       {
-        var grpIdx = doc.Groups.Add();
-        foreach (var id in addedIds)
-        {
-          var obj = doc.Objects.FindId(id);
-          if (obj == null) continue;
-          obj.Attributes.AddToGroup(grpIdx);
-          obj.CommitChanges();
-        }
+        var obj = doc.Objects.FindId(id);
+        if (obj == null) continue;
+        obj.Attributes.SetUserString("vBiminiPkt", seamKey);
+        if (grpIdx >= 0) obj.Attributes.AddToGroup(grpIdx);
+        obj.CommitChanges();
       }
     }
   }
