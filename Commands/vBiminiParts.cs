@@ -275,27 +275,13 @@ public sealed class vBiminiParts : Command
       if (res != GetResult.Point) break;
 
       var pt   = gp.Point();
-      var view = doc.Views.ActiveView;
       Curve? best = null;
       double bestDist = double.MaxValue;
       foreach (var c in candidates)
       {
         if (picked.Contains(c)) continue;
-        // Compare in screen space: immune to Osnap 3D drift while still reflecting cursor intent
-        double d;
-        var mid = c.PointAt(c.Domain.Mid);
-        if (view != null)
-        {
-          var sp = view.ActiveViewport.WorldToClient(pt);
-          var sm = view.ActiveViewport.WorldToClient(mid);
-          var dx = (double)(sp.X - sm.X);
-          var dy = (double)(sp.Y - sm.Y);
-          d = dx * dx + dy * dy;
-        }
-        else
-        {
-          d = pt.DistanceTo(mid);
-        }
+        c.ClosestPoint(pt, out var t);
+        var d = pt.DistanceTo(c.PointAt(t));
         if (d < bestDist) { bestDist = d; best = c; }
       }
       if (best == null) break;
@@ -523,6 +509,18 @@ public sealed class vBiminiParts : Command
       {
         pocketOutline.Transform(xf);
         var id = doc.Objects.AddCurve(pocketOutline, MakeAttr(cut1Idx));
+        if (id != Guid.Empty) addedIds.Add(id);
+      }
+
+      // Add pocket-height side seam reference lines — trimmed copies of seam.Left/Right
+      // spanning only from adjSeam down to the zipper line within the pocket.
+      foreach (var side in new[] { seam.Left, seam.Right })
+      {
+        if (side == null) continue;
+        var sideRef = TrimToPocketHeight(side, adjSeam, zipperRaw, extLen, tol);
+        if (sideRef == null) { L($"  mc: TrimToPocketHeight returned null for side"); continue; }
+        sideRef.Transform(xf);
+        var id = doc.Objects.AddCurve(sideRef, MakeAttr(cut1Idx));
         if (id != Guid.Empty) addedIds.Add(id);
       }
       foreach (var (geom, geomAttr) in interiorObjects)
@@ -1043,5 +1041,35 @@ public sealed class vBiminiParts : Command
     obj.Attributes.ColorSource = ObjectColorSource.ColorFromObject;
     obj.Attributes.ObjectColor = color;
     obj.CommitChanges();
+  }
+
+  // Trims a seam side curve to the vertical range of the pocket:
+  // from the endpoint adjacent to adjSeam down to the zipper intersection.
+  private static Curve? TrimToPocketHeight(Curve seamSide, Curve adjSeam, Curve zipper,
+                                            double extLen, double tol)
+  {
+    // Pocket top: endpoint of seamSide closer to adjSeam midpoint
+    var adjMid = adjSeam.PointAt(adjSeam.Domain.Mid);
+    var tTop   = seamSide.PointAtStart.DistanceTo(adjMid) < seamSide.PointAtEnd.DistanceTo(adjMid)
+                 ? seamSide.Domain.T0 : seamSide.Domain.T1;
+
+    // Pocket bottom: intersection of extended seamSide with extended zipper
+    var seamExt  = seamSide.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? seamSide.DuplicateCurve();
+    var zipExt   = zipper.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)   ?? zipper.DuplicateCurve();
+    var xEvents  = Intersection.CurveCurve(seamExt, zipExt, tol, tol);
+
+    double tBot;
+    if (xEvents != null && xEvents.Count > 0)
+    {
+      if (!seamSide.ClosestPoint(xEvents[0].PointA, out tBot)) return null;
+    }
+    else
+    {
+      // Fallback: project zipper midpoint onto seamSide
+      if (!seamSide.ClosestPoint(zipper.PointAt(zipper.Domain.Mid), out tBot)) return null;
+    }
+
+    if (Math.Abs(tTop - tBot) < RhinoMath.ZeroTolerance) return null;
+    return seamSide.Trim(Math.Min(tTop, tBot), Math.Max(tTop, tBot));
   }
 }
