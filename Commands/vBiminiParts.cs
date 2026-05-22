@@ -189,10 +189,9 @@ public sealed class vBiminiParts : Command
     var plotAttr = MakeAttr(plotIdx);
     var cut1Attr = MakeAttr(cut1Idx);
     var finIds  = new HashSet<Guid>();
-    var seamIds     = new HashSet<Guid>();
-    var seamCrvToId = new Dictionary<Curve, Guid>(ReferenceEqualityComparer.Instance);
+    var seamIds = new HashSet<Guid>();
     foreach (var s in finSegs)  { var id = doc.Objects.AddCurve(s, plotAttr); if (id != Guid.Empty) finIds.Add(id); }
-    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) { seamIds.Add(id); seamCrvToId[s] = id; } }
+    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) seamIds.Add(id); }
     // Delete source curves — replaced by the broken segments added above
     foreach (var id in selIds) doc.Objects.Delete(id, false);
     if (existingFinObj != null) doc.Objects.Delete(existingFinObj.Id, false);
