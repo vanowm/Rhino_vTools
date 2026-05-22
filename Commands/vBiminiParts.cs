@@ -209,7 +209,7 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
 
-    var mainCurves = PickPocketCurves("Click near Main pocket center", 2, seamSegs);
+    var mainCurves = PickPocketCurves("Click near Main pocket center", 1, seamSegs);
 
     // ── Stage 3: Secondary pocket curve selection ────────────────────────────
 
@@ -221,7 +221,7 @@ public sealed class vBiminiParts : Command
     else
     {
       var maxSec = mainCurves.Count == 0 ? 2 : 1;
-      secCurves = PickPocketCurves($"Click near Secondary pocket center (max {maxSec})", maxSec, seamSegs);
+      secCurves = PickPocketCurves($"Click near Secondary pocket center", 1, seamSegs);
     }
 
     // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
@@ -238,7 +238,7 @@ public sealed class vBiminiParts : Command
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
     if (mainCurves.Count > 0)
-      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, seamCrvToId, tol);
+      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, tol);
 
     doc.Views.Redraw();
     _log?.Dispose();
@@ -443,15 +443,11 @@ public sealed class vBiminiParts : Command
   private static void BuildMainPocket(RhinoDoc doc, List<Curve> mainCurves,
                                        Parts seam, Parts fin,
                                        Point3d centroid, int cut1Idx,
-                                       Dictionary<Curve, Guid> seamCrvToId, double tol)
+                                       double tol)
   {
     double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
     const double extLen  = 24.0;
     const double moveOut = 5.0;
-
-    // Remove side seam curves — the main pocket outline replaces them for this part
-    if (seam.Left  != null && seamCrvToId.TryGetValue(seam.Left,  out var leftId))  doc.Objects.Delete(leftId,  false);
-    if (seam.Right != null && seamCrvToId.TryGetValue(seam.Right, out var rightId)) doc.Objects.Delete(rightId, false);
 
     L($"BuildMainPocket: pocketDepth={pocketDepth}  curves={mainCurves.Count}");
     foreach (var mc in mainCurves)
