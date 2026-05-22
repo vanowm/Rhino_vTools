@@ -552,9 +552,13 @@ public sealed class vBiminiParts : Command
       adjSeam.ClosestPoint(ptMirR, out var tSeamR);
       var topSeg6 = adjSeam.Trim(Math.Min(tSeamL, tSeamR), Math.Max(tSeamL, tSeamR))
                  ?? adjSeam.DuplicateCurve();
-      L($"  BuildPocketOutline: topSeg6  gapToMirL={topSeg6.PointAtStart.DistanceTo(ptMirL):F4}|{topSeg6.PointAtEnd.DistanceTo(ptMirL):F4}  gapToMirR={topSeg6.PointAtStart.DistanceTo(ptMirR):F4}|{topSeg6.PointAtEnd.DistanceTo(ptMirR):F4}");
+      // Bridge any remaining gap between the trimmed seam endpoints and the cornerPts
+      bool mirLAtStart = topSeg6.PointAtStart.DistanceTo(ptMirL) < topSeg6.PointAtEnd.DistanceTo(ptMirL);
+      var bridgeL = new LineCurve(mirLAtStart ? topSeg6.PointAtStart : topSeg6.PointAtEnd, ptMirL);
+      var bridgeR = new LineCurve(mirLAtStart ? topSeg6.PointAtEnd   : topSeg6.PointAtStart, ptMirR);
+      L($"  BuildPocketOutline: bridgeL={bridgeL.GetLength():F4}  bridgeR={bridgeR.GetLength():F4}");
 
-      segments = new[] { topSeg6, mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
+      segments = new Curve[] { topSeg6, bridgeR, mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg, bridgeL };
     }
     else
     {
