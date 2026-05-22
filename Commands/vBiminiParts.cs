@@ -186,12 +186,13 @@ public sealed class vBiminiParts : Command
 
     RhinoApp.WriteLine($"vBiminiParts: finished segments = {finSegs.Count}, seam segments = {seamSegs.Count}");
 
-    var plotAttr = MakeAttr(plotIdx);
-    var cut1Attr = MakeAttr(cut1Idx);
-    var finIds  = new HashSet<Guid>();
-    var seamIds = new HashSet<Guid>();
+    var plotAttr   = MakeAttr(plotIdx);
+    var cut1Attr   = MakeAttr(cut1Idx);
+    var finIds     = new HashSet<Guid>();
+    var seamIds    = new HashSet<Guid>();
+    var seamDocIds = new List<Guid>();          // parallel to seamSegs — for picker highlighting
     foreach (var s in finSegs)  { var id = doc.Objects.AddCurve(s, plotAttr); if (id != Guid.Empty) finIds.Add(id); }
-    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) seamIds.Add(id); }
+    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) { seamIds.Add(id); seamDocIds.Add(id); } else { seamDocIds.Add(Guid.Empty); } }
     // Delete source curves — replaced by the broken segments added above
     foreach (var id in selIds) doc.Objects.Delete(id, false);
     if (existingFinObj != null) doc.Objects.Delete(existingFinObj.Id, false);
@@ -208,7 +209,7 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
 
-    var mainCurves = PickPocketCurves("Click near Main pocket center", 1, seamSegs);
+    var mainCurves = PickPocketCurves("Click near Main pocket center", 1, doc, seamSegs, seamDocIds);
 
     // ── Stage 3: Secondary pocket curve selection ────────────────────────────
 
@@ -220,7 +221,7 @@ public sealed class vBiminiParts : Command
     else
     {
       var maxSec = mainCurves.Count == 0 ? 2 : 1;
-      secCurves = PickPocketCurves($"Click near Secondary pocket center", 1, seamSegs);
+      secCurves = PickPocketCurves($"Click near Secondary pocket center", 1, doc, seamSegs, seamDocIds);
     }
 
     // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
@@ -247,7 +248,8 @@ public sealed class vBiminiParts : Command
 
   // ── Pocket curve picker ─────────────────────────────────────────────────────
 
-  private static List<Curve> PickPocketCurves(string prompt, int maxCount, List<Curve> candidates)
+  private static List<Curve> PickPocketCurves(string prompt, int maxCount,
+                                               RhinoDoc doc, List<Curve> candidates, List<Guid> candidateIds)
   {
     var list    = new List<Curve>();
     var picked  = new HashSet<Curve>(ReferenceEqualityComparer.Instance);
@@ -275,6 +277,11 @@ public sealed class vBiminiParts : Command
       if (best == null) break;
       picked.Add(best);
       list.Add(best.DuplicateCurve());
+
+      // Highlight the picked curve so it stays visually selected for subsequent prompts
+      var bestIdx = candidates.FindIndex(c => ReferenceEquals(c, best));
+      if (bestIdx >= 0 && bestIdx < candidateIds.Count && candidateIds[bestIdx] != Guid.Empty)
+        doc.Objects.Select(candidateIds[bestIdx], true);
     }
     return list;
   }
