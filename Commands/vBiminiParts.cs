@@ -207,11 +207,6 @@ public sealed class vBiminiParts : Command
     var finParts  = Classify(finSegs,  centroid);
     var seamParts = Classify(seamSegs, centroid);
 
-    // Color side seam doc objects distinctively so they're visually identifiable
-    SetDocObjectColor(doc, seamSegs, seamDocIds, seamParts.Left,  Color.Magenta);
-    SetDocObjectColor(doc, seamSegs, seamDocIds, seamParts.Right, Color.Magenta);
-    doc.Views.Redraw();
-
     // Open log before picker so picker actions are captured
     var logPath = GetLogPath();
     _log = new StreamWriter(logPath, true, System.Text.Encoding.UTF8) { AutoFlush = true };
@@ -236,7 +231,12 @@ public sealed class vBiminiParts : Command
     }
     L($"mainCandidates (top/bottom only): {mainCandidates.Count}");
 
-    var mainPicks = PickPocketCurves("Click near Main pocket center", 2, doc, mainCandidates, mainCandidateIds);
+    var mainPicks = PickPocketCurves("Click ON the Main pocket seam", 2, doc, mainCandidates);
+
+    // Color side seams after picker so they don't appear highlighted during selection
+    SetDocObjectColor(doc, seamSegs, seamDocIds, seamParts.Left,  Color.Magenta);
+    SetDocObjectColor(doc, seamSegs, seamDocIds, seamParts.Right, Color.Magenta);
+    doc.Views.Redraw();
 
     // ── Stage 3: Secondary pocket curve selection ────────────────────────────
 
@@ -248,7 +248,7 @@ public sealed class vBiminiParts : Command
     else
     {
       var maxSec = mainPicks.Count == 0 ? 2 : 1;
-      secPicks = PickPocketCurves("Click near Secondary pocket center", maxSec, doc, mainCandidates, mainCandidateIds);
+      secPicks = PickPocketCurves("Click ON the Secondary pocket seam", maxSec, doc, mainCandidates);
     }
 
     L($"mainPicks={mainPicks.Count}  secPicks={secPicks.Count}");
@@ -275,43 +275,53 @@ public sealed class vBiminiParts : Command
 
   // ── Pocket curve picker ─────────────────────────────────────────────────────
 
-  private static List<(Curve Curve, Point3d Center)> PickPocketCurves(string prompt, int maxCount,
-                                                                        RhinoDoc doc, List<Curve> candidates, List<Guid> candidateIds)
-  {
-    var list         = new List<(Curve, Point3d)>();
-    var pickedIds    = new HashSet<Guid>();
-    var candidateSet = new HashSet<Guid>(candidateIds.Where(id => id != Guid.Empty));
+  // snapTol: how close a GetPoint click must be to a candidate seam to count as "on" it.
+  private const double PickSnapTol = 1.0;
 
-    L($"PickPocketCurves: prompt=\"{prompt}\"  maxCount={maxCount}  candidates={candidates.Count}  candidateSet={candidateSet.Count}");
+  private static List<(Curve Curve, Point3d Center)> PickPocketCurves(string prompt, int maxCount,
+                                                                        RhinoDoc doc, List<Curve> candidates)
+  {
+    var list       = new List<(Curve, Point3d)>();
+    var pickedIdxs = new HashSet<int>();
+
+    L($"PickPocketCurves: prompt=\"{prompt}\"  maxCount={maxCount}  candidates={candidates.Count}");
 
     for (var i = 0; i < maxCount; i++)
     {
-      var go = new GetObject();
-      go.SetCommandPrompt($"{prompt} ({i + 1}/{maxCount}). Press Enter to finish.");
-      go.GeometryFilter = ObjectType.Curve;
-      go.AcceptNothing(true);
-      go.EnablePreSelect(false, true);
-      go.SetCustomGeometryFilter((rhObj, geom, component) =>
-          !pickedIds.Contains(rhObj.Id) && candidateSet.Contains(rhObj.Id));
-
-      var res = go.Get();
-      L($"  pick {i}: result={res}");
-      if (res != GetResult.Object) break;
-
-      var objRef  = go.Object(0);
-      var pickId  = objRef.ObjectId;
-      var pickIdx = candidateIds.FindIndex(id => id == pickId);
-      L($"  pick {i}: id={pickId}  pickIdx={pickIdx}  candidateIds.Count={candidateIds.Count}");
-      if (pickIdx < 0 || pickIdx >= candidates.Count)
+      while (true)
       {
-        L($"  pick {i}: id not found in candidateIds — break");
+        var gp = new GetPoint();
+        gp.SetCommandPrompt($"{prompt} ({i + 1}/{maxCount}). Press Enter to finish.");
+        gp.AcceptNothing(true);
+
+        var res = gp.Get();
+        L($"  pick {i}: result={res}");
+        if (res != GetResult.Point) goto nextPick;
+
+        var pt      = gp.Point();
+        var bestIdx = -1;
+        var bestDist = double.MaxValue;
+        for (var ci = 0; ci < candidates.Count; ci++)
+        {
+          if (pickedIdxs.Contains(ci)) continue;
+          candidates[ci].ClosestPoint(pt, out var t);
+          var d = pt.DistanceTo(candidates[ci].PointAt(t));
+          if (d < bestDist) { bestDist = d; bestIdx = ci; }
+        }
+        L($"  pick {i}: bestIdx={bestIdx}  bestDist={bestDist:F3}  tol={PickSnapTol}");
+
+        if (bestIdx < 0 || bestDist > PickSnapTol)
+        {
+          RhinoApp.WriteLine($"Click ON a seam curve (missed by {bestDist:F2}). Try again.");
+          continue;
+        }
+
+        pickedIdxs.Add(bestIdx);
+        list.Add((candidates[bestIdx].DuplicateCurve(), pt));
+        L($"  pick {i}: confirmed idx={bestIdx}  pt={pt}");
         break;
       }
-
-      pickedIds.Add(pickId);
-      var selPt = objRef.SelectionPoint();
-      list.Add((candidates[pickIdx].DuplicateCurve(), selPt));
-      L($"  pick {i}: confirmed idx={pickIdx}  selPt={selPt}  curveMid={candidates[pickIdx].PointAt(candidates[pickIdx].Domain.Mid)}");
+      nextPick:;
     }
     return list;
   }
@@ -535,17 +545,6 @@ public sealed class vBiminiParts : Command
         if (id != Guid.Empty) addedIds.Add(id);
       }
 
-      // Add pocket-height side seam reference lines — trimmed copies of seam.Left/Right
-      // spanning only from adjSeam down to the zipper line within the pocket.
-      foreach (var side in new[] { seam.Left, seam.Right })
-      {
-        if (side == null) continue;
-        var sideRef = TrimToPocketHeight(side, adjSeam, zipperRaw, extLen, tol);
-        if (sideRef == null) { L($"  mc: TrimToPocketHeight returned null for side"); continue; }
-        sideRef.Transform(xf);
-        var id = doc.Objects.AddCurve(sideRef, MakeAttr(cut1Idx));
-        if (id != Guid.Empty) addedIds.Add(id);
-      }
       foreach (var (geom, geomAttr) in interiorObjects)
       {
         var copy = geom.Duplicate()!;
