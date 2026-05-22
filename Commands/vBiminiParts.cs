@@ -209,19 +209,19 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
 
-    var mainCurves = PickPocketCurves("Click near Main pocket center", 2, doc, seamSegs, seamDocIds);
+    var mainPicks = PickPocketCurves("Click near Main pocket center", 2, doc, seamSegs, seamDocIds);
 
     // ── Stage 3: Secondary pocket curve selection ────────────────────────────
 
-    List<Curve> secCurves;
-    if (mainCurves.Count >= 2)
+    List<(Curve Curve, Point3d Center)> secPicks;
+    if (mainPicks.Count >= 2)
     {
-      secCurves = new List<Curve>();
+      secPicks = new List<(Curve, Point3d)>();
     }
     else
     {
-      var maxSec = mainCurves.Count == 0 ? 2 : 1;
-      secCurves = PickPocketCurves("Click near Secondary pocket center", maxSec, doc, seamSegs, seamDocIds);
+      var maxSec = mainPicks.Count == 0 ? 2 : 1;
+      secPicks = PickPocketCurves("Click near Secondary pocket center", maxSec, doc, seamSegs, seamDocIds);
     }
 
     // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
@@ -230,15 +230,15 @@ public sealed class vBiminiParts : Command
     _log = new StreamWriter(logPath, true, System.Text.Encoding.UTF8) { AutoFlush = true };
     L($"── vBiminiParts {DateTime.Now} ──");
     L($"tol={doc.ModelAbsoluteTolerance}  selIds={selIds.Count}  seamIds={seamIds.Count}  finIds={finIds.Count}  excludeInterior={excludeInterior.Count}");
-    L($"mainCurves={mainCurves.Count}  secCurves={secCurves.Count}");
+    L($"mainPicks={mainPicks.Count}  secPicks={secPicks.Count}");
     RhinoApp.WriteLine($"vBiminiParts: log → {logPath}");
 
     BuildFacingParts(doc, seamParts, centroid, cut1Idx, excludeInterior, tol);
 
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
-    if (mainCurves.Count > 0)
-      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, tol);
+    if (mainPicks.Count > 0)
+      BuildMainPocket(doc, mainPicks, seamParts, finParts, centroid, cut1Idx, tol);
 
     doc.Views.Redraw();
     _log?.Dispose();
@@ -248,10 +248,10 @@ public sealed class vBiminiParts : Command
 
   // ── Pocket curve picker ─────────────────────────────────────────────────────
 
-  private static List<Curve> PickPocketCurves(string prompt, int maxCount,
-                                               RhinoDoc doc, List<Curve> candidates, List<Guid> candidateIds)
+  private static List<(Curve Curve, Point3d Center)> PickPocketCurves(string prompt, int maxCount,
+                                                                        RhinoDoc doc, List<Curve> candidates, List<Guid> candidateIds)
   {
-    var list    = new List<Curve>();
+    var list    = new List<(Curve, Point3d)>();
     var picked  = new HashSet<Curve>(ReferenceEqualityComparer.Instance);
 
     for (var i = 0; i < maxCount; i++)
@@ -276,7 +276,7 @@ public sealed class vBiminiParts : Command
       }
       if (best == null) break;
       picked.Add(best);
-      list.Add(best.DuplicateCurve());
+      list.Add((best.DuplicateCurve(), pt));  // record the actual clicked point as center
 
       // Keep picked curve highlighted for subsequent prompts
       var bestIdx = candidates.FindIndex(c => ReferenceEquals(c, best));
@@ -446,7 +446,7 @@ public sealed class vBiminiParts : Command
 
   // ── Stage 5: Main pocket ────────────────────────────────────────────────────
 
-  private static void BuildMainPocket(RhinoDoc doc, List<Curve> mainCurves,
+  private static void BuildMainPocket(RhinoDoc doc, List<(Curve Curve, Point3d Center)> mainPicks,
                                        Parts seam, Parts fin,
                                        Point3d centroid, int cut1Idx,
                                        double tol)
@@ -455,8 +455,8 @@ public sealed class vBiminiParts : Command
     const double extLen  = 24.0;
     const double moveOut = 5.0;
 
-    L($"BuildMainPocket: pocketDepth={pocketDepth}  curves={mainCurves.Count}");
-    foreach (var mc in mainCurves)
+    L($"BuildMainPocket: pocketDepth={pocketDepth}  picks={mainPicks.Count}");
+    foreach (var (mc, pktCenter) in mainPicks)
     {
       var adjSeam = ClosestOf(mc, seam.Top, seam.Bottom, seam.Left, seam.Right);
       if (adjSeam == null) { L($"  mc: no adjSeam"); continue; }
