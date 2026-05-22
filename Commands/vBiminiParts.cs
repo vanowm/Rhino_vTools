@@ -291,7 +291,6 @@ public sealed class vBiminiParts : Command
       go.GeometryFilter = ObjectType.Curve;
       go.AcceptNothing(true);
       go.EnablePreSelect(false, true);
-      go.EnablePostSelect(false);
       go.SetCustomGeometryFilter((rhObj, geom, component) =>
           !pickedIds.Contains(rhObj.Id) && candidateSet.Contains(rhObj.Id));
 
