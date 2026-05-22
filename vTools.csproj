@@ -94,7 +94,7 @@
     </PropertyGroup>
 
     <Exec
-      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$msg=[System.IO.File]::ReadAllText('$(PendingMessageFile)').Trim() -replace 'XXXX','$(Version)'; $enc=New-Object System.Text.UTF8Encoding($false); [System.IO.File]::WriteAllText('$(MSBuildProjectDirectory)\.git\vtools-autocommit-message.txt',$msg,$enc)&quot;"
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$body=[System.IO.File]::ReadAllText('$(PendingMessageFile)').Trim(); $msg='$(Version): ' + $body; $enc=New-Object System.Text.UTF8Encoding($false); [System.IO.File]::WriteAllText('$(MSBuildProjectDirectory)\.git\vtools-autocommit-message.txt',$msg,$enc)&quot;"
       Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0' and '$(VersionDllDiffExitCode)' != '0'"
       IgnoreExitCode="true" />
 
