@@ -189,9 +189,10 @@ public sealed class vBiminiParts : Command
     var plotAttr = MakeAttr(plotIdx);
     var cut1Attr = MakeAttr(cut1Idx);
     var finIds  = new HashSet<Guid>();
-    var seamIds = new HashSet<Guid>();
+    var seamIds     = new HashSet<Guid>();
+    var seamCrvToId = new Dictionary<Curve, Guid>(ReferenceEqualityComparer.Instance);
     foreach (var s in finSegs)  { var id = doc.Objects.AddCurve(s, plotAttr); if (id != Guid.Empty) finIds.Add(id); }
-    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) seamIds.Add(id); }
+    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) { seamIds.Add(id); seamCrvToId[s] = id; } }
     // Delete source curves — replaced by the broken segments added above
     foreach (var id in selIds) doc.Objects.Delete(id, false);
     if (existingFinObj != null) doc.Objects.Delete(existingFinObj.Id, false);
@@ -235,7 +236,7 @@ public sealed class vBiminiParts : Command
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
     if (mainCurves.Count > 0)
-      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, tol);
+      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, seamCrvToId, tol);
 
     doc.Views.Redraw();
     _log?.Dispose();
@@ -429,11 +430,16 @@ public sealed class vBiminiParts : Command
 
   private static void BuildMainPocket(RhinoDoc doc, List<Curve> mainCurves,
                                        Parts seam, Parts fin,
-                                       Point3d centroid, int cut1Idx, double tol)
+                                       Point3d centroid, int cut1Idx,
+                                       Dictionary<Curve, Guid> seamCrvToId, double tol)
   {
     double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
     const double extLen  = 24.0;
     const double moveOut = 5.0;
+
+    // Remove side seam curves — pocket replaces them for this part
+    if (seam.Left  != null && seamCrvToId.TryGetValue(seam.Left,  out var leftId))  doc.Objects.Delete(leftId,  false);
+    if (seam.Right != null && seamCrvToId.TryGetValue(seam.Right, out var rightId)) doc.Objects.Delete(rightId, false);
 
     L($"BuildMainPocket: pocketDepth={pocketDepth}  curves={mainCurves.Count}");
     foreach (var mc in mainCurves)
@@ -545,20 +551,8 @@ public sealed class vBiminiParts : Command
       var offRSeg = offRExt.Trim(Math.Min(tMR_off, tOR_off), Math.Max(tMR_off, tOR_off));
       if (offLSeg == null || offRSeg == null) { L($"  BuildPocketOutline: offSide trim null  offLSeg={offLSeg != null}  offRSeg={offRSeg != null}"); return null; }
 
-      // Trim adjSeam between projections of the two cornerPts (adjSeam extends past corners by ~seam allowance)
-      var ptMirL = mirLeft.PointAtStart;   // = cornerPt left
-      var ptMirR = mirRight.PointAtStart;  // = cornerPt right
-      adjSeam.ClosestPoint(ptMirL, out var tSeamL);
-      adjSeam.ClosestPoint(ptMirR, out var tSeamR);
-      var topSeg6 = adjSeam.Trim(Math.Min(tSeamL, tSeamR), Math.Max(tSeamL, tSeamR))
-                 ?? adjSeam.DuplicateCurve();
-      // Bridge any remaining gap between the trimmed seam endpoints and the cornerPts
-      bool mirLAtStart = topSeg6.PointAtStart.DistanceTo(ptMirL) < topSeg6.PointAtEnd.DistanceTo(ptMirL);
-      var bridgeL = new LineCurve(mirLAtStart ? topSeg6.PointAtStart : topSeg6.PointAtEnd, ptMirL);
-      var bridgeR = new LineCurve(mirLAtStart ? topSeg6.PointAtEnd   : topSeg6.PointAtStart, ptMirR);
-      L($"  BuildPocketOutline: bridgeL={bridgeL.GetLength():F4}  bridgeR={bridgeR.GetLength():F4}");
-
-      segments = new Curve[] { topSeg6, bridgeR, mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg, bridgeL };
+      // mirLeft/mirRight now start exactly at adjSeam endpoints (mirror origin = adjSeam endpoint)
+      segments = new[] { adjSeam.DuplicateCurve(), mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
     }
     else
     {
@@ -633,11 +627,12 @@ public sealed class vBiminiParts : Command
     var sideDir      = finSide.PointAtEnd - finSide.PointAtStart;
     sideDir.Unitize();
     var mirrorNormal = new Vector3d(-sideDir.Y, sideDir.X, 0);
+    var mirrorOrigin = isAtStart ? adjSeam.PointAtStart : adjSeam.PointAtEnd;
     var mirrored     = section.DuplicateCurve();
-    mirrored.Transform(Transform.Mirror(new Plane(cornerPt, mirrorNormal)));
+    mirrored.Transform(Transform.Mirror(new Plane(mirrorOrigin, mirrorNormal)));
 
-    // Ensure Start ≈ cornerPt so T0-based trim in BuildPocketOutline is consistent
-    if (mirrored.PointAtEnd.DistanceTo(cornerPt) < mirrored.PointAtStart.DistanceTo(cornerPt))
+    // Ensure Start = mirrorOrigin so T0-based trim in BuildPocketOutline connects directly to adjSeam
+    if (mirrored.PointAtEnd.DistanceTo(mirrorOrigin) < mirrored.PointAtStart.DistanceTo(mirrorOrigin))
       mirrored.Reverse();
 
     // Extend the far end (away from cornerPt) so it overshoots the offset side
