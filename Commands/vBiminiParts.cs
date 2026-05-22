@@ -55,7 +55,12 @@ public sealed class vBiminiParts : Command
   {
     var dir = Path.Combine(Path.GetDirectoryName(typeof(vBiminiParts).Assembly.Location)!, "logs");
     Directory.CreateDirectory(dir);
-    return Path.Combine(dir, $"vBiminiParts_{DateTime.Now:yyMMdd_HHmmss}.txt");
+    return Path.Combine(dir, "vBiminiParts.log");
+  }
+
+  internal static void InitLog()
+  {
+    try { File.WriteAllText(GetLogPath(), string.Empty); } catch { }
   }
 
   private static void L(string s) { _log?.WriteLine(s); }
@@ -219,9 +224,10 @@ public sealed class vBiminiParts : Command
     // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
 
     var logPath = GetLogPath();
-    _log = new StreamWriter(logPath, false, System.Text.Encoding.UTF8) { AutoFlush = true };
-    L($"vBiminiParts log — {DateTime.Now}");
+    _log = new StreamWriter(logPath, true, System.Text.Encoding.UTF8) { AutoFlush = true };
+    L($"── vBiminiParts {DateTime.Now} ──");
     L($"tol={doc.ModelAbsoluteTolerance}  selIds={selIds.Count}  seamIds={seamIds.Count}  finIds={finIds.Count}  excludeInterior={excludeInterior.Count}");
+    L($"mainCurves={mainCurves.Count}  secCurves={secCurves.Count}");
     RhinoApp.WriteLine($"vBiminiParts: log → {logPath}");
 
     BuildFacingParts(doc, seamParts, centroid, cut1Idx, excludeInterior, tol);
@@ -429,17 +435,18 @@ public sealed class vBiminiParts : Command
     const double extLen  = 24.0;
     const double moveOut = 5.0;
 
+    L($"BuildMainPocket: pocketDepth={pocketDepth}  curves={mainCurves.Count}");
     foreach (var mc in mainCurves)
     {
       var adjSeam = ClosestOf(mc, seam.Top, seam.Bottom, seam.Left, seam.Right);
-      if (adjSeam == null) continue;
+      if (adjSeam == null) { L($"  mc: no adjSeam"); continue; }
 
       var zipperRaw = OffsetToward(adjSeam, centroid, pocketDepth, tol);
-      if (zipperRaw == null) continue;
+      if (zipperRaw == null) { L($"  mc: zipperRaw offset failed"); continue; }
 
       var offLeft  = seam.Left  != null ? OffsetAway(seam.Left,  centroid, SidePktOutward, tol) : null;
       var offRight = seam.Right != null ? OffsetAway(seam.Right, centroid, SidePktOutward, tol) : null;
-      if (offLeft == null || offRight == null) continue;
+      if (offLeft == null || offRight == null) { L($"  mc: offLeft={offLeft != null} offRight={offRight != null} seamL={seam.Left != null} seamR={seam.Right != null}"); continue; }
 
       // Build mirrored end flares at each corner where adjSeam meets the fin sides
       var adjFin   = ClosestOf(adjSeam, fin.Top, fin.Bottom, fin.Left, fin.Right);
@@ -449,6 +456,7 @@ public sealed class vBiminiParts : Command
         if (fin.Left  != null) { var c = FindSharedEndpoint(adjFin, fin.Left);  if (c.IsValid) mirLeft  = BuildMirroredEnd(adjSeam, fin.Left,  c, pocketDepth, extLen); }
         if (fin.Right != null) { var c = FindSharedEndpoint(adjFin, fin.Right); if (c.IsValid) mirRight = BuildMirroredEnd(adjSeam, fin.Right, c, pocketDepth, extLen); }
       }
+      L($"  mc: adjFin={adjFin != null}  mirLeft={mirLeft != null}  mirRight={mirRight != null}");
 
       // Build closed 6-segment pocket outline:
       //   adjSeam (top) → mirRight → offRight → zipper (bottom) → offLeft → mirLeft → back
@@ -459,6 +467,7 @@ public sealed class vBiminiParts : Command
       var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
       if (pocketOutline != null && pocketOutline.IsClosed)
         interiorObjects = CollectInsideObjects(doc, new HashSet<Guid>(), pocketOutline, Plane.WorldXY, tol);
+      L($"  mc: outline={pocketOutline != null}  interior={interiorObjects.Count}  addedIds will follow");
 
       // Translate all pocket geometry away from the bimini
       var outDir = adjSeam.PointAtNormalizedLength(0.5) - centroid;
@@ -511,52 +520,54 @@ public sealed class vBiminiParts : Command
     var zipExt  = zipper.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)  ?? zipper.DuplicateCurve();
 
     // Bottom corners: offset sides ∩ zipper
-    if (!FindIntersectionParam(offLExt, zipExt, tol, out var tOL_off, out var tOL_zip)) return null;
-    if (!FindIntersectionParam(offRExt, zipExt, tol, out var tOR_off, out var tOR_zip)) return null;
+    if (!FindIntersectionParam(offLExt, zipExt, tol, out var tOL_off, out var tOL_zip)) { L("  BuildPocketOutline: no offLeft∩zipper"); return null; }
+    if (!FindIntersectionParam(offRExt, zipExt, tol, out var tOR_off, out var tOR_zip)) { L("  BuildPocketOutline: no offRight∩zipper"); return null; }
 
     var zipSeg = zipExt.Trim(Math.Min(tOL_zip, tOR_zip), Math.Max(tOL_zip, tOR_zip));
-    if (zipSeg == null) return null;
+    if (zipSeg == null) { L("  BuildPocketOutline: zipSeg trim null"); return null; }
 
     Curve[] segments;
     if (mirLeft != null && mirRight != null)
     {
       // Top corners: mirrored flares ∩ offset sides
-      if (!FindIntersectionParam(mirLeft,  offLExt, tol, out var tML_mir, out var tML_off)) return null;
-      if (!FindIntersectionParam(mirRight, offRExt, tol, out var tMR_mir, out var tMR_off)) return null;
+      if (!FindIntersectionParam(mirLeft,  offLExt, tol, out var tML_mir, out var tML_off)) { L("  BuildPocketOutline: no mirLeft∩offLeft"); return null; }
+      if (!FindIntersectionParam(mirRight, offRExt, tol, out var tMR_mir, out var tMR_off)) { L("  BuildPocketOutline: no mirRight∩offRight"); return null; }
 
       // Trim flares from cornerPt (T0) to where they meet the offset side
       var mirLeftSeg  = mirLeft.Trim(mirLeft.Domain.T0,   tML_mir)
                       ?? mirLeft.Trim(tML_mir, mirLeft.Domain.T1);
       var mirRightSeg = mirRight.Trim(mirRight.Domain.T0, tMR_mir)
                       ?? mirRight.Trim(tMR_mir, mirRight.Domain.T1);
-      if (mirLeftSeg == null || mirRightSeg == null) return null;
+      if (mirLeftSeg == null || mirRightSeg == null) { L($"  BuildPocketOutline: flare trim null  mirLeftSeg={mirLeftSeg != null}  mirRightSeg={mirRightSeg != null}"); return null; }
 
       // Trim offset sides between flare intersection (top) and zipper intersection (bottom)
       var offLSeg = offLExt.Trim(Math.Min(tML_off, tOL_off), Math.Max(tML_off, tOL_off));
       var offRSeg = offRExt.Trim(Math.Min(tMR_off, tOR_off), Math.Max(tMR_off, tOR_off));
-      if (offLSeg == null || offRSeg == null) return null;
+      if (offLSeg == null || offRSeg == null) { L($"  BuildPocketOutline: offSide trim null  offLSeg={offLSeg != null}  offRSeg={offRSeg != null}"); return null; }
 
       segments = new[] { adjSeam.DuplicateCurve(), mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
     }
     else
     {
+      L("  BuildPocketOutline: fallback 4-sided rect (no mirLeft/mirRight)");
       // Fallback: 4-sided rect (adjSeam + offRight + zipper + offLeft)
       var adjExt = adjSeam.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? adjSeam.DuplicateCurve();
-      if (!FindIntersectionParam(adjExt, offLExt, tol, out var tAdj_L, out var tOL_adj)) return null;
-      if (!FindIntersectionParam(adjExt, offRExt, tol, out var tAdj_R, out var tOR_adj)) return null;
+      if (!FindIntersectionParam(adjExt, offLExt, tol, out var tAdj_L, out var tOL_adj)) { L("  BuildPocketOutline: no adjSeam∩offLeft"); return null; }
+      if (!FindIntersectionParam(adjExt, offRExt, tol, out var tAdj_R, out var tOR_adj)) { L("  BuildPocketOutline: no adjSeam∩offRight"); return null; }
 
       var topSeg = adjExt.Trim(Math.Min(tAdj_L, tAdj_R), Math.Max(tAdj_L, tAdj_R));
-      if (topSeg == null) return null;
+      if (topSeg == null) { L("  BuildPocketOutline: topSeg trim null"); return null; }
 
       var offLSeg4 = offLExt.Trim(Math.Min(tOL_adj, tOL_off), Math.Max(tOL_adj, tOL_off));
       var offRSeg4 = offRExt.Trim(Math.Min(tOR_adj, tOR_off), Math.Max(tOR_adj, tOR_off));
-      if (offLSeg4 == null || offRSeg4 == null) return null;
+      if (offLSeg4 == null || offRSeg4 == null) { L($"  BuildPocketOutline: 4-sided offSide trim null  offLSeg4={offLSeg4 != null}  offRSeg4={offRSeg4 != null}"); return null; }
 
       segments = new[] { topSeg, offRSeg4, zipSeg, offLSeg4 };
     }
 
     var joinTol = Math.Max(tol * 200, 0.1);
     var joined  = Curve.JoinCurves(segments, joinTol);
+    L($"  BuildPocketOutline: joinTol={joinTol:F4}  segs={segments.Length}  joined={joined?.Length}  closed={(joined?.Length == 1 ? joined[0].IsClosed.ToString() : "n/a")}");
     return joined?.Length == 1 && joined[0].IsClosed ? joined[0] : null;
   }
 
