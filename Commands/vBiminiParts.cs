@@ -464,10 +464,10 @@ public sealed class vBiminiParts : Command
       }
       L($"  mc: adjFin={adjFin != null}  mirLeft={mirLeft != null}  mirRight={mirRight != null}");
 
-      // Build closed 6-segment pocket outline:
-      //   adjSeam (top) → mirRight → offRight → zipper (bottom) → offLeft → mirLeft → back
+      // Build closed pocket outline: adjSeam (top) → mirRight → offRight → perpR
+      //   → zipper (full width to seam sides) → perpL → offLeft → mirLeft → back
       var pocketOutline = BuildPocketOutline(adjSeam, mirLeft, mirRight,
-                                             offLeft, offRight, zipperRaw, extLen, tol);
+                                             offLeft, offRight, zipperRaw, seam.Left, seam.Right, extLen, tol);
 
       // Collect objects inside the pocket boundary before moving
       var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
@@ -511,26 +511,54 @@ public sealed class vBiminiParts : Command
   }
 
   /// <summary>
-  /// Builds a closed pocket outline: adjSeam on top, mirrored end flares at each corner
-  /// (each fillet-trimmed where they meet the offset sides), offset sides spanning from each
-  /// flare down to the zipper, and the zipper (bottom line) trimmed between the two offset sides.
+  /// Builds a closed pocket outline. The zipper extends full-width to the seam side curves.
+  /// At each zip-seam corner a perpendicular line connects to the offset side wall.
+  /// Offset sides run from perpendicular foot up to the mirrored end flares (8-segment outline).
   /// Falls back to a 4-sided rect when mirrored ends are unavailable.
   /// </summary>
   private static Curve? BuildPocketOutline(Curve adjSeam,
                                             Curve? mirLeft,  Curve? mirRight,
                                             Curve  offLeft,  Curve  offRight,
-                                            Curve  zipper,   double extLen, double tol)
+                                            Curve  zipper,
+                                            Curve? seamLeft, Curve? seamRight,
+                                            double extLen,   double tol)
   {
     var offLExt = offLeft.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? offLeft.DuplicateCurve();
     var offRExt = offRight.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? offRight.DuplicateCurve();
     var zipExt  = zipper.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)  ?? zipper.DuplicateCurve();
 
-    // Bottom corners: offset sides ∩ zipper
-    if (!FindIntersectionParam(offLExt, zipExt, tol, out var tOL_off, out var tOL_zip)) { L("  BuildPocketOutline: no offLeft∩zipper"); return null; }
-    if (!FindIntersectionParam(offRExt, zipExt, tol, out var tOR_off, out var tOR_zip)) { L("  BuildPocketOutline: no offRight∩zipper"); return null; }
+    // Bottom corners: zip extends to seam sides; perpendiculars connect zip-seam corners to offset side walls
+    Curve?     zipSeg;
+    LineCurve? perpL = null, perpR = null;
+    double     tBotL_off, tBotR_off;  // parameters on offLExt/offRExt for perpendicular feet
 
-    var zipSeg = zipExt.Trim(Math.Min(tOL_zip, tOR_zip), Math.Max(tOL_zip, tOR_zip));
-    if (zipSeg == null) { L("  BuildPocketOutline: zipSeg trim null"); return null; }
+    if (seamLeft != null && seamRight != null)
+    {
+      var seamLExt = seamLeft.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? seamLeft.DuplicateCurve();
+      var seamRExt = seamRight.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? seamRight.DuplicateCurve();
+      if (!FindIntersectionParam(seamLExt, zipExt, tol, out _, out var tSL_zip)) { L("  BuildPocketOutline: no seamLeft∩zipper"); return null; }
+      if (!FindIntersectionParam(seamRExt, zipExt, tol, out _, out var tSR_zip)) { L("  BuildPocketOutline: no seamRight∩zipper"); return null; }
+
+      zipSeg = zipExt.Trim(Math.Min(tSL_zip, tSR_zip), Math.Max(tSL_zip, tSR_zip));
+      if (zipSeg == null) { L("  BuildPocketOutline: zipSeg trim null"); return null; }
+
+      var ptBotL = zipExt.PointAt(tSL_zip);  // zip ∩ seamLeft
+      var ptBotR = zipExt.PointAt(tSR_zip);  // zip ∩ seamRight
+      if (!offLExt.ClosestPoint(ptBotL, out tBotL_off)) { L("  BuildPocketOutline: perpL closest-point failed"); return null; }
+      if (!offRExt.ClosestPoint(ptBotR, out tBotR_off)) { L("  BuildPocketOutline: perpR closest-point failed"); return null; }
+
+      perpL = new LineCurve(ptBotL, offLExt.PointAt(tBotL_off));
+      perpR = new LineCurve(ptBotR, offRExt.PointAt(tBotR_off));
+      L($"  BuildPocketOutline: seam corners  ptBotL={ptBotL}  ptBotR={ptBotR}");
+    }
+    else
+    {
+      // Fallback: bottom corners = offset sides ∩ zipper
+      if (!FindIntersectionParam(offLExt, zipExt, tol, out tBotL_off, out var tOL_zip)) { L("  BuildPocketOutline: no offLeft∩zipper"); return null; }
+      if (!FindIntersectionParam(offRExt, zipExt, tol, out tBotR_off, out var tOR_zip)) { L("  BuildPocketOutline: no offRight∩zipper"); return null; }
+      zipSeg = zipExt.Trim(Math.Min(tOL_zip, tOR_zip), Math.Max(tOL_zip, tOR_zip));
+      if (zipSeg == null) { L("  BuildPocketOutline: zipSeg trim null"); return null; }
+    }
 
     Curve[] segments;
     if (mirLeft != null && mirRight != null)
@@ -539,25 +567,27 @@ public sealed class vBiminiParts : Command
       if (!FindIntersectionParam(mirLeft,  offLExt, tol, out var tML_mir, out var tML_off)) { L("  BuildPocketOutline: no mirLeft∩offLeft"); return null; }
       if (!FindIntersectionParam(mirRight, offRExt, tol, out var tMR_mir, out var tMR_off)) { L("  BuildPocketOutline: no mirRight∩offRight"); return null; }
 
-      // Trim flares from cornerPt (T0) to where they meet the offset side
+      // Trim flares from adjSeam endpoint (T0) to where they meet the offset side
       var mirLeftSeg  = mirLeft.Trim(mirLeft.Domain.T0,   tML_mir)
                       ?? mirLeft.Trim(tML_mir, mirLeft.Domain.T1);
       var mirRightSeg = mirRight.Trim(mirRight.Domain.T0, tMR_mir)
                       ?? mirRight.Trim(tMR_mir, mirRight.Domain.T1);
       if (mirLeftSeg == null || mirRightSeg == null) { L($"  BuildPocketOutline: flare trim null  mirLeftSeg={mirLeftSeg != null}  mirRightSeg={mirRightSeg != null}"); return null; }
 
-      // Trim offset sides between flare intersection (top) and zipper intersection (bottom)
-      var offLSeg = offLExt.Trim(Math.Min(tML_off, tOL_off), Math.Max(tML_off, tOL_off));
-      var offRSeg = offRExt.Trim(Math.Min(tMR_off, tOR_off), Math.Max(tMR_off, tOR_off));
+      // Offset sides: flare intersection (top) to perpendicular foot (bottom)
+      var offLSeg = offLExt.Trim(Math.Min(tML_off, tBotL_off), Math.Max(tML_off, tBotL_off));
+      var offRSeg = offRExt.Trim(Math.Min(tMR_off, tBotR_off), Math.Max(tMR_off, tBotR_off));
       if (offLSeg == null || offRSeg == null) { L($"  BuildPocketOutline: offSide trim null  offLSeg={offLSeg != null}  offRSeg={offRSeg != null}"); return null; }
 
-      // mirLeft/mirRight now start exactly at adjSeam endpoints (mirror origin = adjSeam endpoint)
-      segments = new[] { adjSeam.DuplicateCurve(), mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
+      // 8-seg: adjSeam → mirRight → offRight → perpR → zip → perpL → offLeft → mirLeft
+      if (perpL != null && perpR != null)
+        segments = new Curve[] { adjSeam.DuplicateCurve(), mirRightSeg, offRSeg, perpR, zipSeg, perpL, offLSeg, mirLeftSeg };
+      else
+        segments = new Curve[] { adjSeam.DuplicateCurve(), mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
     }
     else
     {
-      L("  BuildPocketOutline: fallback 4-sided rect (no mirLeft/mirRight)");
-      // Fallback: 4-sided rect (adjSeam + offRight + zipper + offLeft)
+      L("  BuildPocketOutline: fallback 4-sided (no mirLeft/mirRight)");
       var adjExt = adjSeam.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? adjSeam.DuplicateCurve();
       if (!FindIntersectionParam(adjExt, offLExt, tol, out var tAdj_L, out var tOL_adj)) { L("  BuildPocketOutline: no adjSeam∩offLeft"); return null; }
       if (!FindIntersectionParam(adjExt, offRExt, tol, out var tAdj_R, out var tOR_adj)) { L("  BuildPocketOutline: no adjSeam∩offRight"); return null; }
@@ -565,11 +595,14 @@ public sealed class vBiminiParts : Command
       var topSeg = adjExt.Trim(Math.Min(tAdj_L, tAdj_R), Math.Max(tAdj_L, tAdj_R));
       if (topSeg == null) { L("  BuildPocketOutline: topSeg trim null"); return null; }
 
-      var offLSeg4 = offLExt.Trim(Math.Min(tOL_adj, tOL_off), Math.Max(tOL_adj, tOL_off));
-      var offRSeg4 = offRExt.Trim(Math.Min(tOR_adj, tOR_off), Math.Max(tOR_adj, tOR_off));
+      var offLSeg4 = offLExt.Trim(Math.Min(tOL_adj, tBotL_off), Math.Max(tOL_adj, tBotL_off));
+      var offRSeg4 = offRExt.Trim(Math.Min(tOR_adj, tBotR_off), Math.Max(tOR_adj, tBotR_off));
       if (offLSeg4 == null || offRSeg4 == null) { L($"  BuildPocketOutline: 4-sided offSide trim null  offLSeg4={offLSeg4 != null}  offRSeg4={offRSeg4 != null}"); return null; }
 
-      segments = new[] { topSeg, offRSeg4, zipSeg, offLSeg4 };
+      if (perpL != null && perpR != null)
+        segments = new Curve[] { topSeg, offRSeg4, perpR, zipSeg, perpL, offLSeg4 };
+      else
+        segments = new Curve[] { topSeg, offRSeg4, zipSeg, offLSeg4 };
     }
 
     for (int i = 0; i < segments.Length; i++)
