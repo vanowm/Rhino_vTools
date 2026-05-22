@@ -190,12 +190,13 @@ public sealed class vBiminiParts : Command
     var cut1Attr = MakeAttr(cut1Idx);
     var finIds  = new HashSet<Guid>();
     var seamIds     = new HashSet<Guid>();
-    var seamCrvToId = new Dictionary<Curve, Guid>(ReferenceEqualityComparer.Instance);
     foreach (var s in finSegs)  { var id = doc.Objects.AddCurve(s, plotAttr); if (id != Guid.Empty) finIds.Add(id); }
-    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) { seamIds.Add(id); seamCrvToId[s] = id; } }
+    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) seamIds.Add(id); }
     // Delete source curves — replaced by the broken segments added above
     foreach (var id in selIds) doc.Objects.Delete(id, false);
     if (existingFinObj != null) doc.Objects.Delete(existingFinObj.Id, false);
+    doc.Views.Redraw();  // show seam/fin segments before stage-2 prompt
+
     // Exclude original selected curves + seam segments (seam boundary is added explicitly as facing edges).
     // Do NOT exclude finIds — finished curves inside the facing area must be collected into the facings.
     var excludeInterior = new HashSet<Guid>(selIds);
@@ -236,7 +237,7 @@ public sealed class vBiminiParts : Command
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
     if (mainCurves.Count > 0)
-      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, seamCrvToId, tol);
+      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, tol);
 
     doc.Views.Redraw();
     _log?.Dispose();
@@ -431,15 +432,11 @@ public sealed class vBiminiParts : Command
   private static void BuildMainPocket(RhinoDoc doc, List<Curve> mainCurves,
                                        Parts seam, Parts fin,
                                        Point3d centroid, int cut1Idx,
-                                       Dictionary<Curve, Guid> seamCrvToId, double tol)
+                                       double tol)
   {
     double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
     const double extLen  = 24.0;
     const double moveOut = 5.0;
-
-    // Remove side seam curves — pocket replaces them for this part
-    if (seam.Left  != null && seamCrvToId.TryGetValue(seam.Left,  out var leftId))  doc.Objects.Delete(leftId,  false);
-    if (seam.Right != null && seamCrvToId.TryGetValue(seam.Right, out var rightId)) doc.Objects.Delete(rightId, false);
 
     L($"BuildMainPocket: pocketDepth={pocketDepth}  curves={mainCurves.Count}");
     foreach (var mc in mainCurves)
@@ -465,9 +462,9 @@ public sealed class vBiminiParts : Command
       L($"  mc: adjFin={adjFin != null}  mirLeft={mirLeft != null}  mirRight={mirRight != null}");
 
       // Build closed pocket outline: adjSeam (top) → mirRight → offRight → perpR
-      //   → zipper (full width to seam sides) → perpL → offLeft → mirLeft → back
+      //   → zipper (full width to finished sides) → perpL → offLeft → mirLeft → back
       var pocketOutline = BuildPocketOutline(adjSeam, mirLeft, mirRight,
-                                             offLeft, offRight, zipperRaw, seam.Left, seam.Right, extLen, tol);
+                                             offLeft, offRight, zipperRaw, fin.Left, fin.Right, extLen, tol);
 
       // Collect objects inside the pocket boundary before moving
       var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
