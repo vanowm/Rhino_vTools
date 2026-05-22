@@ -545,7 +545,16 @@ public sealed class vBiminiParts : Command
       var offRSeg = offRExt.Trim(Math.Min(tMR_off, tOR_off), Math.Max(tMR_off, tOR_off));
       if (offLSeg == null || offRSeg == null) { L($"  BuildPocketOutline: offSide trim null  offLSeg={offLSeg != null}  offRSeg={offRSeg != null}"); return null; }
 
-      segments = new[] { adjSeam.DuplicateCurve(), mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
+      // Trim adjSeam between projections of the two cornerPts (adjSeam extends past corners by ~seam allowance)
+      var ptMirL = mirLeft.PointAtStart;   // = cornerPt left
+      var ptMirR = mirRight.PointAtStart;  // = cornerPt right
+      adjSeam.ClosestPoint(ptMirL, out var tSeamL);
+      adjSeam.ClosestPoint(ptMirR, out var tSeamR);
+      var topSeg6 = adjSeam.Trim(Math.Min(tSeamL, tSeamR), Math.Max(tSeamL, tSeamR))
+                 ?? adjSeam.DuplicateCurve();
+      L($"  BuildPocketOutline: topSeg6  gapToMirL={topSeg6.PointAtStart.DistanceTo(ptMirL):F4}|{topSeg6.PointAtEnd.DistanceTo(ptMirL):F4}  gapToMirR={topSeg6.PointAtStart.DistanceTo(ptMirR):F4}|{topSeg6.PointAtEnd.DistanceTo(ptMirR):F4}");
+
+      segments = new[] { topSeg6, mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
     }
     else
     {
