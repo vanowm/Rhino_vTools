@@ -65,7 +65,7 @@
   </Target>
 
   <!-- Commit updated version metadata and release plugin binary after successful Release builds. -->
-  <Target Name="CommitReleaseVersion" AfterTargets="CreateReleaseBackup" Condition="'$(Configuration)' == 'Release' and '$(AutoCommitVersionOnRelease)' == 'true'">
+  <Target Name="CommitReleaseVersion" AfterTargets="CreateReleaseBackup" Condition="'$(Configuration)' == 'Release' and '$(AutoCommitVersionOnRelease)' == 'true' and !Exists('$(MSBuildProjectDirectory)\.git\vtools-hold-commits')">
     <PropertyGroup>
       <ShortTagVersion>$([System.Text.RegularExpressions.Regex]::Match('$(Version)', '^\d{2}\.\d{2}\.\d{2}').Value)</ShortTagVersion>
     </PropertyGroup>
@@ -93,11 +93,10 @@
       <HasPendingMessage Condition="Exists('$(PendingMessageFile)')">true</HasPendingMessage>
     </PropertyGroup>
 
-    <Copy
-      SourceFiles="$(PendingMessageFile)"
-      DestinationFiles="$(MSBuildProjectDirectory)\.git\vtools-autocommit-message.txt"
+    <Exec
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$msg=[System.IO.File]::ReadAllText('$(PendingMessageFile)').Trim() -replace 'XXXX','$(Version)'; $enc=New-Object System.Text.UTF8Encoding($false); [System.IO.File]::WriteAllText('$(MSBuildProjectDirectory)\.git\vtools-autocommit-message.txt',$msg,$enc)&quot;"
       Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0' and '$(VersionDllDiffExitCode)' != '0'"
-      OverwriteReadOnlyFiles="true" />
+      IgnoreExitCode="true" />
 
     <Delete
       Files="$(PendingMessageFile)"

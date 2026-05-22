@@ -190,8 +190,9 @@ public sealed class vBiminiParts : Command
     var cut1Attr = MakeAttr(cut1Idx);
     var finIds  = new HashSet<Guid>();
     var seamIds     = new HashSet<Guid>();
+    var seamCrvToId = new Dictionary<Curve, Guid>(ReferenceEqualityComparer.Instance);
     foreach (var s in finSegs)  { var id = doc.Objects.AddCurve(s, plotAttr); if (id != Guid.Empty) finIds.Add(id); }
-    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) seamIds.Add(id); }
+    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) { seamIds.Add(id); seamCrvToId[s] = id; } }
     // Delete source curves — replaced by the broken segments added above
     foreach (var id in selIds) doc.Objects.Delete(id, false);
     if (existingFinObj != null) doc.Objects.Delete(existingFinObj.Id, false);
@@ -208,7 +209,7 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
 
-    var mainCurves = PickPocketCurves("Click on Main pocket curve(s)", 2);
+    var mainCurves = PickPocketCurves("Click near Main pocket center", 2, seamSegs);
 
     // ── Stage 3: Secondary pocket curve selection ────────────────────────────
 
@@ -220,7 +221,7 @@ public sealed class vBiminiParts : Command
     else
     {
       var maxSec = mainCurves.Count == 0 ? 2 : 1;
-      secCurves = PickPocketCurves($"Click on Secondary pocket curve(s) (max {maxSec})", maxSec);
+      secCurves = PickPocketCurves($"Click near Secondary pocket center (max {maxSec})", maxSec, seamSegs);
     }
 
     // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
@@ -237,7 +238,7 @@ public sealed class vBiminiParts : Command
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
     if (mainCurves.Count > 0)
-      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, tol);
+      BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, seamCrvToId, tol);
 
     doc.Views.Redraw();
     _log?.Dispose();
@@ -247,25 +248,35 @@ public sealed class vBiminiParts : Command
 
   // ── Pocket curve picker ─────────────────────────────────────────────────────
 
-  private static List<Curve> PickPocketCurves(string prompt, int maxCount)
+  private static List<Curve> PickPocketCurves(string prompt, int maxCount, List<Curve> candidates)
   {
-    var gm = new GetObject();
-    gm.SetCommandPrompt(prompt + ". Press Enter to skip");
-    gm.GeometryFilter = ObjectType.Curve;
-    gm.SubObjectSelect = false;
-    gm.AcceptNothing(true);
-    gm.EnablePreSelect(false, false);
-    gm.EnableClearObjectsOnEntry(false);
-    gm.AlreadySelectedObjectSelect = true;
+    var list    = new List<Curve>();
+    var picked  = new HashSet<Curve>(ReferenceEqualityComparer.Instance);
 
-    var list = new List<Curve>();
-    var res  = gm.GetMultiple(0, maxCount);
-    if (res == GetResult.Object)
-      for (var i = 0; i < gm.ObjectCount; i++)
+    for (var i = 0; i < maxCount; i++)
+    {
+      var gp = new GetPoint();
+      var remaining = maxCount - i;
+      gp.SetCommandPrompt($"{prompt} ({remaining} remaining). Press Enter to finish");
+      gp.AcceptNothing(true);
+      var res = gp.Get();
+      if (res != GetResult.Point) break;
+
+      var pt = gp.Point();
+      // Find closest candidate not already picked
+      Curve? best = null;
+      double bestDist = double.MaxValue;
+      foreach (var c in candidates)
       {
-        var c = gm.Object(i).Curve();
-        if (c != null) list.Add(c.DuplicateCurve());
+        if (picked.Contains(c)) continue;
+        c.ClosestPoint(pt, out var t);
+        var d = pt.DistanceTo(c.PointAt(t));
+        if (d < bestDist) { bestDist = d; best = c; }
       }
+      if (best == null) break;
+      picked.Add(best);
+      list.Add(best.DuplicateCurve());
+    }
     return list;
   }
 
@@ -432,11 +443,15 @@ public sealed class vBiminiParts : Command
   private static void BuildMainPocket(RhinoDoc doc, List<Curve> mainCurves,
                                        Parts seam, Parts fin,
                                        Point3d centroid, int cut1Idx,
-                                       double tol)
+                                       Dictionary<Curve, Guid> seamCrvToId, double tol)
   {
     double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
     const double extLen  = 24.0;
     const double moveOut = 5.0;
+
+    // Remove side seam curves — the main pocket outline replaces them for this part
+    if (seam.Left  != null && seamCrvToId.TryGetValue(seam.Left,  out var leftId))  doc.Objects.Delete(leftId,  false);
+    if (seam.Right != null && seamCrvToId.TryGetValue(seam.Right, out var rightId)) doc.Objects.Delete(rightId, false);
 
     L($"BuildMainPocket: pocketDepth={pocketDepth}  curves={mainCurves.Count}");
     foreach (var mc in mainCurves)
