@@ -565,6 +565,15 @@ public sealed class vBiminiParts : Command
       segments = new[] { topSeg, offRSeg4, zipSeg, offLSeg4 };
     }
 
+    for (int i = 0; i < segments.Length; i++)
+    {
+      var s = segments[i];
+      var sn = segments[(i + 1) % segments.Length];
+      double gap = Math.Min(
+        Math.Min(s.PointAtStart.DistanceTo(sn.PointAtStart), s.PointAtStart.DistanceTo(sn.PointAtEnd)),
+        Math.Min(s.PointAtEnd.DistanceTo(sn.PointAtStart),   s.PointAtEnd.DistanceTo(sn.PointAtEnd)));
+      L($"  seg[{i}]→seg[{(i+1)%segments.Length}]  gap={gap:F4}  s0={s.PointAtStart}  s1={s.PointAtEnd}  n0={sn.PointAtStart}  n1={sn.PointAtEnd}");
+    }
     var joinTol = Math.Max(tol * 200, 0.1);
     var joined  = Curve.JoinCurves(segments, joinTol);
     L($"  BuildPocketOutline: joinTol={joinTol:F4}  segs={segments.Length}  joined={joined?.Length}  closed={(joined?.Length == 1 ? joined[0].IsClosed.ToString() : "n/a")}");
