@@ -237,12 +237,6 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
-    // Remove seam side doc objects — their function inside the pocket is replaced by the pocket outline sides
-    var seamLeftIdx  = seamSegs.FindIndex(c => ReferenceEquals(c, seamParts.Left));
-    var seamRightIdx = seamSegs.FindIndex(c => ReferenceEquals(c, seamParts.Right));
-    if (seamLeftIdx  >= 0 && seamLeftIdx  < seamDocIds.Count && seamDocIds[seamLeftIdx]  != Guid.Empty) doc.Objects.Delete(seamDocIds[seamLeftIdx],  false);
-    if (seamRightIdx >= 0 && seamRightIdx < seamDocIds.Count && seamDocIds[seamRightIdx] != Guid.Empty) doc.Objects.Delete(seamDocIds[seamRightIdx], false);
-
     if (mainCurves.Count > 0)
       BuildMainPocket(doc, mainCurves, seamParts, finParts, centroid, cut1Idx, tol);
 
@@ -257,33 +251,37 @@ public sealed class vBiminiParts : Command
   private static List<Curve> PickPocketCurves(string prompt, int maxCount,
                                                RhinoDoc doc, List<Curve> candidates, List<Guid> candidateIds)
   {
-    var list      = new List<Curve>();
-    var pickedIds = new HashSet<Guid>();
-    var candidateSet = new HashSet<Guid>(candidateIds.Where(id => id != Guid.Empty));
+    var list    = new List<Curve>();
+    var picked  = new HashSet<Curve>(ReferenceEqualityComparer.Instance);
 
     for (var i = 0; i < maxCount; i++)
     {
-      var go = new GetObject();
-      var remaining = maxCount - i;
-      go.SetCommandPrompt($"{prompt} ({remaining} to pick). Press Enter to finish.");
-      go.GeometryFilter = ObjectType.Curve;
-      go.EnablePreSelect(false, true);
-      go.SetCustomGeometryFilter((rhobj, geom, _) =>
-          candidateSet.Contains(rhobj.Id) && !pickedIds.Contains(rhobj.Id));
-      go.AcceptNothing(true);
-      var res = go.Get();
-      if (res != GetResult.Object) break;
+      var gp = new GetPoint();
+      gp.SetCommandPrompt($"{prompt}. Press Enter to finish.");
+      gp.AcceptNothing(true);
 
-      var id = go.Object(0).ObjectId;
-      if (pickedIds.Contains(id)) break;
-      pickedIds.Add(id);
+      var res = gp.Get();
 
-      var idx = candidateIds.IndexOf(id);
-      if (idx >= 0)
+      if (res != GetResult.Point) break;
+
+      var pt = gp.Point();
+      Curve? best = null;
+      double bestDist = double.MaxValue;
+      foreach (var c in candidates)
       {
-        list.Add(candidates[idx].DuplicateCurve());
-        doc.Objects.Select(id, true);
+        if (picked.Contains(c)) continue;
+        // Compare against the curve midpoint — immune to Osnap snapping to endpoints
+        var d = pt.DistanceTo(c.PointAt(c.Domain.Mid));
+        if (d < bestDist) { bestDist = d; best = c; }
       }
+      if (best == null) break;
+      picked.Add(best);
+      list.Add(best.DuplicateCurve());
+
+      // Keep picked curve highlighted for subsequent prompts
+      var bestIdx = candidates.FindIndex(c => ReferenceEquals(c, best));
+      if (bestIdx >= 0 && bestIdx < candidateIds.Count && candidateIds[bestIdx] != Guid.Empty)
+        doc.Objects.Select(candidateIds[bestIdx], true);
     }
     return list;
   }
