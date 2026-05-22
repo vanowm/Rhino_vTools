@@ -426,43 +426,41 @@ public sealed class vBiminiParts : Command
                                        Point3d centroid, int cut1Idx, double tol)
   {
     double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
-    const double extLen  = 24.0;  // generous extension so all 4 curves overshoot their corners
-    const double moveOut = 5.0;   // gap between pocket and bimini
+    const double extLen  = 24.0;
+    const double moveOut = 5.0;
 
     foreach (var mc in mainCurves)
     {
       var adjSeam = ClosestOf(mc, seam.Top, seam.Bottom, seam.Left, seam.Right);
       if (adjSeam == null) continue;
 
-      // zipper = adjSeam offset toward centroid by pocketDepth
       var zipperRaw = OffsetToward(adjSeam, centroid, pocketDepth, tol);
       if (zipperRaw == null) continue;
 
-      // offset sides outward (side walls of the pocket)
       var offLeft  = seam.Left  != null ? OffsetAway(seam.Left,  centroid, SidePktOutward, tol) : null;
       var offRight = seam.Right != null ? OffsetAway(seam.Right, centroid, SidePktOutward, tol) : null;
       if (offLeft == null || offRight == null) continue;
 
-      // Extend all 4 curves so they overshoot, then trim at intersections (fillet radius=0)
-      var topExt   = adjSeam.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)   ?? adjSeam.DuplicateCurve();
-      var botExt   = zipperRaw.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? zipperRaw.DuplicateCurve();
-      var leftExt  = offLeft.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)   ?? offLeft.DuplicateCurve();
-      var rightExt = offRight.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)  ?? offRight.DuplicateCurve();
-
-      // Build closed pocket outline: adjSeam (top) + offRight (right) + zipper (bottom) + offLeft (left)
-      var pocketOutline = BuildFilletedRect(topExt, botExt, leftExt, rightExt, tol);
-
-      // Mirrored end curves: section of adjSeam mirrored across each finished side at corner,
-      // trimmed to meet the offset side curve
-      var adjFin        = ClosestOf(adjSeam, fin.Top, fin.Bottom, fin.Left, fin.Right);
-      var mirroredGeoms = new List<Curve>();
+      // Build mirrored end flares at each corner where adjSeam meets the fin sides
+      var adjFin   = ClosestOf(adjSeam, fin.Top, fin.Bottom, fin.Left, fin.Right);
+      Curve? mirLeft = null, mirRight = null;
       if (adjFin != null)
       {
-        if (fin.Left  != null) { var c = FindSharedEndpoint(adjFin, fin.Left);  if (c.IsValid) AddMirroredEndGeom(adjSeam, fin.Left,  c, offLeft,  pocketDepth, tol, mirroredGeoms); }
-        if (fin.Right != null) { var c = FindSharedEndpoint(adjFin, fin.Right); if (c.IsValid) AddMirroredEndGeom(adjSeam, fin.Right, c, offRight, pocketDepth, tol, mirroredGeoms); }
+        if (fin.Left  != null) { var c = FindSharedEndpoint(adjFin, fin.Left);  if (c.IsValid) mirLeft  = BuildMirroredEnd(adjSeam, fin.Left,  c, pocketDepth, extLen); }
+        if (fin.Right != null) { var c = FindSharedEndpoint(adjFin, fin.Right); if (c.IsValid) mirRight = BuildMirroredEnd(adjSeam, fin.Right, c, pocketDepth, extLen); }
       }
 
-      // Translate all pocket geometry away from the bimini before adding to doc
+      // Build closed 6-segment pocket outline:
+      //   adjSeam (top) → mirRight → offRight → zipper (bottom) → offLeft → mirLeft → back
+      var pocketOutline = BuildPocketOutline(adjSeam, mirLeft, mirRight,
+                                             offLeft, offRight, zipperRaw, extLen, tol);
+
+      // Collect objects inside the pocket boundary before moving
+      var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
+      if (pocketOutline != null && pocketOutline.IsClosed)
+        interiorObjects = CollectInsideObjects(doc, new HashSet<Guid>(), pocketOutline, Plane.WorldXY, tol);
+
+      // Translate all pocket geometry away from the bimini
       var outDir = adjSeam.PointAtNormalizedLength(0.5) - centroid;
       outDir.Unitize();
       var xf = Transform.Translation(outDir * moveOut);
@@ -474,14 +472,15 @@ public sealed class vBiminiParts : Command
         var id = doc.Objects.AddCurve(pocketOutline, MakeAttr(cut1Idx));
         if (id != Guid.Empty) addedIds.Add(id);
       }
-      foreach (var m in mirroredGeoms)
+      foreach (var (geom, geomAttr) in interiorObjects)
       {
-        m.Transform(xf);
-        var id = doc.Objects.AddCurve(m, MakeAttr(cut1Idx));
+        var copy = geom.Duplicate()!;
+        copy.Transform(xf);
+        geomAttr.RemoveFromAllGroups();
+        var id = AddObjectToDoc(doc, copy, geomAttr);
         if (id != Guid.Empty) addedIds.Add(id);
       }
 
-      // Group all pocket curves
       if (addedIds.Count > 1)
       {
         var grpIdx = doc.Groups.Add();
@@ -497,24 +496,67 @@ public sealed class vBiminiParts : Command
   }
 
   /// <summary>
-  /// Builds a closed rectangular pocket outline from 4 extended curves by trimming each
-  /// pair at their intersection (equivalent to fillet radius = 0 at all 4 corners).
+  /// Builds a closed pocket outline: adjSeam on top, mirrored end flares at each corner
+  /// (each fillet-trimmed where they meet the offset sides), offset sides spanning from each
+  /// flare down to the zipper, and the zipper (bottom line) trimmed between the two offset sides.
+  /// Falls back to a 4-sided rect when mirrored ends are unavailable.
   /// </summary>
-  private static Curve? BuildFilletedRect(Curve top, Curve bot, Curve left, Curve right, double tol)
+  private static Curve? BuildPocketOutline(Curve adjSeam,
+                                            Curve? mirLeft,  Curve? mirRight,
+                                            Curve  offLeft,  Curve  offRight,
+                                            Curve  zipper,   double extLen, double tol)
   {
-    if (!FindIntersectionParam(top,  left,  tol, out var tTopL,  out var tLeftT))  return null;
-    if (!FindIntersectionParam(top,  right, tol, out var tTopR,  out var tRightT)) return null;
-    if (!FindIntersectionParam(bot,  left,  tol, out var tBotL,  out var tLeftB))  return null;
-    if (!FindIntersectionParam(bot,  right, tol, out var tBotR,  out var tRightB)) return null;
+    var offLExt = offLeft.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? offLeft.DuplicateCurve();
+    var offRExt = offRight.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? offRight.DuplicateCurve();
+    var zipExt  = zipper.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)  ?? zipper.DuplicateCurve();
 
-    var topSeg   = top.Trim(Math.Min(tTopL,   tTopR),   Math.Max(tTopL,   tTopR));
-    var botSeg   = bot.Trim(Math.Min(tBotL,   tBotR),   Math.Max(tBotL,   tBotR));
-    var leftSeg  = left.Trim(Math.Min(tLeftT,  tLeftB),  Math.Max(tLeftT,  tLeftB));
-    var rightSeg = right.Trim(Math.Min(tRightT, tRightB), Math.Max(tRightT, tRightB));
+    // Bottom corners: offset sides ∩ zipper
+    if (!FindIntersectionParam(offLExt, zipExt, tol, out var tOL_off, out var tOL_zip)) return null;
+    if (!FindIntersectionParam(offRExt, zipExt, tol, out var tOR_off, out var tOR_zip)) return null;
 
-    if (topSeg == null || botSeg == null || leftSeg == null || rightSeg == null) return null;
+    var zipSeg = zipExt.Trim(Math.Min(tOL_zip, tOR_zip), Math.Max(tOL_zip, tOR_zip));
+    if (zipSeg == null) return null;
 
-    var joined = Curve.JoinCurves(new[] { topSeg, botSeg, leftSeg, rightSeg }, tol * 100);
+    Curve[] segments;
+    if (mirLeft != null && mirRight != null)
+    {
+      // Top corners: mirrored flares ∩ offset sides
+      if (!FindIntersectionParam(mirLeft,  offLExt, tol, out var tML_mir, out var tML_off)) return null;
+      if (!FindIntersectionParam(mirRight, offRExt, tol, out var tMR_mir, out var tMR_off)) return null;
+
+      // Trim flares from cornerPt (T0) to where they meet the offset side
+      var mirLeftSeg  = mirLeft.Trim(mirLeft.Domain.T0,   tML_mir)
+                      ?? mirLeft.Trim(tML_mir, mirLeft.Domain.T1);
+      var mirRightSeg = mirRight.Trim(mirRight.Domain.T0, tMR_mir)
+                      ?? mirRight.Trim(tMR_mir, mirRight.Domain.T1);
+      if (mirLeftSeg == null || mirRightSeg == null) return null;
+
+      // Trim offset sides between flare intersection (top) and zipper intersection (bottom)
+      var offLSeg = offLExt.Trim(Math.Min(tML_off, tOL_off), Math.Max(tML_off, tOL_off));
+      var offRSeg = offRExt.Trim(Math.Min(tMR_off, tOR_off), Math.Max(tMR_off, tOR_off));
+      if (offLSeg == null || offRSeg == null) return null;
+
+      segments = new[] { adjSeam.DuplicateCurve(), mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
+    }
+    else
+    {
+      // Fallback: 4-sided rect (adjSeam + offRight + zipper + offLeft)
+      var adjExt = adjSeam.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? adjSeam.DuplicateCurve();
+      if (!FindIntersectionParam(adjExt, offLExt, tol, out var tAdj_L, out var tOL_adj)) return null;
+      if (!FindIntersectionParam(adjExt, offRExt, tol, out var tAdj_R, out var tOR_adj)) return null;
+
+      var topSeg = adjExt.Trim(Math.Min(tAdj_L, tAdj_R), Math.Max(tAdj_L, tAdj_R));
+      if (topSeg == null) return null;
+
+      var offLSeg4 = offLExt.Trim(Math.Min(tOL_adj, tOL_off), Math.Max(tOL_adj, tOL_off));
+      var offRSeg4 = offRExt.Trim(Math.Min(tOR_adj, tOR_off), Math.Max(tOR_adj, tOR_off));
+      if (offLSeg4 == null || offRSeg4 == null) return null;
+
+      segments = new[] { topSeg, offRSeg4, zipSeg, offLSeg4 };
+    }
+
+    var joinTol = Math.Max(tol * 200, 0.1);
+    var joined  = Curve.JoinCurves(segments, joinTol);
     return joined?.Length == 1 && joined[0].IsClosed ? joined[0] : null;
   }
 
@@ -531,13 +573,13 @@ public sealed class vBiminiParts : Command
   }
 
   /// <summary>
-  /// Mirrors a section of <paramref name="adjSeam"/> at the end nearest <paramref name="cornerPt"/>
-  /// across <paramref name="finSide"/> at <paramref name="cornerPt"/>, then trims the result
-  /// to where it first intersects <paramref name="offSide"/>. Appends result to <paramref name="result"/>.
+  /// Mirrors a section of <paramref name="adjSeam"/> (length ≤ <paramref name="depth"/>)
+  /// at the end nearest <paramref name="cornerPt"/> across <paramref name="finSide"/> at
+  /// <paramref name="cornerPt"/>. Returns the mirrored curve with Start ≈ cornerPt,
+  /// extended at the far end by <paramref name="extLen"/> so it overshoots the offset side.
   /// </summary>
-  private static void AddMirroredEndGeom(Curve adjSeam, Curve finSide, Point3d cornerPt,
-                                          Curve? offSide, double depth, double tol,
-                                          List<Curve> result)
+  private static Curve? BuildMirroredEnd(Curve adjSeam, Curve finSide, Point3d cornerPt,
+                                          double depth, double extLen)
   {
     var totalLen  = adjSeam.GetLength();
     var isAtStart = adjSeam.PointAtStart.DistanceTo(cornerPt)
@@ -545,15 +587,15 @@ public sealed class vBiminiParts : Command
     Curve? section;
     if (isAtStart)
     {
-      if (!adjSeam.LengthParameter(Math.Min(depth, totalLen * 0.5), out var tEnd)) return;
+      if (!adjSeam.LengthParameter(Math.Min(depth, totalLen * 0.5), out var tEnd)) return null;
       section = adjSeam.Trim(adjSeam.Domain.T0, tEnd);
     }
     else
     {
-      if (!adjSeam.LengthParameter(Math.Max(totalLen - depth, totalLen * 0.5), out var tStart)) return;
+      if (!adjSeam.LengthParameter(Math.Max(totalLen - depth, totalLen * 0.5), out var tStart)) return null;
       section = adjSeam.Trim(tStart, adjSeam.Domain.T1);
     }
-    if (section == null) return;
+    if (section == null) return null;
 
     var sideDir      = finSide.PointAtEnd - finSide.PointAtStart;
     sideDir.Unitize();
@@ -561,17 +603,13 @@ public sealed class vBiminiParts : Command
     var mirrored     = section.DuplicateCurve();
     mirrored.Transform(Transform.Mirror(new Plane(cornerPt, mirrorNormal)));
 
-    // Trim the mirrored curve to where it meets the offset side
-    if (offSide != null && FindIntersectionParam(mirrored, offSide, tol, out var tM, out _))
-    {
-      var nearStart = mirrored.PointAtStart.DistanceTo(cornerPt) <= mirrored.PointAtEnd.DistanceTo(cornerPt);
-      var trimmed   = nearStart
-        ? mirrored.Trim(mirrored.Domain.T0, tM)
-        : mirrored.Trim(tM, mirrored.Domain.T1);
-      if (trimmed != null) mirrored = trimmed;
-    }
+    // Ensure Start ≈ cornerPt so T0-based trim in BuildPocketOutline is consistent
+    if (mirrored.PointAtEnd.DistanceTo(cornerPt) < mirrored.PointAtStart.DistanceTo(cornerPt))
+      mirrored.Reverse();
 
-    result.Add(mirrored);
+    // Extend the far end (away from cornerPt) so it overshoots the offset side
+    var extended = mirrored.Extend(CurveEnd.End, extLen, CurveExtensionStyle.Line);
+    return extended ?? mirrored;
   }
 
   /// <summary>Returns the shared endpoint of two curves (within 0.5"), or <see cref="Point3d.Unset"/>.</summary>
