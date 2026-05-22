@@ -184,8 +184,6 @@ public sealed class vBiminiParts : Command
     var finSegs  = BreakAtCorners(finishedCrv, CornerAngleDeg);
     var seamSegs = BreakAtCorners(seamCrv,     CornerAngleDeg);
 
-    RhinoApp.WriteLine($"vBiminiParts: finished segments = {finSegs.Count}, seam segments = {seamSegs.Count}");
-
     var plotAttr   = MakeAttr(plotIdx);
     var cut1Attr   = MakeAttr(cut1Idx);
     var finIds     = new HashSet<Guid>();
@@ -215,7 +213,6 @@ public sealed class vBiminiParts : Command
     L($"seamCandidates: {seamSegs.Count} segs, {seamDocIds.Count} docIds");
     for (var _si = 0; _si < seamSegs.Count; _si++)
       L($"  seamSeg[{_si}]: id={(_si < seamDocIds.Count ? seamDocIds[_si] : Guid.Empty)}  len={seamSegs[_si].GetLength():F2}  start={seamSegs[_si].PointAtStart}  end={seamSegs[_si].PointAtEnd}");
-    RhinoApp.WriteLine($"vBiminiParts: log → {logPath}");
 
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
     // Exclude side seams from picker — main pocket is always top or bottom seam.
