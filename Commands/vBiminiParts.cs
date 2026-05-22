@@ -231,7 +231,7 @@ public sealed class vBiminiParts : Command
     }
     L($"mainCandidates (top/bottom only): {mainCandidates.Count}");
 
-    var mainPicks = PickPocketCurves("Click ON the Main pocket seam", 2, doc, mainCandidates);
+    var mainPicks = PickPocketCurves("Click ON the Main pocket seam", 2, doc, mainCandidates, mainCandidateIds);
 
     // ── Stage 3: Secondary pocket curve selection ────────────────────────────
 
@@ -243,7 +243,7 @@ public sealed class vBiminiParts : Command
     else
     {
       var maxSec = mainPicks.Count == 0 ? 2 : 1;
-      secPicks = PickPocketCurves("Click ON the Secondary pocket seam", maxSec, doc, mainCandidates);
+      secPicks = PickPocketCurves("Click ON the Secondary pocket seam", maxSec, doc, mainCandidates, mainCandidateIds);
     }
 
     L($"mainPicks={mainPicks.Count}  secPicks={secPicks.Count}");
@@ -274,7 +274,8 @@ public sealed class vBiminiParts : Command
   private const double PickSnapTol = 1.0;
 
   private static List<(Curve Curve, Point3d Center)> PickPocketCurves(string prompt, int maxCount,
-                                                                        RhinoDoc doc, List<Curve> candidates)
+                                                                        RhinoDoc doc, List<Curve> candidates,
+                                                                        List<Guid> candidateIds)
   {
     var list       = new List<(Curve, Point3d)>();
     var pickedIdxs = new HashSet<int>();
@@ -318,6 +319,11 @@ public sealed class vBiminiParts : Command
         pickedIdxs.Add(bestIdx);
         list.Add((candidates[bestIdx].DuplicateCurve(), pt));
         L($"  pick {i}: confirmed idx={bestIdx}  pt={pt}");
+
+        // Highlight the confirmed seam so the user can see which seam was registered
+        if (bestIdx < candidateIds.Count && candidateIds[bestIdx] != Guid.Empty)
+          doc.Objects.Select(candidateIds[bestIdx], true);
+        doc.Views.Redraw();
         break;
       }
       nextPick:;
@@ -503,13 +509,30 @@ public sealed class vBiminiParts : Command
       // Dedup: delete any previously created pocket objects for this same seam
       var seamMid = adjSeam.PointAtNormalizedLength(0.5);
       var seamKey = $"{seamMid.X:F2},{seamMid.Y:F2}";
+      var grpName  = "vBiminiPkt:" + seamKey;
       var toDelete = new List<Guid>();
+
+      // Primary: find by UserString tag (set on every object since build 1817)
       foreach (var o in doc.Objects)
-      {
         if (o.Attributes.GetUserString("vBiminiPkt") == seamKey)
           toDelete.Add(o.Id);
+
+      // Fallback: find by named group (named group also set since build 1817)
+      if (toDelete.Count == 0)
+      {
+        for (var gi = 0; gi < doc.Groups.Count; gi++)
+        {
+          if (doc.Groups.GroupName(gi) == grpName)
+          {
+            var grouped = doc.Objects.FindByGroup(gi);
+            if (grouped != null) foreach (var go in grouped) toDelete.Add(go.Id);
+            break;
+          }
+        }
       }
-      L($"  mc: seamKey={seamKey}  dedup found={toDelete.Count}");
+
+      var dedupTagged = toDelete.Count > 0;
+      L($"  mc: seamKey={seamKey}  dedup found={toDelete.Count}  tagged={dedupTagged}");
       foreach (var delId in toDelete) doc.Objects.Delete(delId, true);
 
       var zipperRaw = OffsetToward(adjSeam, centroid, pocketDepth, tol);
@@ -552,10 +575,62 @@ public sealed class vBiminiParts : Command
       if (pocketOutline != null)
       {
         pocketOutline.Transform(xf);
+
+        // Geo-fallback dedup: for untagged pockets from pre-1817 builds, find existing closed
+        // curves whose bounding box matches the new pocket outline and delete their whole group.
+        if (!dedupTagged)
+        {
+          var newBbox = pocketOutline.GetBoundingBox(true);
+          var newArea = newBbox.Diagonal.X * newBbox.Diagonal.Y;
+          var geoFound = new List<Guid>();
+          foreach (var o in doc.Objects)
+          {
+            if (globalExclude.Contains(o.Id)) continue;
+            if (o.Geometry is not Curve crv || !crv.IsClosed) continue;
+            var ob = crv.GetBoundingBox(true);
+            var ix = BoundingBox.Intersection(newBbox, ob);
+            if (!ix.IsValid) continue;
+            var ixArea  = ix.Diagonal.X  * ix.Diagonal.Y;
+            var objArea = ob.Diagonal.X  * ob.Diagonal.Y;
+            if (ixArea > 0.5 * newArea && ixArea > 0.5 * objArea)
+              geoFound.Add(o.Id);
+          }
+          if (geoFound.Count > 0)
+          {
+            // Expand to full groups; skip if group contains any protected (excluded) objects
+            var geoIds = new HashSet<Guid>();
+            foreach (var id in geoFound)
+            {
+              var obj = doc.Objects.FindId(id);
+              if (obj == null) continue;
+              var grps = obj.Attributes.GetGroupList();
+              var safe = true;
+              var ids  = new HashSet<Guid> { id };
+              if (grps != null)
+              {
+                foreach (var gi in grps)
+                {
+                  var grouped = doc.Objects.FindByGroup(gi);
+                  if (grouped == null) continue;
+                  foreach (var go in grouped)
+                  {
+                    if (globalExclude.Contains(go.Id)) { safe = false; break; }
+                    ids.Add(go.Id);
+                  }
+                  if (!safe) break;
+                }
+              }
+              if (safe) foreach (var i in ids) geoIds.Add(i);
+            }
+            L($"  mc: geo fallback dedup: deleting {geoIds.Count} untagged pocket objects");
+            foreach (var id in geoIds) doc.Objects.Delete(id, true);
+          }
+        }
+
         var outlineAttr = MakeAttr(cut1Idx);
         outlineAttr.SetUserString("vBiminiPkt", seamKey);
-        var id = doc.Objects.AddCurve(pocketOutline, outlineAttr);
-        if (id != Guid.Empty) addedIds.Add(id);
+        var id2 = doc.Objects.AddCurve(pocketOutline, outlineAttr);
+        if (id2 != Guid.Empty) addedIds.Add(id2);
       }
 
       // Add confirmation point at the pick location (transformed with the pocket)
@@ -577,10 +652,10 @@ public sealed class vBiminiParts : Command
         if (id != Guid.Empty) addedIds.Add(id);
       }
 
-      // Group all objects
+      // Group all objects under a named group for future dedup
       if (addedIds.Count > 1)
       {
-        var grpIdx = doc.Groups.Add();
+        var grpIdx = doc.Groups.Add(grpName);
         foreach (var id in addedIds)
         {
           var obj = doc.Objects.FindId(id);
