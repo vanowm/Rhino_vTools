@@ -212,6 +212,16 @@ public sealed class vBiminiParts : Command
     SetDocObjectColor(doc, seamSegs, seamDocIds, seamParts.Right, Color.Magenta);
     doc.Views.Redraw();
 
+    // Open log before picker so picker actions are captured
+    var logPath = GetLogPath();
+    _log = new StreamWriter(logPath, true, System.Text.Encoding.UTF8) { AutoFlush = true };
+    L($"── vBiminiParts {DateTime.Now} ──");
+    L($"tol={doc.ModelAbsoluteTolerance}  selIds={selIds.Count}  seamIds={seamIds.Count}  finIds={finIds.Count}  excludeInterior={excludeInterior.Count}");
+    L($"seamCandidates: {seamSegs.Count} segs, {seamDocIds.Count} docIds");
+    for (var _si = 0; _si < seamSegs.Count; _si++)
+      L($"  seamSeg[{_si}]: id={(_si < seamDocIds.Count ? seamDocIds[_si] : Guid.Empty)}  len={seamSegs[_si].GetLength():F2}  start={seamSegs[_si].PointAtStart}  end={seamSegs[_si].PointAtEnd}");
+    RhinoApp.WriteLine($"vBiminiParts: log → {logPath}");
+
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
 
     var mainPicks = PickPocketCurves("Click near Main pocket center", 2, doc, seamSegs, seamDocIds);
@@ -229,23 +239,18 @@ public sealed class vBiminiParts : Command
       secPicks = PickPocketCurves("Click near Secondary pocket center", maxSec, doc, seamSegs, seamDocIds);
     }
 
-    // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
-
-    var logPath = GetLogPath();
-    _log = new StreamWriter(logPath, true, System.Text.Encoding.UTF8) { AutoFlush = true };
-    L($"── vBiminiParts {DateTime.Now} ──");
-    L($"tol={doc.ModelAbsoluteTolerance}  selIds={selIds.Count}  seamIds={seamIds.Count}  finIds={finIds.Count}  excludeInterior={excludeInterior.Count}");
     L($"mainPicks={mainPicks.Count}  secPicks={secPicks.Count}");
-    RhinoApp.WriteLine($"vBiminiParts: log → {logPath}");
+
+    // ── Stage 4: Facing parts (FacingP = port/left, FacingS = stbd/right) ───
 
     BuildFacingParts(doc, seamParts, centroid, cut1Idx, excludeInterior, tol);
 
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
-    // Global exclusion: seam curves + finished curves + original selection
-    // Passed to BuildMainPocket so CollectInsideObjects never lifts them into the pocket part
+    // excludeInterior already contains seamIds (covers all global seam curves incl. Left/Right).
+    // finIds are NOT excluded so finished-edge segments inside the pocket outline are collected.
     var pocketExclude = new HashSet<Guid>(excludeInterior);
-    pocketExclude.UnionWith(finIds);
+    L($"pocketExclude: {pocketExclude.Count} ids (selIds + seamIds; finIds not excluded)");
 
     if (mainPicks.Count > 0)
       BuildMainPocket(doc, mainPicks, seamParts, finParts, centroid, cut1Idx, tol, pocketExclude);
@@ -495,9 +500,12 @@ public sealed class vBiminiParts : Command
 
       // Collect objects inside the pocket boundary before moving
       var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
+      L($"  mc: pocketOutline={pocketOutline != null}  closed={(pocketOutline?.IsClosed)}  globalExclude={globalExclude.Count}");
+      if (pocketOutline != null)
+        L($"  mc: outline bbox={pocketOutline.GetBoundingBox(true)}");
       if (pocketOutline != null && pocketOutline.IsClosed)
         interiorObjects = CollectInsideObjects(doc, globalExclude, pocketOutline, Plane.WorldXY, tol);
-      L($"  mc: outline={pocketOutline != null}  interior={interiorObjects.Count}  addedIds will follow");
+      L($"  mc: interior collected={interiorObjects.Count}");
 
       // Translate all pocket geometry away from the bimini
       var outDir = adjSeam.PointAtNormalizedLength(0.5) - centroid;
@@ -932,6 +940,7 @@ public sealed class vBiminiParts : Command
   {
     var result   = new List<(GeometryBase, ObjectAttributes)>();
     var boundary = new List<Curve> { perimeter };
+    int nScanned = 0, nExcluded = 0, nOutside = 0;
 
     var settings = new ObjectEnumeratorSettings
     {
@@ -943,8 +952,9 @@ public sealed class vBiminiParts : Command
 
     foreach (var obj in doc.Objects.GetObjectList(settings))
     {
+      nScanned++;
       if (obj.ObjectType == ObjectType.Grip) continue;
-      if (excludeIds.Contains(obj.Id)) continue;
+      if (excludeIds.Contains(obj.Id)) { nExcluded++; continue; }
       var geom = obj.Geometry;
       if (geom == null) continue;
 
@@ -963,8 +973,12 @@ public sealed class vBiminiParts : Command
 
         if (splitParams.Count == 0)
         {
-          if (IsInsideOrOn(crv.PointAtNormalizedLength(0.5), boundary, plane, tol))
+          var inside = IsInsideOrOn(crv.PointAtNormalizedLength(0.5), boundary, plane, tol);
+          L($"  CollectInside: crv id={obj.Id}  splitParams=0  inside={inside}  mid={crv.PointAtNormalizedLength(0.5)}");
+          if (inside)
             result.Add((crv.DuplicateCurve(), attr));
+          else
+            nOutside++;
         }
         else
         {
@@ -973,19 +987,28 @@ public sealed class vBiminiParts : Command
           foreach (var seg in segments)
           {
             if (seg.GetLength() < tol) continue;
-            if (IsInsideOrOn(seg.PointAtNormalizedLength(0.5), boundary, plane, tol))
+            var inside = IsInsideOrOn(seg.PointAtNormalizedLength(0.5), boundary, plane, tol);
+            L($"  CollectInside: crv id={obj.Id}  seg mid={seg.PointAtNormalizedLength(0.5)}  inside={inside}");
+            if (inside)
               result.Add((seg, attr));
+            else
+              nOutside++;
           }
         }
       }
       else
       {
         var testPt = RepresentativePoint(geom);
-        if (testPt.IsValid && IsInsideOrOn(testPt, boundary, plane, tol))
+        var inside = testPt.IsValid && IsInsideOrOn(testPt, boundary, plane, tol);
+        L($"  CollectInside: other id={obj.Id}  type={obj.ObjectType}  inside={inside}  pt={testPt}");
+        if (inside)
           result.Add((geom.Duplicate()!, attr));
+        else
+          nOutside++;
       }
     }
 
+    L($"CollectInsideObjects done: scanned={nScanned}  excluded={nExcluded}  outside={nOutside}  collected={result.Count}");
     return result;
   }
 
@@ -1048,28 +1071,40 @@ public sealed class vBiminiParts : Command
   private static Curve? TrimToPocketHeight(Curve seamSide, Curve adjSeam, Curve zipper,
                                             double extLen, double tol)
   {
-    // Pocket top: endpoint of seamSide closer to adjSeam midpoint
-    var adjMid = adjSeam.PointAt(adjSeam.Domain.Mid);
-    var tTop   = seamSide.PointAtStart.DistanceTo(adjMid) < seamSide.PointAtEnd.DistanceTo(adjMid)
-                 ? seamSide.Domain.T0 : seamSide.Domain.T1;
+    // Pocket top: endpoint of seamSide closest to EITHER endpoint of adjSeam
+    // (they share a corner; comparing to adjSeam midpoint gave the wrong end when curve is long)
+    var adjP0  = adjSeam.PointAtStart;
+    var adjP1  = adjSeam.PointAtEnd;
+    var dStart = Math.Min(seamSide.PointAtStart.DistanceTo(adjP0), seamSide.PointAtStart.DistanceTo(adjP1));
+    var dEnd   = Math.Min(seamSide.PointAtEnd.DistanceTo(adjP0),   seamSide.PointAtEnd.DistanceTo(adjP1));
+    var tTop   = dStart < dEnd ? seamSide.Domain.T0 : seamSide.Domain.T1;
+    L($"  TrimToPocketHeight: seamStart={seamSide.PointAtStart}  seamEnd={seamSide.PointAtEnd}");
+    L($"  adjP0={adjP0}  adjP1={adjP1}  dStart={dStart:F3}  dEnd={dEnd:F3}  tTop={tTop:F4} (={seamSide.PointAt(tTop)})");
 
     // Pocket bottom: intersection of extended seamSide with extended zipper
-    var seamExt  = seamSide.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? seamSide.DuplicateCurve();
-    var zipExt   = zipper.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)   ?? zipper.DuplicateCurve();
-    var xEvents  = Intersection.CurveCurve(seamExt, zipExt, tol, tol);
+    var seamExt = seamSide.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? seamSide.DuplicateCurve();
+    var zipExt  = zipper.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)   ?? zipper.DuplicateCurve();
+    var xEvents = Intersection.CurveCurve(seamExt, zipExt, tol, tol);
+    L($"  xEvents={(xEvents?.Count ?? 0)}  zipMid={zipper.PointAt(zipper.Domain.Mid)}");
 
     double tBot;
     if (xEvents != null && xEvents.Count > 0)
     {
-      if (!seamSide.ClosestPoint(xEvents[0].PointA, out tBot)) return null;
+      var xPt = xEvents[0].PointA;
+      L($"  intersection xPt={xPt}");
+      if (!seamSide.ClosestPoint(xPt, out tBot)) { L($"  ClosestPoint on seamSide failed — return null"); return null; }
     }
     else
     {
       // Fallback: project zipper midpoint onto seamSide
-      if (!seamSide.ClosestPoint(zipper.PointAt(zipper.Domain.Mid), out tBot)) return null;
+      L($"  no intersection — fallback: project zipper mid onto seamSide");
+      if (!seamSide.ClosestPoint(zipper.PointAt(zipper.Domain.Mid), out tBot)) { L($"  fallback ClosestPoint failed — return null"); return null; }
     }
 
-    if (Math.Abs(tTop - tBot) < RhinoMath.ZeroTolerance) return null;
-    return seamSide.Trim(Math.Min(tTop, tBot), Math.Max(tTop, tBot));
+    L($"  tBot={tBot:F4} (={seamSide.PointAt(tBot)})");
+    if (Math.Abs(tTop - tBot) < RhinoMath.ZeroTolerance) { L($"  tTop==tBot — return null"); return null; }
+    var trimmed = seamSide.Trim(Math.Min(tTop, tBot), Math.Max(tTop, tBot));
+    L($"  trimmed={(trimmed != null ? $"len={trimmed.GetLength():F2}" : "null")}");
+    return trimmed;
   }
 }
