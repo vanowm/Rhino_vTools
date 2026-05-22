@@ -207,6 +207,11 @@ public sealed class vBiminiParts : Command
     var finParts  = Classify(finSegs,  centroid);
     var seamParts = Classify(seamSegs, centroid);
 
+    // Color side seam doc objects distinctively so they're visually identifiable
+    SetDocObjectColor(doc, seamSegs, seamDocIds, seamParts.Left,  Color.Magenta);
+    SetDocObjectColor(doc, seamSegs, seamDocIds, seamParts.Right, Color.Magenta);
+    doc.Views.Redraw();
+
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
 
     var mainPicks = PickPocketCurves("Click near Main pocket center", 2, doc, seamSegs, seamDocIds);
@@ -237,8 +242,13 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 5: Main pocket geometry ───────────────────────────────────────
 
+    // Global exclusion: seam curves + finished curves + original selection
+    // Passed to BuildMainPocket so CollectInsideObjects never lifts them into the pocket part
+    var pocketExclude = new HashSet<Guid>(excludeInterior);
+    pocketExclude.UnionWith(finIds);
+
     if (mainPicks.Count > 0)
-      BuildMainPocket(doc, mainPicks, seamParts, finParts, centroid, cut1Idx, tol);
+      BuildMainPocket(doc, mainPicks, seamParts, finParts, centroid, cut1Idx, tol, pocketExclude);
 
     doc.Views.Redraw();
     _log?.Dispose();
@@ -264,14 +274,28 @@ public sealed class vBiminiParts : Command
 
       if (res != GetResult.Point) break;
 
-      var pt = gp.Point();
+      var pt   = gp.Point();
+      var view = doc.Views.ActiveView;
       Curve? best = null;
       double bestDist = double.MaxValue;
       foreach (var c in candidates)
       {
         if (picked.Contains(c)) continue;
-        // Compare against the curve midpoint — immune to Osnap snapping to endpoints
-        var d = pt.DistanceTo(c.PointAt(c.Domain.Mid));
+        // Compare in screen space: immune to Osnap 3D drift while still reflecting cursor intent
+        double d;
+        var mid = c.PointAt(c.Domain.Mid);
+        if (view != null)
+        {
+          var sp = view.ActiveViewport.WorldToClient(pt);
+          var sm = view.ActiveViewport.WorldToClient(mid);
+          var dx = (double)(sp.X - sm.X);
+          var dy = (double)(sp.Y - sm.Y);
+          d = dx * dx + dy * dy;
+        }
+        else
+        {
+          d = pt.DistanceTo(mid);
+        }
         if (d < bestDist) { bestDist = d; best = c; }
       }
       if (best == null) break;
@@ -449,7 +473,7 @@ public sealed class vBiminiParts : Command
   private static void BuildMainPocket(RhinoDoc doc, List<(Curve Curve, Point3d Center)> mainPicks,
                                        Parts seam, Parts fin,
                                        Point3d centroid, int cut1Idx,
-                                       double tol)
+                                       double tol, HashSet<Guid> globalExclude)
   {
     double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
     const double extLen  = 24.0;
@@ -486,7 +510,7 @@ public sealed class vBiminiParts : Command
       // Collect objects inside the pocket boundary before moving
       var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
       if (pocketOutline != null && pocketOutline.IsClosed)
-        interiorObjects = CollectInsideObjects(doc, new HashSet<Guid>(), pocketOutline, Plane.WorldXY, tol);
+        interiorObjects = CollectInsideObjects(doc, globalExclude, pocketOutline, Plane.WorldXY, tol);
       L($"  mc: outline={pocketOutline != null}  interior={interiorObjects.Count}  addedIds will follow");
 
       // Translate all pocket geometry away from the bimini
@@ -1005,5 +1029,19 @@ public sealed class vBiminiParts : Command
       case Mesh m:                        return doc.Objects.AddMesh(m, attr);
       default:                            return doc.Objects.Add(geom, attr);
     }
+  }
+
+  // Sets a per-object display color on the doc object corresponding to the given
+  // Curve reference within seamSegs / seamDocIds parallel lists.
+  private static void SetDocObjectColor(RhinoDoc doc, List<Curve> segs, List<Guid> ids, Curve? c, Color color)
+  {
+    if (c == null) return;
+    var idx = segs.FindIndex(s => ReferenceEquals(s, c));
+    if (idx < 0 || idx >= ids.Count || ids[idx] == Guid.Empty) return;
+    var obj = doc.Objects.FindId(ids[idx]);
+    if (obj == null) return;
+    obj.Attributes.ColorSource = ObjectColorSource.ColorFromObject;
+    obj.Attributes.ObjectColor = color;
+    obj.CommitChanges();
   }
 }
