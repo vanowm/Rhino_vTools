@@ -223,8 +223,20 @@ public sealed class vBiminiParts : Command
     RhinoApp.WriteLine($"vBiminiParts: log → {logPath}");
 
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
+    // Exclude side seams from picker — main pocket is always top or bottom seam.
+    // Side seams are magenta and should not be selectable during pocket picking.
+    var mainCandidates   = new List<Curve>();
+    var mainCandidateIds = new List<Guid>();
+    for (var _ci = 0; _ci < seamSegs.Count; _ci++)
+    {
+      var _s = seamSegs[_ci];
+      if (ReferenceEquals(_s, seamParts.Left) || ReferenceEquals(_s, seamParts.Right)) continue;
+      mainCandidates.Add(_s);
+      mainCandidateIds.Add(_ci < seamDocIds.Count ? seamDocIds[_ci] : Guid.Empty);
+    }
+    L($"mainCandidates (top/bottom only): {mainCandidates.Count}");
 
-    var mainPicks = PickPocketCurves("Click near Main pocket center", 2, doc, seamSegs, seamDocIds);
+    var mainPicks = PickPocketCurves("Click near Main pocket center", 2, doc, mainCandidates, mainCandidateIds);
 
     // ── Stage 3: Secondary pocket curve selection ────────────────────────────
 
@@ -236,7 +248,7 @@ public sealed class vBiminiParts : Command
     else
     {
       var maxSec = mainPicks.Count == 0 ? 2 : 1;
-      secPicks = PickPocketCurves("Click near Secondary pocket center", maxSec, doc, seamSegs, seamDocIds);
+      secPicks = PickPocketCurves("Click near Secondary pocket center", maxSec, doc, mainCandidates, mainCandidateIds);
     }
 
     L($"mainPicks={mainPicks.Count}  secPicks={secPicks.Count}");
@@ -266,37 +278,41 @@ public sealed class vBiminiParts : Command
   private static List<(Curve Curve, Point3d Center)> PickPocketCurves(string prompt, int maxCount,
                                                                         RhinoDoc doc, List<Curve> candidates, List<Guid> candidateIds)
   {
-    var list    = new List<(Curve, Point3d)>();
-    var picked  = new HashSet<Curve>(ReferenceEqualityComparer.Instance);
+    var list         = new List<(Curve, Point3d)>();
+    var pickedIds    = new HashSet<Guid>();
+    var candidateSet = new HashSet<Guid>(candidateIds.Where(id => id != Guid.Empty));
+
+    L($"PickPocketCurves: prompt=\"{prompt}\"  maxCount={maxCount}  candidates={candidates.Count}  candidateSet={candidateSet.Count}");
 
     for (var i = 0; i < maxCount; i++)
     {
-      var gp = new GetPoint();
-      gp.SetCommandPrompt($"{prompt}. Press Enter to finish.");
-      gp.AcceptNothing(true);
+      var go = new GetObject();
+      go.SetCommandPrompt($"{prompt} ({i + 1}/{maxCount}). Press Enter to finish.");
+      go.GeometryFilter = ObjectType.Curve;
+      go.AcceptNothing(true);
+      go.EnablePreSelect(false, true);
+      go.EnablePostSelect(false);
+      go.SetCustomGeometryFilter((rhObj, geom, component) =>
+          !pickedIds.Contains(rhObj.Id) && candidateSet.Contains(rhObj.Id));
 
-      var res = gp.Get();
+      var res = go.Get();
+      L($"  pick {i}: result={res}");
+      if (res != GetResult.Object) break;
 
-      if (res != GetResult.Point) break;
-
-      var pt   = gp.Point();
-      Curve? best = null;
-      double bestDist = double.MaxValue;
-      foreach (var c in candidates)
+      var objRef  = go.Object(0);
+      var pickId  = objRef.ObjectId;
+      var pickIdx = candidateIds.FindIndex(id => id == pickId);
+      L($"  pick {i}: id={pickId}  pickIdx={pickIdx}  candidateIds.Count={candidateIds.Count}");
+      if (pickIdx < 0 || pickIdx >= candidates.Count)
       {
-        if (picked.Contains(c)) continue;
-        c.ClosestPoint(pt, out var t);
-        var d = pt.DistanceTo(c.PointAt(t));
-        if (d < bestDist) { bestDist = d; best = c; }
+        L($"  pick {i}: id not found in candidateIds — break");
+        break;
       }
-      if (best == null) break;
-      picked.Add(best);
-      list.Add((best.DuplicateCurve(), pt));  // record the actual clicked point as center
 
-      // Keep picked curve highlighted for subsequent prompts
-      var bestIdx = candidates.FindIndex(c => ReferenceEquals(c, best));
-      if (bestIdx >= 0 && bestIdx < candidateIds.Count && candidateIds[bestIdx] != Guid.Empty)
-        doc.Objects.Select(candidateIds[bestIdx], true);
+      pickedIds.Add(pickId);
+      var selPt = objRef.SelectionPoint();
+      list.Add((candidates[pickIdx].DuplicateCurve(), selPt));
+      L($"  pick {i}: confirmed idx={pickIdx}  selPt={selPt}  curveMid={candidates[pickIdx].PointAt(candidates[pickIdx].Domain.Mid)}");
     }
     return list;
   }
