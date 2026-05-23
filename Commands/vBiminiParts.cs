@@ -90,7 +90,7 @@ public sealed class vBiminiParts : Command
   private static string _layerRef       = "Reference";
   private static Color  _layerPlotColor = Color.FromArgb(15, 138, 138);
   private static Color  _layerCut1Color = Color.FromArgb(204, 51, 51);
-  private static Color  _layerRefColor  = Color.FromArgb(0, 180, 60);
+  private static Color  _layerRefColor  = Color.FromArgb(255, 255, 255);
 
   private static double _seamAllowance    = 0.5;
   private static double _facingInset      = 3.0;
@@ -511,7 +511,7 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 6: Secondary pocket geometry ──────────────────────────────────────
 
-    if (secPicks.Count > 0 && mainPicks.Count > 0)
+    if (secPicks.Count > 0 && (mainPicks.Count > 0 || secPicks.Count >= 2))
       BuildSecondaryPockets(doc, secPicks, mainPicks, seamParts, finParts, centroid, cut1Idx, tol, pocketExclude);
 
     // ── Stage 7: Extra rectangle for 1-1/2" pipe ────────────────────────────
@@ -559,6 +559,7 @@ public sealed class vBiminiParts : Command
 
     for (var i = 0; i < maxCount; i++)
     {
+      var confirmed = false;
       while (true)
       {
         var gp = new GetPoint();
@@ -567,7 +568,7 @@ public sealed class vBiminiParts : Command
 
         var res = gp.Get();
         L($"  pick {i}: result={res}");
-        if (res != GetResult.Point) goto nextPick;
+        if (res != GetResult.Point) break;
 
         var pt      = gp.Point();
         var bestIdx = -1;
@@ -605,9 +606,10 @@ public sealed class vBiminiParts : Command
         if (bestIdx < candidateIds.Count && candidateIds[bestIdx] != Guid.Empty)
           doc.Objects.Select(candidateIds[bestIdx], true);
         doc.Views.Redraw();
+        confirmed = true;
         break;
       }
-      nextPick:;
+      if (!confirmed) break;  // user pressed Enter; stop asking for more picks
     }
     return list;
   }
@@ -1009,7 +1011,8 @@ public sealed class vBiminiParts : Command
     double tol, HashSet<Guid> globalExclude)
   {
     var refIdx   = EnsureLayer(doc, _layerRef, _layerRefColor);
-    var mainHalf  = mainPicks[0].Curve.GetLength() / 2.0;
+    var refCurve  = mainPicks.Count > 0 ? mainPicks[0].Curve : secPicks[0].Curve;
+    var mainHalf  = refCurve.GetLength() / 2.0;
     var secondary = Math.Ceiling(mainHalf / 6.0) * 6.0;
     if (secondary - mainHalf < 2.0) secondary += 6.0;
     var halfFull  = secondary / 2.0;          // cut edge: ±halfFull from center on seam
@@ -1161,14 +1164,17 @@ public sealed class vBiminiParts : Command
 
         // Center line from secondary pocket center to main pocket center (both on finished curve).
         var ptSecCtr  = adjFin.PointAt(tCtrFin);
-        var mainAdjFin = ClosestOf(mainPicks[0].Curve, fin.Top, fin.Bottom, fin.Left, fin.Right);
-        if (mainAdjFin != null)
+        if (mainPicks.Count > 0)
         {
-          mainAdjFin.ClosestPoint(mainPicks[0].Center, out var tMainCtr);
-          var ptMainCtr = mainAdjFin.PointAt(tMainCtr);
-          var lineAttr  = new ObjectAttributes { LayerIndex = refIdx };
-          doc.Objects.AddLine(ptSecCtr, ptMainCtr, lineAttr);
-          L($"    sc: center line {ptSecCtr} → {ptMainCtr}");
+          var mainAdjFin = ClosestOf(mainPicks[0].Curve, fin.Top, fin.Bottom, fin.Left, fin.Right);
+          if (mainAdjFin != null)
+          {
+            mainAdjFin.ClosestPoint(mainPicks[0].Center, out var tMainCtr);
+            var ptMainCtr = mainAdjFin.PointAt(tMainCtr);
+            var lineAttr  = new ObjectAttributes { LayerIndex = refIdx };
+            doc.Objects.AddLine(ptSecCtr, ptMainCtr, lineAttr);
+            L($"    sc: center line {ptSecCtr} → {ptMainCtr}");
+          }
         }
       }
 
