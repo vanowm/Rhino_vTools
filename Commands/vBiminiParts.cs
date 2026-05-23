@@ -1023,7 +1023,8 @@ public sealed class vBiminiParts : Command
     Point3d centroid, int cut1Idx,
     double tol, HashSet<Guid> globalExclude)
   {
-    var refIdx   = EnsureLayer(doc, _layerRef, _layerRefColor);
+    var refIdx   = EnsureLayer(doc, _layerRef,  _layerRefColor);
+    var plotIdx  = EnsureLayer(doc, _layerPlot, _layerPlotColor);
     var refCurve  = mainPicks.Count > 0 ? mainPicks[0].Curve : secPicks[0].Curve;
     var mainHalf  = refCurve.GetLength() / 2.0;
     var secondary = Math.Ceiling(mainHalf / 6.0) * 6.0;
@@ -1072,23 +1073,101 @@ public sealed class vBiminiParts : Command
       var zipFull = OffsetToward(adjSeam, centroid, pktDepth, tol);
       if (zipFull == null) { L("  sc: zipFull offset failed"); continue; }
 
-      // Closest points on zipper to the seam endpoints.
+      // End-line direction: parallel to center line (sec→main) or to opposite-seam axis.
+      var mainSeamRef = mainPicks.Count > 0
+          ? ClosestOf(mainPicks[0].Curve, seam.Top, seam.Bottom, seam.Left, seam.Right)
+          : null;
+      Curve? oppSeam = ReferenceEquals(adjSeam, seam.Top)    ? seam.Bottom
+                     : ReferenceEquals(adjSeam, seam.Bottom) ? seam.Top
+                     : ReferenceEquals(adjSeam, seam.Left)   ? seam.Right
+                     :                                          seam.Left;
+      var endLineSrc = (mainSeamRef ?? oppSeam)?.PointAtNormalizedLength(0.5) ?? centroid;
+      var endLineDir = endLineSrc - adjSeam.PointAtNormalizedLength(0.5);
+      endLineDir.Unitize();
+
+      // Fallback: closest points on zipper.
       zipFull.ClosestPoint(ptL, out var tZL);
       zipFull.ClosestPoint(ptR, out var tZR);
-      var ptZL = zipFull.PointAt(tZL);
-      var ptZR = zipFull.PointAt(tZR);
+      var ptZL_fb = zipFull.PointAt(tZL);
+      var ptZR_fb = zipFull.PointAt(tZR);
 
-      // Trim zipper; orient it to run ptZR → ptZL (opposite to seam L→R).
-      var tLoZip = Math.Min(tZL, tZR);
-      var tHiZip = Math.Max(tZL, tZR);
+      // Angled end-line intersections with zipFull.
+      Point3d ptZR_ang, ptZL_ang;
+      {
+        var ray = new LineCurve(ptR - endLineDir * 80.0, ptR + endLineDir * 80.0);
+        var ev  = Intersection.CurveCurve(ray, zipFull, tol, tol);
+        if (ev != null && ev.Count > 0)
+        {
+          var bd = double.MaxValue; var bi = 0;
+          for (var k = 0; k < ev.Count; k++)
+          { var d = ray.PointAt(ev[k].ParameterA).DistanceTo(ptR); if (d < bd) { bd = d; bi = k; } }
+          ptZR_ang = zipFull.PointAt(ev[bi].ParameterB);
+        }
+        else ptZR_ang = ptZR_fb;
+      }
+      {
+        var ray = new LineCurve(ptL - endLineDir * 80.0, ptL + endLineDir * 80.0);
+        var ev  = Intersection.CurveCurve(ray, zipFull, tol, tol);
+        if (ev != null && ev.Count > 0)
+        {
+          var bd = double.MaxValue; var bi = 0;
+          for (var k = 0; k < ev.Count; k++)
+          { var d = ray.PointAt(ev[k].ParameterA).DistanceTo(ptL); if (d < bd) { bd = d; bi = k; } }
+          ptZL_ang = zipFull.PointAt(ev[bi].ParameterB);
+        }
+        else ptZL_ang = ptZL_fb;
+      }
+
+      // Re-trim zipper between angled intersection points; orient ptZR_ang → ptZL_ang.
+      zipFull.ClosestPoint(ptZR_ang, out var tZR2);
+      zipFull.ClosestPoint(ptZL_ang, out var tZL2);
+      var tLoZip = Math.Min(tZR2, tZL2);
+      var tHiZip = Math.Max(tZR2, tZL2);
       var zipSeg = zipFull.Trim(tLoZip, tHiZip);
       if (zipSeg == null) { L("  sc: zipSeg trim failed"); continue; }
-      if (zipSeg.PointAtStart.DistanceTo(ptZR) > zipSeg.PointAtStart.DistanceTo(ptZL))
-        zipSeg.Reverse();   // ensure start = ptZR, end = ptZL
+      if (zipSeg.PointAtStart.DistanceTo(ptZR_ang) > zipSeg.PointAtStart.DistanceTo(ptZL_ang))
+        zipSeg.Reverse();
 
-      // Side walls: ptR→ptZR (right), ptZL→ptL (left, = wallL reversed).
-      var wallR    = new LineCurve(ptR,  ptZR);
-      var wallLrev = new LineCurve(ptZL, ptL);
+      var wallR    = new LineCurve(ptR,      ptZR_ang);
+      var wallLrev = new LineCurve(ptZL_ang, ptL);
+
+      // Perpendicular to endLineDir in XY, pointing from ptR toward ptL (toward center).
+      var edXY   = new Vector3d(endLineDir.X, endLineDir.Y, 0); edXY.Unitize();
+      var perp90 = new Vector3d(-edXY.Y, edXY.X, 0);
+      var toLeft = ptL - ptR; toLeft.Z = 0;
+      if (Vector3d.Multiply(toLeft, perp90) < 0) perp90 = -perp90;
+
+      // Pre-compute offset end marks (1" toward center) — added to doc after xf is applied.
+      var topBound     = (Curve?)(adjFin) ?? adjSeam;
+      var endMarkLines = new List<LineCurve>();
+      foreach (var (wStart, wEnd, pSign) in new (Point3d, Point3d, double)[]
+               { (ptR, ptZR_ang, 1.0), (ptL, ptZL_ang, -1.0) })
+      {
+        var shift      = perp90 * pSign;
+        var markOrigin = wStart + shift;
+        var markRay    = new LineCurve(markOrigin - endLineDir * 40.0,
+                                       markOrigin + endLineDir * 40.0);
+        Point3d ptMarkTop = wStart + shift;
+        if (topBound != null)
+        {
+          var evT = Intersection.CurveCurve(markRay, topBound, tol * 10, tol);
+          if (evT != null && evT.Count > 0) ptMarkTop = evT[0].PointA;
+        }
+        Point3d ptMarkBot = wEnd + shift;
+        {
+          var evB = Intersection.CurveCurve(markRay, zipFull, tol * 10, tol);
+          if (evB != null && evB.Count > 0)
+          {
+            ptMarkBot = evB[0].PointA;
+            var bd = ptMarkBot.DistanceTo(wEnd + shift);
+            for (var k = 1; k < evB.Count; k++)
+            { var d = evB[k].PointA.DistanceTo(wEnd + shift); if (d < bd) { bd = d; ptMarkBot = evB[k].PointA; } }
+          }
+        }
+        if (ptMarkTop.DistanceTo(ptMarkBot) > tol * 10)
+          endMarkLines.Add(new LineCurve(ptMarkTop, ptMarkBot));
+      }
+      L($"  sc: endLineDir={endLineDir}  endMarkLines={endMarkLines.Count}");
 
       // Closed outline: seamSeg → wallR → zipSeg(R→L) → wallLrev
       var pocketOutline = BuildSecondaryOutline(seamSeg, wallR, zipSeg, wallLrev, tol);
@@ -1144,6 +1223,16 @@ public sealed class vBiminiParts : Command
         geomAttr.SetUserString("vBiminiPkt", seamKey);
         var id = AddObjectToDoc(doc, copy, geomAttr);
         if (id != Guid.Empty) addedIds.Add(id);
+      }
+
+      // Offset end marks: 1" toward center, PLOT layer, moved with pocket.
+      foreach (var em in endMarkLines)
+      {
+        em.Transform(xf);
+        var emAttr = MakeAttr(plotIdx);
+        emAttr.SetUserString("vBiminiPkt", seamKey);
+        var emId = doc.Objects.AddCurve(em, emAttr);
+        if (emId != Guid.Empty) addedIds.Add(emId);
       }
 
       // Center point on pocket (Reference layer, moved with pocket)
