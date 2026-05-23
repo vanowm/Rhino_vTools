@@ -334,7 +334,7 @@ public sealed class vBiminiParts : Command
     // ── Stage 6: Secondary pocket geometry ──────────────────────────────────────
 
     if (secPicks.Count > 0 && mainPicks.Count > 0)
-      BuildSecondaryPockets(doc, secPicks, mainPicks, seamParts, centroid, cut1Idx, tol, pocketExclude);
+      BuildSecondaryPockets(doc, secPicks, mainPicks, finParts, cut1Idx, tol);
 
     // Remove temporary finished segments; add single intact finished curve as permanent PLOT object.
     foreach (var id in finTempIds) if (id != Guid.Empty) doc.Objects.Delete(id, false);
@@ -812,180 +812,57 @@ public sealed class vBiminiParts : Command
 
   // ── Stage 6: Secondary pocket ──────────────────────────────────────────────
 
-  /// <summary>
-  /// Builds secondary pocket outlines from <paramref name="secPicks"/> using the
-  /// BiminiSecondary.py width formula:  secondary = next multiple-of-6 ≥ mainHalf,
-  /// bumped by +6 if the gap to mainHalf is &lt; 2".  Each pocket is a rectangular
-  /// sleeve (adjSeam top edge + pocketDepth inward offset) moved outward so the
-  /// inner (zipper) edge is exactly <see cref="PktSeamClearance"/> from the seam.
-  /// </summary>
+  // Place reference points at ±halfInner on the secondary finished curve.
+  // Width formula from BiminiSecondary.py:
+  //   secondary = next multiple-of-6 ≥ mainHalf, bumped +6 if gap < 2".
+  //   halfInner = secondary/2 − 1  (1" seam allowance each side).
   private static void BuildSecondaryPockets(
     RhinoDoc doc,
     List<(Curve Curve, Point3d Center)> secPicks,
     List<(Curve Curve, Point3d Center)> mainPicks,
-    Parts seam,
-    Point3d centroid, int cut1Idx,
-    double tol, HashSet<Guid> globalExclude)
+    Parts fin,
+    int cut1Idx, double tol)
   {
-    // Derive secondary pocket width from main pocket arc length (BiminiSecondary.py formula).
-    var mainHalf       = mainPicks[0].Curve.GetLength() / 2.0;
-    var secondaryFull  = Math.Ceiling(mainHalf / 6.0) * 6.0;
-    if (secondaryFull - mainHalf < 2.0) secondaryFull += 6.0;
-    var halfFull       = secondaryFull / 2.0;        // cut edge: ±halfFull from center
-    var halfInner      = halfFull - 1.0;             // fold/stitch line: ±halfInner (1" seam allowance)
-    double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
-    var cut1Attr       = MakeAttr(cut1Idx);
+    var mainHalf  = mainPicks[0].Curve.GetLength() / 2.0;
+    var secondary = Math.Ceiling(mainHalf / 6.0) * 6.0;
+    if (secondary - mainHalf < 2.0) secondary += 6.0;
+    var halfInner = secondary / 2.0 - 1.0;
 
-    L($"BuildSecondaryPockets: mainHalf={mainHalf:F3}  secondary={secondaryFull}  halfFull={halfFull}  halfInner={halfInner}  depth={pocketDepth}");
+    L($"BuildSecondaryPockets: mainHalf={mainHalf:F3}  secondary={secondary}  halfInner={halfInner}");
 
     foreach (var (secCrv, pickPt) in secPicks)
     {
-      // Identify which seam segment this secondary pick targets.
-      var adjSeam = ClosestOf(secCrv, seam.Top, seam.Bottom, seam.Left, seam.Right);
-      if (adjSeam == null) { L("  sc: no adjSeam"); continue; }
+      // Find the finished curve that matches the picked side.
+      var finCrv = ClosestOf(secCrv, fin.Top, fin.Bottom, fin.Left, fin.Right);
+      if (finCrv == null) { L("  sc: no finCrv"); continue; }
 
-      var seamMid = adjSeam.PointAtNormalizedLength(0.5);
-      var seamKey = $"sec:{seamMid.X:F2},{seamMid.Y:F2}";
-      var grpName = "vBiminiPkt:" + seamKey;
+      var finMid  = finCrv.PointAtNormalizedLength(0.5);
+      var seamKey = $"sec:{finMid.X:F2},{finMid.Y:F2}";
 
-      // Dedup: remove objects from a previous run for this same seam.
+      // Dedup: remove reference points from a previous run.
       var toDelete = new List<Guid>();
       foreach (var o in doc.Objects)
         if (o.Attributes.GetUserString("vBiminiPkt") == seamKey)
           toDelete.Add(o.Id);
-      L($"  sc: seamKey={seamKey}  dedup={toDelete.Count}");
       foreach (var delId in toDelete) doc.Objects.Delete(delId, true);
+      L($"  sc: seamKey={seamKey}  dedup={toDelete.Count}");
 
-      // Find center parameter by arc-length from the picked point.
-      adjSeam.ClosestPoint(pickPt, out var tCenter);
-      var sCenter   = adjSeam.GetLength(new Interval(adjSeam.Domain.Min, tCenter));
-      var totalLen  = adjSeam.GetLength();
+      finCrv.ClosestPoint(pickPt, out var tCenter);
+      var sCenter  = finCrv.GetLength(new Interval(finCrv.Domain.Min, tCenter));
+      var totalLen = finCrv.GetLength();
+      L($"  sc: sCenter={sCenter:F3}  total={totalLen:F3}  halfInner={halfInner:F3}");
 
-      // Clamp to curve so we don't run off the end.
-      var sFwd = Math.Min(sCenter + halfFull, totalLen);
-      var sBwd = Math.Max(sCenter - halfFull, 0.0);
-      if (!adjSeam.LengthParameter(sFwd, out var tFwd) ||
-          !adjSeam.LengthParameter(sBwd, out var tBwd))
-      { L($"  sc: LengthParameter failed  sCenter={sCenter:F3}  total={totalLen:F3}"); continue; }
-
-      var tLo    = Math.Min(tFwd, tBwd);
-      var tHi    = Math.Max(tFwd, tBwd);
-      var topSeg = adjSeam.Trim(tLo, tHi);
-      if (topSeg == null) { L("  sc: topSeg trim failed"); continue; }
-
-      // Zipper = topSeg offset inward toward centroid by pocketDepth.
-      var zipSeg = OffsetToward(topSeg, centroid, pocketDepth, tol);
-      if (zipSeg == null) { L("  sc: zipSeg offset failed"); continue; }
-
-      // Orient zipper so its start is on the same side as topSeg start.
-      if (zipSeg.PointAtStart.DistanceTo(topSeg.PointAtStart) >
-          zipSeg.PointAtEnd  .DistanceTo(topSeg.PointAtStart))
-        zipSeg.Reverse();
-
-      // Rectangular outline: topSeg → right wall → zipper (reversed) → left wall.
-      var wallL = new LineCurve(topSeg.PointAtStart, zipSeg.PointAtStart);
-      var wallR = new LineCurve(topSeg.PointAtEnd,   zipSeg.PointAtEnd);
-      var zipRev = zipSeg.DuplicateCurve();
-      zipRev.Reverse();  // traverse zipper end→start so the outline closes
-      var segments = new Curve[] { topSeg.DuplicateCurve(), wallR, zipRev, wallL };
-      var joinTol  = Math.Max(tol * 200, 0.1);
-      var joined   = Curve.JoinCurves(segments, joinTol);
-      if (joined == null || joined.Length != 1 || !joined[0].IsClosed)
-      { L($"  sc: outline join failed  joined={joined?.Length}"); continue; }
-      var pocketOutline = joined[0];
-
-      // Binary-search distToMove: min 3D distance from inner boundary to adjSeam = PktSeamClearance.
-      var outDir = adjSeam.PointAtNormalizedLength(0.5) - zipSeg.PointAtNormalizedLength(0.5);
-      outDir.Unitize();
-
-      var innerPts = new List<Point3d>();
-      for (var si = 0; si < 128; si++)
-      {
-        var pt = pocketOutline.PointAtNormalizedLength((double)si / 128);
-        adjSeam.ClosestPoint(pt, out var tAdj);
-        if (Vector3d.Multiply(pt - adjSeam.PointAt(tAdj), outDir) < 0)
-          innerPts.Add(pt);
-      }
-
-      double lo = 0, hi = 100;
-      if (innerPts.Count > 0)
-      {
-        for (var iter = 0; iter < 24; iter++)
-        {
-          var dm    = (lo + hi) * 0.5;
-          var minD  = double.MaxValue;
-          foreach (var pt in innerPts)
-          {
-            var mpt = pt + dm * outDir;
-            adjSeam.ClosestPoint(mpt, out var tAdj);
-            var d = mpt.DistanceTo(adjSeam.PointAt(tAdj));
-            if (d < minD) minD = d;
-          }
-          if (minD < PktSeamClearance) lo = dm; else hi = dm;
-        }
-      }
-      var distToMove = (lo + hi) * 0.5;
-      L($"  sc: distToMove={distToMove:F3}  outDir={outDir}");
-      var xf = Transform.Translation(outDir * distToMove);
-
-      // Collect interior objects before transforming the outline.
-      var interiorObjects = CollectInsideObjects(doc, globalExclude, pocketOutline, Plane.WorldXY, tol);
-      L($"  sc: interior collected={interiorObjects.Count}");
-
-      pocketOutline.Transform(xf);
-      var addedIds = new List<Guid>();
-
-      var outlineAttr = MakeAttr(cut1Idx);
-      outlineAttr.SetUserString("vBiminiPkt", seamKey);
-      var outlineId = doc.Objects.AddCurve(pocketOutline, outlineAttr);
-      if (outlineId != Guid.Empty) addedIds.Add(outlineId);
-
-      // Reference stitch points at ±halfInner from center (BiminiSecondary.py output).
       foreach (var sign in new[] { -1.0, 1.0 })
       {
-        var sInner = sCenter + sign * halfInner;
-        if (sInner < 0 || sInner > totalLen) continue;
-        if (!adjSeam.LengthParameter(sInner, out var tInner)) continue;
-        var spt = adjSeam.PointAt(tInner);
-        spt.Transform(xf);
-        var sptAttr = MakeAttr(cut1Idx);
-        sptAttr.SetUserString("vBiminiPkt", seamKey);
-        var sptId = doc.Objects.AddPoint(spt, sptAttr);
-        if (sptId != Guid.Empty) addedIds.Add(sptId);
+        var s = sCenter + sign * halfInner;
+        if (s < 0 || s > totalLen) { L($"    sc: s={s:F3} out of range"); continue; }
+        if (!finCrv.LengthParameter(s, out var t)) { L($"    sc: LengthParameter failed s={s:F3}"); continue; }
+        var pt   = finCrv.PointAt(t);
+        var attr = MakeAttr(cut1Idx);
+        attr.SetUserString("vBiminiPkt", seamKey);
+        var id = doc.Objects.AddPoint(pt, attr);
+        L($"    sc: point sign={sign:+#;-#}  s={s:F3}  pt={pt}  id={id}");
       }
-
-      // Confirmation point at picked location on seam, moved with pocket.
-      adjSeam.ClosestPoint(pickPt, out var ptT);
-      var ptPos = adjSeam.PointAt(ptT);
-      ptPos.Transform(xf);
-      var ptAttr = MakeAttr(cut1Idx);
-      ptAttr.SetUserString("vBiminiPkt", seamKey);
-      var ptId = doc.Objects.AddPoint(ptPos, ptAttr);
-      if (ptId != Guid.Empty) addedIds.Add(ptId);
-
-      foreach (var (geom, geomAttr) in interiorObjects)
-      {
-        var copy = geom.Duplicate()!;
-        copy.Transform(xf);
-        geomAttr.RemoveFromAllGroups();
-        geomAttr.SetUserString("vBiminiPkt", seamKey);
-        var id = AddObjectToDoc(doc, copy, geomAttr);
-        if (id != Guid.Empty) addedIds.Add(id);
-      }
-
-      if (addedIds.Count > 1)
-      {
-        var grpIdx = doc.Groups.Add(grpName);
-        foreach (var id in addedIds)
-        {
-          var obj = doc.Objects.FindId(id);
-          if (obj == null) continue;
-          var attr = obj.Attributes;
-          attr.AddToGroup(grpIdx);
-          doc.Objects.ModifyAttributes(obj, attr, true);
-        }
-      }
-      L($"  sc: added {addedIds.Count} objects for secondary pocket {seamKey}");
     }
   }
 
