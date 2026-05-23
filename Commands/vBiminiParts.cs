@@ -1144,6 +1144,7 @@ public sealed class vBiminiParts : Command
       if (ro.Attributes.LayerIndex != layerIdx) continue;
       var c = ro.Geometry as Curve;
       if (c == null) continue;
+      if (c.IsClosed != target.IsClosed) continue;  // open segment must not match closed curve
       c.ClosestPoint(mid, out var t);
       if (mid.DistanceTo(c.PointAt(t)) < threshold)
         return ro.Id;  // reuse existing segment
