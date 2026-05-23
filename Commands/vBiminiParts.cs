@@ -514,21 +514,59 @@ public sealed class vBiminiParts : Command
     if (secPicks.Count > 0)
       BuildSecondaryPockets(doc, secPicks, mainPicks, seamParts, finParts, centroid, cut1Idx, tol, pocketExclude);
 
-    // ── Stage 6.5: Opposite fin midpoint when exactly one curve selected ─────
-    if (mainPicks.Count + secPicks.Count == 1)
+    // ── Stage 6.5: Collect all pocket center points; draw single center line ──
     {
-      var sp        = mainPicks.Count == 1 ? mainPicks[0] : secPicks[0];
-      var adjFinS   = ClosestOf(sp.Curve, finParts.Top, finParts.Bottom, finParts.Left, finParts.Right);
-      Curve? oppFin = ReferenceEquals(adjFinS, finParts.Top)    ? finParts.Bottom
-                    : ReferenceEquals(adjFinS, finParts.Bottom) ? finParts.Top
-                    : ReferenceEquals(adjFinS, finParts.Left)   ? finParts.Right
-                    :                                              finParts.Left;
-      if (oppFin != null)
+      var refIdxCL = EnsureLayer(doc, _layerRef, _layerRefColor);
+      var ctrPts   = new List<Point3d>();
+
+      foreach (var (mc, pktCtr) in mainPicks)
       {
-        var ptOpp   = oppFin.PointAtNormalizedLength(0.5);
-        var refIdxS = EnsureLayer(doc, _layerRef, _layerRefColor);
-        if (!NearbyPointExists(doc, ptOpp, tol))
-          doc.Objects.AddPoint(ptOpp, new ObjectAttributes { LayerIndex = refIdxS });
+        var adjF = ClosestOf(mc, finParts.Top, finParts.Bottom, finParts.Left, finParts.Right);
+        if (adjF == null) continue;
+        adjF.ClosestPoint(pktCtr, out var tF);
+        ctrPts.Add(adjF.PointAt(tF));
+      }
+      foreach (var (sc, sp) in secPicks)
+      {
+        var adjF = ClosestOf(sc, finParts.Top, finParts.Bottom, finParts.Left, finParts.Right);
+        if (adjF == null) continue;
+        adjF.ClosestPoint(sp, out var tF);
+        ctrPts.Add(adjF.PointAt(tF));
+      }
+
+      // Single-pick: also place a center point at opposite fin midpoint.
+      if (mainPicks.Count + secPicks.Count == 1)
+      {
+        var sp0     = mainPicks.Count == 1 ? mainPicks[0] : secPicks[0];
+        var adjFinS = ClosestOf(sp0.Curve, finParts.Top, finParts.Bottom, finParts.Left, finParts.Right);
+        Curve? oppFin = ReferenceEquals(adjFinS, finParts.Top)    ? finParts.Bottom
+                      : ReferenceEquals(adjFinS, finParts.Bottom) ? finParts.Top
+                      : ReferenceEquals(adjFinS, finParts.Left)   ? finParts.Right
+                      :                                              finParts.Left;
+        if (oppFin != null)
+        {
+          var ptOpp = oppFin.PointAtNormalizedLength(0.5);
+          if (!NearbyPointExists(doc, ptOpp, tol))
+            doc.Objects.AddPoint(ptOpp, new ObjectAttributes { LayerIndex = refIdxCL });
+          ctrPts.Add(ptOpp);
+        }
+      }
+
+      // Sort spatially along the dominant axis, then connect with line(s).
+      if (ctrPts.Count >= 2)
+      {
+        double minX = ctrPts[0].X, maxX = ctrPts[0].X;
+        double minY = ctrPts[0].Y, maxY = ctrPts[0].Y;
+        foreach (var p in ctrPts)
+        {
+          if (p.X < minX) minX = p.X; if (p.X > maxX) maxX = p.X;
+          if (p.Y < minY) minY = p.Y; if (p.Y > maxY) maxY = p.Y;
+        }
+        bool sortByX = (maxX - minX) >= (maxY - minY);
+        ctrPts.Sort((a, b) => sortByX ? a.X.CompareTo(b.X) : a.Y.CompareTo(b.Y));
+        for (var i = 0; i < ctrPts.Count - 1; i++)
+          doc.Objects.AddLine(ctrPts[i], ctrPts[i + 1],
+                              new ObjectAttributes { LayerIndex = refIdxCL });
       }
     }
 
@@ -1025,25 +1063,6 @@ public sealed class vBiminiParts : Command
       }
     }
 
-    // Center line between main finished-curve centers (only when 2+ mains selected).
-    if (mainPicks.Count >= 2)
-    {
-      var refIdx = EnsureLayer(doc, _layerRef, _layerRefColor);
-      var finCenters = new List<Point3d>();
-      foreach (var (mc, pktCtr) in mainPicks)
-      {
-        var adjFinM = ClosestOf(mc, fin.Top, fin.Bottom, fin.Left, fin.Right);
-        Point3d ptF = pktCtr;
-        if (adjFinM != null) { adjFinM.ClosestPoint(pktCtr, out var tF); ptF = adjFinM.PointAt(tF); }
-        finCenters.Add(ptF);
-      }
-      for (var i = 0; i < finCenters.Count - 1; i++)
-      {
-        doc.Objects.AddLine(finCenters[i], finCenters[i + 1],
-                            new ObjectAttributes { LayerIndex = refIdx });
-        L($"  mc: center line {finCenters[i]} \u2192 {finCenters[i + 1]}");
-      }
-    }
   }
 
   // ── Stage 6: Secondary pocket ──────────────────────────────────────────────
@@ -1360,13 +1379,6 @@ public sealed class vBiminiParts : Command
           L($"    sc: finished center point at {ptSecCtr}");
         }
 
-        // Center line: secondary → partner (nearest main, or other secondary when no main).
-        if (ptPartnerFinCtr.HasValue)
-        {
-          var lineAttr = new ObjectAttributes { LayerIndex = refIdx };
-          doc.Objects.AddLine(ptSecCtr, ptPartnerFinCtr.Value, lineAttr);
-          L($"    sc: center line {ptSecCtr} → {ptPartnerFinCtr.Value}");
-        }
       }
 
       L($"  sc: added {addedIds.Count} pocket objects for {seamKey}");
