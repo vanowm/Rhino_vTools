@@ -197,18 +197,16 @@ public sealed class vBiminiParts : Command
     var toExclude = new HashSet<Guid>(selIds);
     foreach (var o in existingFinPieces) toExclude.Add(o.Id);
 
-    // Add finished as a single intact permanent object.
-    var finOrigId = FindOrAddCurve(doc, finishedCrv, plotIdx, plotAttr, toExclude, doc.ModelAbsoluteTolerance);
-    if (finOrigId != Guid.Empty) finIds.Add(finOrigId);
-
-    // Add broken finSegs as temporary objects — needed for per-segment picking and interior
-    // collection inside pocket outlines. Deleted after all parts are built.
+    // Add broken finSegs as temporary objects — needed for per-segment picking feedback and
+    // interior collection inside pocket outlines. The single intact finished curve is added
+    // AFTER building so no closed curve is visible (and hover-highlighted) during picking.
     var finTempIds = new List<Guid>();
     foreach (var s in finSegs)
     {
       var id = doc.Objects.AddCurve(s, plotAttr);
       finTempIds.Add(id);
-      finDocIds.Add(id != Guid.Empty ? id : finOrigId);
+      finDocIds.Add(id != Guid.Empty ? id : Guid.Empty);
+      if (id != Guid.Empty) finIds.Add(id);
     }
     foreach (var s in seamSegs)
     {
@@ -313,8 +311,10 @@ public sealed class vBiminiParts : Command
     if (mainPicks.Count > 0)
       BuildMainPocket(doc, mainPicks, seamParts, finParts, centroid, cut1Idx, tol, pocketExclude);
 
-    // Remove temporary finished segments — the single intact finished curve remains.
+    // Remove temporary finished segments; then add the single intact finished curve as the
+    // permanent PLOT object (absent during picking to avoid hover-highlight on closed curve).
     foreach (var id in finTempIds) if (id != Guid.Empty) doc.Objects.Delete(id, false);
+    FindOrAddCurve(doc, finishedCrv, plotIdx, plotAttr, toExclude, doc.ModelAbsoluteTolerance);
 
     doc.Views.Redraw();
     _log?.Dispose();
