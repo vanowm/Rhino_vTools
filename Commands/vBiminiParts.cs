@@ -955,19 +955,32 @@ public sealed class vBiminiParts : Command
         if (id2 != Guid.Empty) addedIds.Add(id2);
       }
 
-      // Add confirmation point — project to finished edge (matches what user hovered)
-      var ptPos = pktCenter;
+      // Center point — project to finished edge; Reference layer
+      var refIdx = EnsureLayer(doc, _layerRef, _layerRefColor);
+      var ptFinished = pktCenter;
       if (adjFin != null)
       {
         adjFin.ClosestPoint(pktCenter, out var ptT);
-        ptPos = adjFin.PointAt(ptT);
+        ptFinished = adjFin.PointAt(ptT);
       }
-      ptPos.Transform(xf);
-      var ptAttr = MakeAttr(cut1Idx);
-      ptAttr.SetUserString("vBiminiPkt", seamKey);
-      var ptId = doc.Objects.AddPoint(ptPos, ptAttr);
-      if (ptId != Guid.Empty) addedIds.Add(ptId);
-      L($"  mc: pick point added at {ptPos}");
+      var ptPocket = ptFinished;
+      ptPocket.Transform(xf);
+      if (!NearbyPointExists(doc, ptPocket, tol))
+      {
+        var ptAttr = MakeAttr(refIdx);
+        ptAttr.SetUserString("vBiminiPkt", seamKey);
+        var ptId = doc.Objects.AddPoint(ptPocket, ptAttr);
+        if (ptId != Guid.Empty) addedIds.Add(ptId);
+        L($"  mc: pocket center point at {ptPocket}");
+      }
+      // Center point on finished curve (not moved — center line anchor or standalone ref)
+      if (!NearbyPointExists(doc, ptFinished, tol))
+      {
+        var finPtAttr = MakeAttr(refIdx);
+        finPtAttr.SetUserString("vBiminiPkt", seamKey);
+        doc.Objects.AddPoint(ptFinished, finPtAttr);
+        L($"  mc: finished center point at {ptFinished}");
+      }
 
       foreach (var (geom, geomAttr) in interiorObjects)
       {
@@ -1133,6 +1146,18 @@ public sealed class vBiminiParts : Command
         if (id != Guid.Empty) addedIds.Add(id);
       }
 
+      // Center point on pocket (Reference layer, moved with pocket)
+      var ptPktCtr = adjSeam.PointAt(tCtr);
+      ptPktCtr.Transform(xf);
+      if (!NearbyPointExists(doc, ptPktCtr, tol))
+      {
+        var pktPtAttr = MakeAttr(refIdx);
+        pktPtAttr.SetUserString("vBiminiPkt", seamKey);
+        var pktPtId = doc.Objects.AddPoint(ptPktCtr, pktPtAttr);
+        if (pktPtId != Guid.Empty) addedIds.Add(pktPtId);
+        L($"  sc: pocket center point at {ptPktCtr}");
+      }
+
       if (addedIds.Count > 1)
       {
         var grpIdx = doc.Groups.Add(grpName);
@@ -1162,8 +1187,17 @@ public sealed class vBiminiParts : Command
           L($"    sc: fin mark sign={sign:+#;-#}  pt={pt}");
         }
 
-        // Center line from secondary pocket center to main pocket center (both on finished curve).
-        var ptSecCtr  = adjFin.PointAt(tCtrFin);
+        // Center point on finished curve (Reference layer, not moved)
+        var ptSecCtr = adjFin.PointAt(tCtrFin);
+        if (!NearbyPointExists(doc, ptSecCtr, tol))
+        {
+          var finPtAttr = MakeAttr(refIdx);
+          finPtAttr.SetUserString("vBiminiPkt", seamKey);
+          doc.Objects.AddPoint(ptSecCtr, finPtAttr);
+          L($"    sc: finished center point at {ptSecCtr}");
+        }
+
+        // Center line between secondary and main finished-curve center points.
         if (mainPicks.Count > 0)
         {
           var mainAdjFin = ClosestOf(mainPicks[0].Curve, fin.Top, fin.Bottom, fin.Left, fin.Right);
@@ -1421,6 +1455,15 @@ public sealed class vBiminiParts : Command
 
   private static ObjectAttributes MakeAttr(int layerIdx) =>
     new ObjectAttributes { LayerIndex = layerIdx };
+
+  /// <summary>Returns true if any Point object already exists within <paramref name="tol"/> of <paramref name="pt"/>.</summary>
+  private static bool NearbyPointExists(RhinoDoc doc, Point3d pt, double tol)
+  {
+    foreach (var obj in doc.Objects.GetObjectList(ObjectType.Point))
+      if (obj.Geometry is Rhino.Geometry.Point gpt && gpt.Location.DistanceTo(pt) <= tol)
+        return true;
+    return false;
+  }
 
   /// <summary>Offsets <paramref name="crv"/> by <paramref name="dist"/> toward <paramref name="target"/>.</summary>
   private static Curve? OffsetToward(Curve crv, Point3d target, double dist, double tol)
