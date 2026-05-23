@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Rhino;
 using Rhino.Commands;
 using Rhino.DocObjects;
@@ -27,29 +30,81 @@ namespace vTools.Commands;
 /// </summary>
 public sealed class vBiminiParts : Command
 {
-  // ── Constants ───────────────────────────────────────────────────────────────
+  // ── Config POCO types ────────────────────────────────────────────────────────
 
-  private const string SectionName     = "vBiminiParts";
-  private const string PipeSizeKey     = "pipeSize";
+  private sealed class BiminiLayerEntry
+  {
+    public string? Name  { get; set; }
+    public string? Color { get; set; }
+  }
 
-  private const double SeamAllowance   = 0.5;   // seam offset from finished (inches)
-  private const double FacingInset     = 3.0;   // facing: inset from seam side toward center
-  private const double SidePktOutward  = 2.5;   // main pocket: side seam outward offset
-  private const double MainPktSmall    = 4.0;   // main pocket depth, pipe ≤ 1"
-  private const double MainPktLarge    = 5.0;   // main pocket depth, pipe 1-1/4"
-  private const double CornerAngleDeg  = 30.0;  // minimum kink angle to split at (degrees)
-  private const double FacingMoveOut   = 4.0;   // gap between moved facing and bimini seam edge
-  private const double PktSeamClearance = 4.0;   // gap between moved pocket (zipper edge) and bimini seam
-  private const double SecPktSmall     = 4.5;   // secondary pocket depth, pipe ≤ 1"
-  private const double SecPktLarge     = 5.5;   // secondary pocket depth, pipe 1-1/4"
+  private sealed class BiminiLayersConfig
+  {
+    public BiminiLayerEntry? Plot      { get; set; }
+    public BiminiLayerEntry? Cut1      { get; set; }
+    public BiminiLayerEntry? Reference { get; set; }
+  }
 
-  private const string LayerPlot       = "PLOT";
-  private const string LayerCut1       = "CUT1";
-  private const string LayerRef        = "Reference";
+  private sealed class ExtraRectConfig
+  {
+    public double Height      { get; set; } = 1.5;
+    public double LengthExtra { get; set; } = 1.0;
+  }
+
+  private sealed class PipeSizeConfig
+  {
+    public double  Size         { get; set; } = 1.0;
+    public string  Label        { get; set; } = "1";
+    public double  MainPktDepth { get; set; } = 4.0;
+    public double  SecPktDepth  { get; set; } = 4.5;
+    public ExtraRectConfig? ExtraRect { get; set; }
+  }
+
+  private sealed class BiminiConfigSection
+  {
+    public BiminiLayersConfig   Layers          { get; set; } = new();
+    public double SeamAllowance    { get; set; } = 0.5;
+    public double FacingInset      { get; set; } = 3.0;
+    public double SidePktOutward   { get; set; } = 2.5;
+    public double CornerAngleDeg   { get; set; } = 30.0;
+    public double FacingMoveOut    { get; set; } = 4.0;
+    public double PktSeamClearance { get; set; } = 4.0;
+    public List<PipeSizeConfig> PipeSizes { get; set; } = new();
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+  }
+
+  private sealed class BiminiToolsConfigRoot
+  {
+    public BiminiConfigSection? VBiminiParts { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? AdditionalSections { get; set; }
+  }
+
+  // ── Runtime fields (populated from config each run) ─────────────────────────
+
+  private const string SectionName         = "vBiminiParts";
+  private const string PipeSizeKey         = "pipeSizeIdx";
+  private const string ToolsConfigFileName = "vTools.config.json";
+
+  private static string _layerPlot      = "PLOT";
+  private static string _layerCut1      = "CUT1";
+  private static string _layerRef       = "Reference";
+  private static Color  _layerPlotColor = Color.FromArgb(15, 138, 138);
+  private static Color  _layerCut1Color = Color.FromArgb(204, 51, 51);
+  private static Color  _layerRefColor  = Color.FromArgb(0, 180, 60);
+
+  private static double _seamAllowance    = 0.5;
+  private static double _facingInset      = 3.0;
+  private static double _sidePktOutward   = 2.5;
+  private static double _cornerAngleDeg   = 30.0;
+  private static double _facingMoveOut    = 4.0;
+  private static double _pktSeamClearance = 4.0;
+  private static double _mainPktDepth     = 4.0;
+  private static double _secPktDepth      = 4.5;
+  private static ExtraRectConfig? _extraRect = null;
 
   // ── Persisted state ─────────────────────────────────────────────────────────
 
-  private static double _pipeSize = 1.0;  // 1.0 or 1.25 inches
+  private static int _pipeSizeIdx = 1;  // index into BiminiConfigSection.PipeSizes
 
   // ── Debug logging ──────────────────────────────────────────────────────────
 
@@ -77,19 +132,124 @@ public sealed class vBiminiParts : Command
   {
     vToolsOptionStore.Read<int>(SectionName, section =>
     {
-      if (vToolsOptionStore.TryGetDouble(section, PipeSizeKey, out var ps)) _pipeSize = ps;
+      if (vToolsOptionStore.TryGetDouble(section, PipeSizeKey, out var ps))
+        _pipeSizeIdx = (int)Math.Round(ps);
       return 0;
     });
   }
 
   private static void SaveOptions() =>
-    vToolsOptionStore.Update(SectionName, section => { section[PipeSizeKey] = _pipeSize; });
+    vToolsOptionStore.Update(SectionName, section => { section[PipeSizeKey] = (double)_pipeSizeIdx; });
+
+  // ── Config file helpers ──────────────────────────────────────────────────────
+
+  private static readonly JsonSerializerOptions _jsonOpts = new()
+  {
+    WriteIndented            = true,
+    PropertyNamingPolicy     = JsonNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true,
+    ReadCommentHandling      = JsonCommentHandling.Skip,
+    AllowTrailingCommas      = true,
+  };
+
+  private static string GetConfigPath()
+  {
+    var dir = Path.GetDirectoryName(typeof(vBiminiParts).Assembly.Location) ?? ".";
+    return Path.Combine(dir, ToolsConfigFileName);
+  }
+
+  private static BiminiToolsConfigRoot LoadConfig(string path)
+  {
+    try
+    {
+      if (File.Exists(path))
+      {
+        var json = File.ReadAllText(path);
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+          var loaded = JsonSerializer.Deserialize<BiminiToolsConfigRoot>(json, _jsonOpts);
+          if (loaded != null) return loaded;
+        }
+      }
+    }
+    catch { }
+    return new BiminiToolsConfigRoot();
+  }
+
+  private static void SaveConfig(string path, BiminiToolsConfigRoot root)
+  {
+    try
+    {
+      var json = JsonSerializer.Serialize(root, _jsonOpts);
+      var tmp  = path + ".tmp";
+      File.WriteAllText(tmp, json);
+      File.Copy(tmp, path, overwrite: true);
+      File.Delete(tmp);
+    }
+    catch { }
+  }
+
+  private static List<PipeSizeConfig> DefaultPipeSizes() => new()
+  {
+    new() { Size = 0.875, Label = "7/8",   MainPktDepth = 4.0, SecPktDepth = 4.5 },
+    new() { Size = 1.0,   Label = "1",     MainPktDepth = 4.0, SecPktDepth = 4.5 },
+    new() { Size = 1.25,  Label = "1-1/4", MainPktDepth = 5.0, SecPktDepth = 5.5 },
+    new() { Size = 1.5,   Label = "1-1/2", MainPktDepth = 5.0, SecPktDepth = 5.5,
+            ExtraRect = new() { Height = 1.5, LengthExtra = 1.0 } },
+  };
+
+  private static BiminiConfigSection EnsureSection(BiminiToolsConfigRoot root)
+  {
+    root.VBiminiParts ??= new BiminiConfigSection();
+    var s = root.VBiminiParts!;
+    if (s.PipeSizes == null || s.PipeSizes.Count == 0)
+      s.PipeSizes = DefaultPipeSizes();
+    s.Layers ??= new BiminiLayersConfig();
+    s.Layers.Plot      ??= new BiminiLayerEntry { Name = "PLOT",      Color = "#0F8A8A" };
+    s.Layers.Cut1      ??= new BiminiLayerEntry { Name = "CUT1",      Color = "#CC3333" };
+    s.Layers.Reference ??= new BiminiLayerEntry { Name = "Reference", Color = "#00B43C" };
+    return s;
+  }
+
+  private static Color ParseHexColor(string? hex, Color fallback)
+  {
+    if (string.IsNullOrWhiteSpace(hex)) return fallback;
+    var h = hex.TrimStart('#');
+    if (h.Length == 6 && int.TryParse(h, NumberStyles.HexNumber, null, out var rgb))
+      return Color.FromArgb((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+    return fallback;
+  }
+
+  private static void ApplyConfig(BiminiConfigSection s, int idx)
+  {
+    _layerPlot      = string.IsNullOrWhiteSpace(s.Layers?.Plot?.Name)      ? "PLOT"      : s.Layers!.Plot!.Name!;
+    _layerCut1      = string.IsNullOrWhiteSpace(s.Layers?.Cut1?.Name)      ? "CUT1"      : s.Layers!.Cut1!.Name!;
+    _layerRef       = string.IsNullOrWhiteSpace(s.Layers?.Reference?.Name) ? "Reference" : s.Layers!.Reference!.Name!;
+    _layerPlotColor = ParseHexColor(s.Layers?.Plot?.Color,      Color.FromArgb(15, 138, 138));
+    _layerCut1Color = ParseHexColor(s.Layers?.Cut1?.Color,      Color.FromArgb(204, 51, 51));
+    _layerRefColor  = ParseHexColor(s.Layers?.Reference?.Color, Color.FromArgb(0, 180, 60));
+    _seamAllowance    = s.SeamAllowance;
+    _facingInset      = s.FacingInset;
+    _sidePktOutward   = s.SidePktOutward;
+    _cornerAngleDeg   = s.CornerAngleDeg;
+    _facingMoveOut    = s.FacingMoveOut;
+    _pktSeamClearance = s.PktSeamClearance;
+    var i  = Math.Max(0, Math.Min(idx, s.PipeSizes.Count - 1));
+    var ps = s.PipeSizes[i];
+    _mainPktDepth = ps.MainPktDepth;
+    _secPktDepth  = ps.SecPktDepth;
+    _extraRect    = ps.ExtraRect;
+  }
 
   // ── Command ──────────────────────────────────────────────────────────────────
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadOptions();
+    var configPath = GetConfigPath();
+    var configRoot = LoadConfig(configPath);
+    var section    = EnsureSection(configRoot);
+    ApplyConfig(section, _pipeSizeIdx);
     var tol = doc.ModelAbsoluteTolerance;
 
     // ── Stage 1: Select bimini boundary ─────────────────────────────────────
@@ -102,20 +262,34 @@ public sealed class vBiminiParts : Command
     go.EnablePreSelect(true, true);
     go.AcceptNothing(false);
 
-    // PipeSize option — current value shown via toggle label
-    var pipeToggle = new OptionToggle(_pipeSize >= 1.25, "1inch", "1_25inch");
-    go.AddOptionToggle("PipeSize", ref pipeToggle);
+    var pipeSizeLabels = section.PipeSizes
+        .Select(p => p.Label.Replace("/", "_").Replace("-", "_")
+                            .Replace(".", "_").Replace(" ", "") + "in")
+        .ToArray();
+    var pipeSizeOptIdx = go.AddOptionList("PipeSize", pipeSizeLabels, _pipeSizeIdx);
 
     while (true)
     {
       var r = go.GetMultiple(1, 0);
-      if (r == GetResult.Option) continue;
+      if (r == GetResult.Option)
+      {
+        if (go.OptionIndex() == pipeSizeOptIdx)
+        {
+          var opt = go.Option();
+          if (opt != null)
+          {
+            _pipeSizeIdx = opt.CurrentListOptionIndex;
+            ApplyConfig(section, _pipeSizeIdx);
+            SaveOptions();
+          }
+        }
+        continue;
+      }
       if (r != GetResult.Object) return Result.Cancel;
       break;
     }
 
-    _pipeSize = pipeToggle.CurrentValue ? 1.25 : 1.0;
-    SaveOptions();
+    SaveConfig(configPath, configRoot);
 
     var selIds    = new HashSet<Guid>(Enumerable.Range(0, go.ObjectCount).Select(i => go.Object(i).ObjectId));
     var rawCurves = Enumerable.Range(0, go.ObjectCount)
@@ -153,14 +327,14 @@ public sealed class vBiminiParts : Command
     var centroid = amp.Centroid;
 
     // Ensure layers exist first (needed to filter PLOT layer in existing-curve detection)
-    var plotIdx = EnsureLayer(doc, LayerPlot, Color.FromArgb(15, 138, 138));
-    var cut1Idx = EnsureLayer(doc, LayerCut1, Color.FromArgb(204, 51, 51));
-    var refIdx  = EnsureLayer(doc, LayerRef,  Color.FromArgb(0,  180,  60));
+    var plotIdx = EnsureLayer(doc, _layerPlot, _layerPlotColor);
+    var cut1Idx = EnsureLayer(doc, _layerCut1, _layerCut1Color);
+    var refIdx  = EnsureLayer(doc, _layerRef,  _layerRefColor);
 
     // Determine Finished vs Seam.
     // Scan PLOT layer for existing finished curves near the inward offset (handles broken pieces too).
     Curve finishedCrv, seamCrv;
-    var inwardCandidate = OffsetToward(boundary, centroid, SeamAllowance, tol);
+    var inwardCandidate = OffsetToward(boundary, centroid, _seamAllowance, tol);
     var existingFinPieces = inwardCandidate != null
       ? FindNearCurves(doc, inwardCandidate, selIds, tol * 50.0, plotIdx)
       : new List<RhinoObject>();
@@ -183,13 +357,13 @@ public sealed class vBiminiParts : Command
     else
     {
       finishedCrv = boundary.DuplicateCurve();
-      seamCrv     = OffsetAway(boundary, centroid, SeamAllowance, tol)
+      seamCrv     = OffsetAway(boundary, centroid, _seamAllowance, tol)
                     ?? boundary.DuplicateCurve();
     }
 
     // Break both curves at corners → 4 open segments each
-    var finSegs  = BreakAtCorners(finishedCrv, CornerAngleDeg);
-    var seamSegs = BreakAtCorners(seamCrv,     CornerAngleDeg);
+    var finSegs  = BreakAtCorners(finishedCrv, _cornerAngleDeg);
+    var seamSegs = BreakAtCorners(seamCrv,     _cornerAngleDeg);
 
     var plotAttr   = MakeAttr(plotIdx);
     var cut1Attr   = MakeAttr(cut1Idx);
@@ -340,6 +514,11 @@ public sealed class vBiminiParts : Command
     if (secPicks.Count > 0 && mainPicks.Count > 0)
       BuildSecondaryPockets(doc, secPicks, mainPicks, seamParts, finParts, centroid, cut1Idx, tol, pocketExclude);
 
+    // ── Stage 7: Extra rectangle for 1-1/2" pipe ────────────────────────────
+
+    if (_extraRect != null && mainPicks.Count > 0)
+      BuildExtraRect(doc, mainPicks, seamParts, centroid, cut1Idx, _extraRect, tol);
+
     // Remove temporary finished segments; add single intact finished curve as permanent PLOT object.
     foreach (var id in finTempIds) if (id != Guid.Empty) doc.Objects.Delete(id, false);
     FindOrAddCurve(doc, finishedCrv, plotIdx, plotAttr, toExclude, doc.ModelAbsoluteTolerance);
@@ -453,7 +632,7 @@ public sealed class vBiminiParts : Command
                                       string label)
   {
     // 1. Offset seam side 3" toward centroid → inner facing edge (CUT1)
-    var innerEdge = OffsetToward(seamSide, centroid, FacingInset, tol);
+    var innerEdge = OffsetToward(seamSide, centroid, _facingInset, tol);
     if (innerEdge == null)
     {
       RhinoApp.WriteLine($"vBiminiParts: {label} — offset failed.");
@@ -518,7 +697,7 @@ public sealed class vBiminiParts : Command
     //    FacingMoveOut inches clear of the bimini seam (total = FacingMoveOut + FacingInset)
     var outDir = seamSide.PointAtNormalizedLength(0.5) - centroid;
     outDir.Unitize();
-    var xf   = Transform.Translation(outDir * (FacingMoveOut + FacingInset));
+    var xf   = Transform.Translation(outDir * (_facingMoveOut + _facingInset));
     var attr = MakeAttr(cut1Idx);
     attr.Name = label;
     var addedIds = new List<Guid>();
@@ -598,7 +777,7 @@ public sealed class vBiminiParts : Command
                                        Point3d centroid, int cut1Idx,
                                        double tol, HashSet<Guid> globalExclude)
   {
-    double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
+    double pocketDepth = _mainPktDepth;
     const double extLen  = 24.0;
 
     L($"BuildMainPocket: pocketDepth={pocketDepth}  picks={mainPicks.Count}");
@@ -639,8 +818,8 @@ public sealed class vBiminiParts : Command
       var zipperRaw = OffsetToward(adjSeam, centroid, pocketDepth, tol);
       if (zipperRaw == null) { L($"  mc: zipperRaw offset failed"); continue; }
 
-      var offLeft  = seam.Left  != null ? OffsetAway(seam.Left,  centroid, SidePktOutward, tol) : null;
-      var offRight = seam.Right != null ? OffsetAway(seam.Right, centroid, SidePktOutward, tol) : null;
+      var offLeft  = seam.Left  != null ? OffsetAway(seam.Left,  centroid, _sidePktOutward, tol) : null;
+      var offRight = seam.Right != null ? OffsetAway(seam.Right, centroid, _sidePktOutward, tol) : null;
       if (offLeft == null || offRight == null) { L($"  mc: offLeft={offLeft != null} offRight={offRight != null} seamL={seam.Left != null} seamR={seam.Right != null}"); continue; }
 
       // Build mirrored end flares at each corner where adjSeam meets the fin sides
@@ -701,13 +880,13 @@ public sealed class vBiminiParts : Command
             var d = mpt.DistanceTo(adjSeam.PointAt(tAdj));
             if (d < minD) minD = d;
           }
-          if (minD < PktSeamClearance) lo = dm; else hi = dm;
+          if (minD < _pktSeamClearance) lo = dm; else hi = dm;
         }
         distToMove = (lo + hi) * 0.5;
       }
       else
       {
-        distToMove = pocketDepth + PktSeamClearance;  // fallback when outline failed
+        distToMove = pocketDepth + _pktSeamClearance;  // fallback when outline failed
       }
       L($"  mc: distToMove={distToMove:F3}  outDir={outDir}  innerCount={(pocketOutline != null ? (int)(distToMove * 0) : 0)}");
       var xf = Transform.Translation(outDir * distToMove);
@@ -829,13 +1008,13 @@ public sealed class vBiminiParts : Command
     Point3d centroid, int cut1Idx,
     double tol, HashSet<Guid> globalExclude)
   {
-    var refIdx   = EnsureLayer(doc, LayerRef, Color.FromArgb(0, 180, 60));
+    var refIdx   = EnsureLayer(doc, _layerRef, _layerRefColor);
     var mainHalf  = mainPicks[0].Curve.GetLength() / 2.0;
     var secondary = Math.Ceiling(mainHalf / 6.0) * 6.0;
     if (secondary - mainHalf < 2.0) secondary += 6.0;
     var halfFull  = secondary / 2.0;          // cut edge: ±halfFull from center on seam
     var halfInner = halfFull - 1.0;           // stitch/fold mark: ±halfInner on finished curve
-    var pktDepth  = _pipeSize >= 1.25 ? SecPktLarge : SecPktSmall;
+    var pktDepth  = _secPktDepth;
 
     L($"BuildSecondaryPockets: mainHalf={mainHalf:F3}  secondary={secondary}  halfFull={halfFull}  halfInner={halfInner}  depth={pktDepth}");
 
@@ -927,7 +1106,7 @@ public sealed class vBiminiParts : Command
             var d = mpt.DistanceTo(adjSeam.PointAt(tAdj));
             if (d < minD) minD = d;
           }
-          if (minD < PktSeamClearance) lo = dm; else hi = dm;
+          if (minD < _pktSeamClearance) lo = dm; else hi = dm;
         }
       var distToMove = (lo + hi) * 0.5;
       L($"  sc: distToMove={distToMove:F3}  outDir={outDir}");
@@ -976,7 +1155,7 @@ public sealed class vBiminiParts : Command
           if (s < 0 || s > finLen) { L($"    sc: fin mark s={s:F3} out of range"); continue; }
           if (!adjFin.LengthParameter(s, out var t)) continue;
           var pt = adjFin.PointAt(t);
-          doc.Objects.AddPoint(pt, MakeAttr(cut1Idx));
+          doc.Objects.AddPoint(pt, new ObjectAttributes { LayerIndex = refIdx });
           L($"    sc: fin mark sign={sign:+#;-#}  pt={pt}");
         }
 
@@ -994,6 +1173,39 @@ public sealed class vBiminiParts : Command
       }
 
       L($"  sc: added {addedIds.Count} pocket objects for {seamKey}");
+    }
+  }
+
+  private static void BuildExtraRect(
+    RhinoDoc doc, List<(Curve Curve, Point3d Center)> mainPicks,
+    Parts seam, Point3d centroid, int cut1Idx, ExtraRectConfig cfg, double tol)
+  {
+    foreach (var (mc, _) in mainPicks)
+    {
+      var adjSeam = ClosestOf(mc, seam.Top, seam.Bottom, seam.Left, seam.Right);
+      if (adjSeam == null) { L("  extraRect: no adjSeam"); continue; }
+
+      var seamLen = adjSeam.GetLength();
+      var rectLen = seamLen + cfg.LengthExtra;
+      var seamMid = adjSeam.PointAtNormalizedLength(0.5);
+
+      var tang = adjSeam.TangentAt(adjSeam.Domain.Mid);
+      tang.Unitize();
+
+      var toOut = seamMid - centroid;
+      var dot   = Vector3d.Multiply(toOut, tang);
+      toOut -= dot * tang;
+      toOut.Unitize();
+
+      var offset = _pktSeamClearance + _mainPktDepth + 1.0;
+      var origin = seamMid + toOut * offset;
+      var plane  = new Plane(origin, tang, toOut);
+      var rect   = new Rectangle3d(plane,
+                     new Interval(-rectLen / 2.0, rectLen / 2.0),
+                     new Interval(0.0, cfg.Height));
+
+      doc.Objects.AddCurve(rect.ToNurbsCurve(), MakeAttr(cut1Idx));
+      L($"  extraRect: seamLen={seamLen:F3}  rectLen={rectLen:F3}  h={cfg.Height}  offset={offset:F3}");
     }
   }
 
