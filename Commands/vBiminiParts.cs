@@ -1041,6 +1041,40 @@ public sealed class vBiminiParts : Command
       var adjFin  = ClosestOf(secCrv, fin.Top,  fin.Bottom,  fin.Left,  fin.Right);
       if (adjSeam == null) { L("  sc: no adjSeam"); continue; }
 
+      // Pre-compute finished-curve centers for endLineDir and center line (shared).
+      // ptPartnerFinCtr: nearest main fin center, or other secondary's fin center (2-sec/no-main).
+      Point3d? ptSecFinCtr = null, ptPartnerFinCtr = null;
+      if (adjFin != null)
+      {
+        adjFin.ClosestPoint(pickPt, out var tCF);
+        ptSecFinCtr = adjFin.PointAt(tCF);
+      }
+      if (mainPicks.Count > 0)
+      {
+        foreach (var mp in mainPicks)
+        {
+          var mf = ClosestOf(mp.Curve, fin.Top, fin.Bottom, fin.Left, fin.Right);
+          if (mf == null) continue;
+          mf.ClosestPoint(mp.Center, out var tMF);
+          var cand = mf.PointAt(tMF);
+          if (!ptPartnerFinCtr.HasValue ||
+              (ptSecFinCtr.HasValue && cand.DistanceTo(ptSecFinCtr.Value) < ptPartnerFinCtr.Value.DistanceTo(ptSecFinCtr.Value)))
+            ptPartnerFinCtr = cand;
+        }
+      }
+      else if (secPicks.Count >= 2)
+      {
+        foreach (var (sc2, sp2) in secPicks)
+        {
+          if (ReferenceEquals(sc2, secCrv)) continue;
+          var sf2 = ClosestOf(sc2, fin.Top, fin.Bottom, fin.Left, fin.Right);
+          if (sf2 == null) continue;
+          sf2.ClosestPoint(sp2, out var tSF2);
+          ptPartnerFinCtr = sf2.PointAt(tSF2);
+          break;
+        }
+      }
+
       var seamMid = adjSeam.PointAtNormalizedLength(0.5);
       var seamKey = $"sec:{seamMid.X:F2},{seamMid.Y:F2}";
       var grpName = "vBiminiPkt:" + seamKey;
@@ -1073,16 +1107,18 @@ public sealed class vBiminiParts : Command
       var zipFull = OffsetToward(adjSeam, centroid, pktDepth, tol);
       if (zipFull == null) { L("  sc: zipFull offset failed"); continue; }
 
-      // End-line direction: parallel to center line (sec→main) or to opposite-seam axis.
-      var mainSeamRef = mainPicks.Count > 0
-          ? ClosestOf(mainPicks[0].Curve, seam.Top, seam.Bottom, seam.Left, seam.Right)
-          : null;
-      Curve? oppSeam = ReferenceEquals(adjSeam, seam.Top)    ? seam.Bottom
-                     : ReferenceEquals(adjSeam, seam.Bottom) ? seam.Top
-                     : ReferenceEquals(adjSeam, seam.Left)   ? seam.Right
-                     :                                          seam.Left;
-      var endLineSrc = (mainSeamRef ?? oppSeam)?.PointAtNormalizedLength(0.5) ?? centroid;
-      var endLineDir = endLineSrc - adjSeam.PointAtNormalizedLength(0.5);
+      // End-line direction: same source as center line (sec→partner on finished curves).
+      Vector3d endLineDir;
+      if (ptSecFinCtr.HasValue && ptPartnerFinCtr.HasValue)
+        endLineDir = ptPartnerFinCtr.Value - ptSecFinCtr.Value;
+      else
+      {
+        Curve? oppSeam = ReferenceEquals(adjSeam, seam.Top)    ? seam.Bottom
+                       : ReferenceEquals(adjSeam, seam.Bottom) ? seam.Top
+                       : ReferenceEquals(adjSeam, seam.Left)   ? seam.Right
+                       :                                          seam.Left;
+        endLineDir = (oppSeam?.PointAtNormalizedLength(0.5) ?? centroid) - adjSeam.PointAtNormalizedLength(0.5);
+      }
       endLineDir.Unitize();
 
       // Fallback: closest points on zipper.
@@ -1286,18 +1322,12 @@ public sealed class vBiminiParts : Command
           L($"    sc: finished center point at {ptSecCtr}");
         }
 
-        // Center line between secondary and main finished-curve center points.
-        if (mainPicks.Count > 0)
+        // Center line: secondary → partner (nearest main, or other secondary when no main).
+        if (ptPartnerFinCtr.HasValue)
         {
-          var mainAdjFin = ClosestOf(mainPicks[0].Curve, fin.Top, fin.Bottom, fin.Left, fin.Right);
-          if (mainAdjFin != null)
-          {
-            mainAdjFin.ClosestPoint(mainPicks[0].Center, out var tMainCtr);
-            var ptMainCtr = mainAdjFin.PointAt(tMainCtr);
-            var lineAttr  = new ObjectAttributes { LayerIndex = refIdx };
-            doc.Objects.AddLine(ptSecCtr, ptMainCtr, lineAttr);
-            L($"    sc: center line {ptSecCtr} → {ptMainCtr}");
-          }
+          var lineAttr = new ObjectAttributes { LayerIndex = refIdx };
+          doc.Objects.AddLine(ptSecCtr, ptPartnerFinCtr.Value, lineAttr);
+          L($"    sc: center line {ptSecCtr} → {ptPartnerFinCtr.Value}");
         }
       }
 
