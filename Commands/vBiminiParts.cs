@@ -636,12 +636,31 @@ public sealed class vBiminiParts : Command
         interiorObjects = CollectInsideObjects(doc, globalExclude, pocketOutline, Plane.WorldXY, tol);
       L($"  mc: interior collected={interiorObjects.Count}");
 
-      // Move pocket outward so the zipper (nearest edge) ends up PktSeamClearance from the seam.
-      // outDir is the true perpendicular to the seam derived from the zipper offset direction.
-      // Move = PktSeamClearance + pocketDepth because the zipper starts pocketDepth inward from adjSeam.
-      var outDir = adjSeam.PointAtNormalizedLength(0.5) - zipperRaw.PointAtNormalizedLength(0.5);
+      // Move pocket outward so its closest edge ends up exactly PktSeamClearance from the seam.
+      // outDir = true perpendicular to adjSeam (derived from the actual zipper offset direction).
+      // distToMove is computed by sampling the pocket outline to find its deepest interior point
+      // (min projection along outDir), then moving that point to +PktSeamClearance from the seam.
+      // This accounts for the zipSeg being deeper than pocketDepth due to side-seam extension.
+      var adjMid = adjSeam.PointAtNormalizedLength(0.5);
+      var outDir = adjMid - zipperRaw.PointAtNormalizedLength(0.5);
       outDir.Unitize();
-      var xf = Transform.Translation(outDir * (PktSeamClearance + pocketDepth));
+      double distToMove;
+      if (pocketOutline != null && pocketOutline.IsClosed)
+      {
+        var minProj = double.MaxValue;
+        for (var si = 0; si < 64; si++)
+        {
+          var proj = Vector3d.Multiply(pocketOutline.PointAtNormalizedLength((double)si / 64) - adjMid, outDir);
+          if (proj < minProj) minProj = proj;
+        }
+        distToMove = -minProj + PktSeamClearance;
+      }
+      else
+      {
+        distToMove = pocketDepth + PktSeamClearance;  // fallback when outline failed
+      }
+      L($"  mc: distToMove={distToMove:F3}  outDir={outDir}");
+      var xf = Transform.Translation(outDir * distToMove);
 
       var addedIds = new List<Guid>();
       if (pocketOutline != null)
