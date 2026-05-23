@@ -10,10 +10,10 @@
     <RootNamespace>vTools</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
-    <Version>26.5.23.056</Version>
-    <InformationalVersion>26.5.23.056</InformationalVersion>
-    <AssemblyVersion>26.5.23.056</AssemblyVersion>
-    <FileVersion>26.5.23.056</FileVersion>
+    <Version>26.5.23.057</Version>
+    <InformationalVersion>26.5.23.057</InformationalVersion>
+    <AssemblyVersion>26.5.23.057</AssemblyVersion>
+    <FileVersion>26.5.23.057</FileVersion>
     <!-- Fail fast when output files are locked (no retry loop). -->
     <CopyRetryCount>0</CopyRetryCount>
     <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>

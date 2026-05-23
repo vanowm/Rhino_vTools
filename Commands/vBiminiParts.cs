@@ -514,6 +514,24 @@ public sealed class vBiminiParts : Command
     if (secPicks.Count > 0)
       BuildSecondaryPockets(doc, secPicks, mainPicks, seamParts, finParts, centroid, cut1Idx, tol, pocketExclude);
 
+    // ── Stage 6.5: Opposite fin midpoint when exactly one curve selected ─────
+    if (mainPicks.Count + secPicks.Count == 1)
+    {
+      var sp        = mainPicks.Count == 1 ? mainPicks[0] : secPicks[0];
+      var adjFinS   = ClosestOf(sp.Curve, finParts.Top, finParts.Bottom, finParts.Left, finParts.Right);
+      Curve? oppFin = ReferenceEquals(adjFinS, finParts.Top)    ? finParts.Bottom
+                    : ReferenceEquals(adjFinS, finParts.Bottom) ? finParts.Top
+                    : ReferenceEquals(adjFinS, finParts.Left)   ? finParts.Right
+                    :                                              finParts.Left;
+      if (oppFin != null)
+      {
+        var ptOpp   = oppFin.PointAtNormalizedLength(0.5);
+        var refIdxS = EnsureLayer(doc, _layerRef, _layerRefColor);
+        if (!NearbyPointExists(doc, ptOpp, tol))
+          doc.Objects.AddPoint(ptOpp, new ObjectAttributes { LayerIndex = refIdxS });
+      }
+    }
+
     // ── Stage 7: Extra rectangle for 1-1/2" pipe ────────────────────────────
 
     if (_extraRect != null && mainPicks.Count > 0)
