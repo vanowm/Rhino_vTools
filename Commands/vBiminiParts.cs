@@ -39,6 +39,7 @@ public sealed class vBiminiParts : Command
   private const double MainPktLarge    = 5.0;   // main pocket depth, pipe 1-1/4"
   private const double CornerAngleDeg  = 30.0;  // minimum kink angle to split at (degrees)
   private const double FacingMoveOut   = 5.0;   // gap between moved facing and bimini seam edge
+  private const double PktSeamClearance = 2.0;   // gap between moved pocket (zipper edge) and bimini seam
 
   private const string LayerPlot       = "PLOT";
   private const string LayerCut1       = "CUT1";
@@ -635,14 +636,12 @@ public sealed class vBiminiParts : Command
         interiorObjects = CollectInsideObjects(doc, globalExclude, pocketOutline, Plane.WorldXY, tol);
       L($"  mc: interior collected={interiorObjects.Count}");
 
-      // Move pocket outward: FacingMoveOut + pocketDepth so the zipper (nearest edge)
-      // ends up FacingMoveOut clear of the seam — matching the facing inner-edge clearance.
-      // Use (adjSeam.mid − zipper.mid) as outDir: this is the true perpendicular to the seam
-      // (derived from the actual offset, not centroid direction) so the clearance is exact
-      // even when the bimini is trapezoidal and the centroid direction is not ⊥ to the seam.
+      // Move pocket outward so the zipper (nearest edge) ends up PktSeamClearance from the seam.
+      // outDir is the true perpendicular to the seam derived from the zipper offset direction.
+      // Move = PktSeamClearance + pocketDepth because the zipper starts pocketDepth inward from adjSeam.
       var outDir = adjSeam.PointAtNormalizedLength(0.5) - zipperRaw.PointAtNormalizedLength(0.5);
       outDir.Unitize();
-      var xf = Transform.Translation(outDir * (FacingMoveOut + pocketDepth));
+      var xf = Transform.Translation(outDir * (PktSeamClearance + pocketDepth));
 
       var addedIds = new List<Guid>();
       if (pocketOutline != null)
