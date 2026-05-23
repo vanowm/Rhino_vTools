@@ -188,9 +188,24 @@ public sealed class vBiminiParts : Command
     var cut1Attr   = MakeAttr(cut1Idx);
     var finIds     = new HashSet<Guid>();
     var seamIds    = new HashSet<Guid>();
-    var seamDocIds = new List<Guid>();          // parallel to seamSegs — for picker highlighting
-    foreach (var s in finSegs)  { var id = doc.Objects.AddCurve(s, plotAttr); if (id != Guid.Empty) finIds.Add(id); }
-    foreach (var s in seamSegs) { var id = doc.Objects.AddCurve(s, cut1Attr); if (id != Guid.Empty) { seamIds.Add(id); seamDocIds.Add(id); } else { seamDocIds.Add(Guid.Empty); } }
+    var finDocIds  = new List<Guid>();          // parallel to finSegs  — for picker
+    var seamDocIds = new List<Guid>();          // parallel to seamSegs — for picker
+
+    // Skip-if-exists: exclude curves the user selected (will be deleted) so we
+    // don't mistake them for already-present output curves.
+    var toExclude = new HashSet<Guid>(selIds);
+    if (existingFinObj != null) toExclude.Add(existingFinObj.Id);
+
+    foreach (var s in finSegs)
+    {
+      var id = FindOrAddCurve(doc, s, plotIdx, plotAttr, toExclude, doc.ModelAbsoluteTolerance);
+      if (id != Guid.Empty) { finIds.Add(id); finDocIds.Add(id); } else { finDocIds.Add(Guid.Empty); }
+    }
+    foreach (var s in seamSegs)
+    {
+      var id = FindOrAddCurve(doc, s, cut1Idx, cut1Attr, toExclude, doc.ModelAbsoluteTolerance);
+      if (id != Guid.Empty) { seamIds.Add(id); seamDocIds.Add(id); } else { seamDocIds.Add(Guid.Empty); }
+    }
     // Delete source curves — replaced by the broken segments added above
     foreach (var id in selIds) doc.Objects.Delete(id, false);
     if (existingFinObj != null) doc.Objects.Delete(existingFinObj.Id, false);
@@ -215,8 +230,8 @@ public sealed class vBiminiParts : Command
       L($"  seamSeg[{_si}]: id={(_si < seamDocIds.Count ? seamDocIds[_si] : Guid.Empty)}  len={seamSegs[_si].GetLength():F2}  start={seamSegs[_si].PointAtStart}  end={seamSegs[_si].PointAtEnd}");
 
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
-    // Exclude side seams from picker — main pocket is always top or bottom seam.
-    // Side seams are magenta and should not be selectable during pocket picking.
+    // Picker candidates: seam AND finished top/bottom (exclude side Left/Right).
+    // mc returned by picker can be either; ClosestOf in BuildMainPocket resolves the seam.
     var mainCandidates   = new List<Curve>();
     var mainCandidateIds = new List<Guid>();
     for (var _ci = 0; _ci < seamSegs.Count; _ci++)
@@ -226,7 +241,14 @@ public sealed class vBiminiParts : Command
       mainCandidates.Add(_s);
       mainCandidateIds.Add(_ci < seamDocIds.Count ? seamDocIds[_ci] : Guid.Empty);
     }
-    L($"mainCandidates (top/bottom only): {mainCandidates.Count}");
+    for (var _fi = 0; _fi < finSegs.Count; _fi++)
+    {
+      var _f = finSegs[_fi];
+      if (ReferenceEquals(_f, finParts.Left) || ReferenceEquals(_f, finParts.Right)) continue;
+      mainCandidates.Add(_f);
+      mainCandidateIds.Add(_fi < finDocIds.Count ? finDocIds[_fi] : Guid.Empty);
+    }
+    L($"mainCandidates (seam+fin top/bottom): {mainCandidates.Count}");
 
     var mainPicks = PickPocketCurves("Click ON the Main pocket seam", 2, doc, mainCandidates, mainCandidateIds);
 
@@ -630,8 +652,13 @@ public sealed class vBiminiParts : Command
         if (id2 != Guid.Empty) addedIds.Add(id2);
       }
 
-      // Add confirmation point at the pick location (transformed with the pocket)
+      // Add confirmation point — project to finished edge (matches what user hovered)
       var ptPos = pktCenter;
+      if (adjFin != null)
+      {
+        adjFin.ClosestPoint(pktCenter, out var ptT);
+        ptPos = adjFin.PointAt(ptT);
+      }
       ptPos.Transform(xf);
       var ptAttr = MakeAttr(cut1Idx);
       ptAttr.SetUserString("vBiminiPkt", seamKey);
@@ -1034,6 +1061,27 @@ public sealed class vBiminiParts : Command
   }
 
   /// <summary>Returns the candidate whose midpoint is closest to <paramref name="reference"/>'s midpoint.</summary>
+  /// Returns the ID of an existing doc curve on <paramref name="layerIdx"/> whose midpoint
+  /// is within <c>tol * 50</c> of <paramref name="target"/>'s midpoint (i.e. the same segment
+  /// already exists from a previous run).  Adds a new curve and returns its ID if not found.
+  private static Guid FindOrAddCurve(RhinoDoc doc, Curve target, int layerIdx,
+                                     ObjectAttributes attr, HashSet<Guid> excludeIds, double tol)
+  {
+    var mid       = target.PointAtNormalizedLength(0.5);
+    var threshold = tol * 50.0;  // generous but well inside SeamAllowance (0.5")
+    foreach (var ro in doc.Objects.GetObjectList(ObjectType.Curve))
+    {
+      if (ro == null || excludeIds.Contains(ro.Id)) continue;
+      if (ro.Attributes.LayerIndex != layerIdx) continue;
+      var c = ro.Geometry as Curve;
+      if (c == null) continue;
+      c.ClosestPoint(mid, out var t);
+      if (mid.DistanceTo(c.PointAt(t)) < threshold)
+        return ro.Id;  // reuse existing segment
+    }
+    return doc.Objects.AddCurve(target, attr);
+  }
+
   private static Curve? ClosestOf(Curve reference, params Curve?[] candidates)
   {
     var mid = reference.PointAtNormalizedLength(0.5);
