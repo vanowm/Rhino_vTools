@@ -148,25 +148,31 @@ public sealed class vBiminiParts : Command
     }
     var centroid = amp.Centroid;
 
-    // Determine Finished vs Seam
-    // If a curve exists 0.5" inward from boundary → that is Finished, boundary is Seam.
-    // Otherwise → boundary is Finished, offset 0.5" outward is Seam.
+    // Ensure layers exist first (needed to filter PLOT layer in existing-curve detection)
+    var plotIdx = EnsureLayer(doc, LayerPlot, Color.FromArgb(15, 138, 138));
+    var cut1Idx = EnsureLayer(doc, LayerCut1, Color.FromArgb(204, 51, 51));
+
+    // Determine Finished vs Seam.
+    // Scan PLOT layer for existing finished curves near the inward offset (handles broken pieces too).
     Curve finishedCrv, seamCrv;
-    RhinoObject? existingFinObj = null;
     var inwardCandidate = OffsetToward(boundary, centroid, SeamAllowance, tol);
-    if (inwardCandidate != null)
+    var existingFinPieces = inwardCandidate != null
+      ? FindNearCurves(doc, inwardCandidate, selIds, tol * 50.0, plotIdx)
+      : new List<RhinoObject>();
+
+    if (existingFinPieces.Count > 0)
     {
-      existingFinObj = FindNearCurve(doc, inwardCandidate, selIds, tol * 20.0);
-      if (existingFinObj != null)
+      seamCrv = boundary.DuplicateCurve();
+      if (existingFinPieces.Count == 1)
       {
-        seamCrv     = boundary.DuplicateCurve();
-        finishedCrv = ((Curve)existingFinObj.Geometry).DuplicateCurve();
+        finishedCrv = ((Curve)existingFinPieces[0].Geometry).DuplicateCurve();
       }
       else
       {
-        finishedCrv = boundary.DuplicateCurve();
-        seamCrv     = OffsetAway(boundary, centroid, SeamAllowance, tol)
-                      ?? boundary.DuplicateCurve();
+        // Re-join broken pieces from a previous run
+        var pieces = existingFinPieces.Select(o => ((Curve)o.Geometry).DuplicateCurve()).ToArray();
+        var joined = Curve.JoinCurves(pieces, tol);
+        finishedCrv = joined?.Length > 0 ? joined[0] : pieces[0];
       }
     }
     else
@@ -175,10 +181,6 @@ public sealed class vBiminiParts : Command
       seamCrv     = OffsetAway(boundary, centroid, SeamAllowance, tol)
                     ?? boundary.DuplicateCurve();
     }
-
-    // Ensure layers exist
-    var plotIdx = EnsureLayer(doc, LayerPlot, Color.FromArgb(15, 138, 138));
-    var cut1Idx = EnsureLayer(doc, LayerCut1, Color.FromArgb(204, 51, 51));
 
     // Break both curves at corners → 4 open segments each
     var finSegs  = BreakAtCorners(finishedCrv, CornerAngleDeg);
@@ -191,24 +193,22 @@ public sealed class vBiminiParts : Command
     var finDocIds  = new List<Guid>();          // parallel to finSegs  — for picker
     var seamDocIds = new List<Guid>();          // parallel to seamSegs — for picker
 
-    // Skip-if-exists: exclude curves the user selected (will be deleted) so we
-    // don't mistake them for already-present output curves.
+    // Exclude selected inputs and previously generated finished pieces from reuse checks.
     var toExclude = new HashSet<Guid>(selIds);
-    if (existingFinObj != null) toExclude.Add(existingFinObj.Id);
+    foreach (var o in existingFinPieces) toExclude.Add(o.Id);
 
-    foreach (var s in finSegs)
-    {
-      var id = FindOrAddCurve(doc, s, plotIdx, plotAttr, toExclude, doc.ModelAbsoluteTolerance);
-      if (id != Guid.Empty) { finIds.Add(id); finDocIds.Add(id); } else { finDocIds.Add(Guid.Empty); }
-    }
+    // Add finished as a single intact object — finSegs are internal-only for building geometry.
+    var finOrigId = FindOrAddCurve(doc, finishedCrv, plotIdx, plotAttr, toExclude, doc.ModelAbsoluteTolerance);
+    if (finOrigId != Guid.Empty) finIds.Add(finOrigId);
+    for (var _i = 0; _i < finSegs.Count; _i++) finDocIds.Add(finOrigId);
     foreach (var s in seamSegs)
     {
       var id = FindOrAddCurve(doc, s, cut1Idx, cut1Attr, toExclude, doc.ModelAbsoluteTolerance);
       if (id != Guid.Empty) { seamIds.Add(id); seamDocIds.Add(id); } else { seamDocIds.Add(Guid.Empty); }
     }
-    // Delete source curves — replaced by the broken segments added above
+    // Delete source curves and any previously generated finished pieces (plugin output)
     foreach (var id in selIds) doc.Objects.Delete(id, false);
-    if (existingFinObj != null) doc.Objects.Delete(existingFinObj.Id, false);
+    foreach (var o in existingFinPieces) doc.Objects.Delete(o.Id, false);
     doc.Views.Redraw();  // show seam/fin segments before stage-2 prompt
 
     // Exclude original selected curves + seam segments (seam boundary is added explicitly as facing edges).
@@ -230,16 +230,17 @@ public sealed class vBiminiParts : Command
       L($"  seamSeg[{_si}]: id={(_si < seamDocIds.Count ? seamDocIds[_si] : Guid.Empty)}  len={seamSegs[_si].GetLength():F2}  start={seamSegs[_si].PointAtStart}  end={seamSegs[_si].PointAtEnd}");
 
     // ── Stage 2: Main pocket curve selection ────────────────────────────────
-    // Picker candidates: seam AND finished top/bottom (exclude side Left/Right).
-    // mc returned by picker can be either; ClosestOf in BuildMainPocket resolves the seam.
+    // Picker candidates: seam AND finished top/bottom (exclude Left/Right sides).
     var mainCandidates   = new List<Curve>();
     var mainCandidateIds = new List<Guid>();
+    var mainSideIds      = new List<int>();  // 0=Top, 1=Bottom; shared between seam and fin
     for (var _ci = 0; _ci < seamSegs.Count; _ci++)
     {
       var _s = seamSegs[_ci];
       if (ReferenceEquals(_s, seamParts.Left) || ReferenceEquals(_s, seamParts.Right)) continue;
       mainCandidates.Add(_s);
       mainCandidateIds.Add(_ci < seamDocIds.Count ? seamDocIds[_ci] : Guid.Empty);
+      mainSideIds.Add(ReferenceEquals(_s, seamParts.Top) ? 0 : 1);
     }
     for (var _fi = 0; _fi < finSegs.Count; _fi++)
     {
@@ -247,12 +248,33 @@ public sealed class vBiminiParts : Command
       if (ReferenceEquals(_f, finParts.Left) || ReferenceEquals(_f, finParts.Right)) continue;
       mainCandidates.Add(_f);
       mainCandidateIds.Add(_fi < finDocIds.Count ? finDocIds[_fi] : Guid.Empty);
+      mainSideIds.Add(ReferenceEquals(_f, finParts.Top) ? 0 : 1);
     }
     L($"mainCandidates (seam+fin top/bottom): {mainCandidates.Count}");
 
-    var mainPicks = PickPocketCurves("Click ON the Main pocket seam", 2, doc, mainCandidates, mainCandidateIds);
+    var mainPicks = PickPocketCurves("Click ON the Main pocket curve", 2, doc, mainCandidates, mainCandidateIds, mainSideIds);
 
     // ── Stage 3: Secondary pocket curve selection ────────────────────────────
+
+    // Carry side exclusions forward so secondary can't re-pick the same Top/Bottom side.
+    var mainConsumedIdxs = new HashSet<int>();
+    foreach (var (mc, _) in mainPicks)
+    {
+      var mcMid = mc.PointAtNormalizedLength(0.5);
+      var bestCi = -1; var bestD = double.MaxValue;
+      for (var _ci = 0; _ci < mainCandidates.Count; _ci++)
+      {
+        mainCandidates[_ci].ClosestPoint(mcMid, out var _t);
+        var _d = mcMid.DistanceTo(mainCandidates[_ci].PointAt(_t));
+        if (_d < bestD) { bestD = _d; bestCi = _ci; }
+      }
+      if (bestCi >= 0)
+      {
+        var side = mainSideIds[bestCi];
+        for (var _ci = 0; _ci < mainCandidates.Count; _ci++)
+          if (mainSideIds[_ci] == side) mainConsumedIdxs.Add(_ci);
+      }
+    }
 
     List<(Curve Curve, Point3d Center)> secPicks;
     if (mainPicks.Count >= 2)
@@ -262,7 +284,8 @@ public sealed class vBiminiParts : Command
     else
     {
       var maxSec = mainPicks.Count == 0 ? 2 : 1;
-      secPicks = PickPocketCurves("Click ON the Secondary pocket seam", maxSec, doc, mainCandidates, mainCandidateIds);
+      secPicks = PickPocketCurves("Click ON the Secondary pocket curve", maxSec, doc, mainCandidates,
+                                  mainCandidateIds, mainSideIds, clearFirst: false, initialPickedIdxs: mainConsumedIdxs);
     }
 
     L($"mainPicks={mainPicks.Count}  secPicks={secPicks.Count}");
@@ -292,18 +315,21 @@ public sealed class vBiminiParts : Command
   // snapTol: how close a GetPoint click must be to a candidate seam to count as "on" it.
   private const double PickSnapTol = 1.0;
 
-  private static List<(Curve Curve, Point3d Center)> PickPocketCurves(string prompt, int maxCount,
-                                                                        RhinoDoc doc, List<Curve> candidates,
-                                                                        List<Guid> candidateIds)
+  private static List<(Curve Curve, Point3d Center)> PickPocketCurves(
+    string prompt, int maxCount, RhinoDoc doc,
+    List<Curve> candidates, List<Guid> candidateIds,
+    List<int>? sideIds = null, bool clearFirst = true, HashSet<int>? initialPickedIdxs = null)
   {
     var list       = new List<(Curve, Point3d)>();
-    var pickedIdxs = new HashSet<int>();
+    var pickedIdxs = initialPickedIdxs != null ? new HashSet<int>(initialPickedIdxs) : new HashSet<int>();
 
-    L($"PickPocketCurves: prompt=\"{prompt}\"  maxCount={maxCount}  candidates={candidates.Count}");
+    L($"PickPocketCurves: prompt=\"{prompt}\"  maxCount={maxCount}  candidates={candidates.Count}  preExcluded={pickedIdxs.Count}");
 
-    // Clear any pre-existing selection so the viewport is clean during picking
-    doc.Objects.UnselectAll();
-    doc.Views.Redraw();
+    if (clearFirst)
+    {
+      doc.Objects.UnselectAll();
+      doc.Views.Redraw();
+    }
 
     for (var i = 0; i < maxCount; i++)
     {
@@ -335,11 +361,21 @@ public sealed class vBiminiParts : Command
           continue;
         }
 
-        pickedIdxs.Add(bestIdx);
+        // Mark all candidates on the same side as consumed (prevents re-picking opposite type on same side)
+        if (sideIds != null)
+        {
+          var side = sideIds[bestIdx];
+          for (var ci = 0; ci < candidates.Count; ci++)
+            if (sideIds[ci] == side) pickedIdxs.Add(ci);
+        }
+        else
+        {
+          pickedIdxs.Add(bestIdx);
+        }
         list.Add((candidates[bestIdx].DuplicateCurve(), pt));
         L($"  pick {i}: confirmed idx={bestIdx}  pt={pt}");
 
-        // Highlight the confirmed seam so the user can see which seam was registered
+        // Highlight the confirmed curve
         if (bestIdx < candidateIds.Count && candidateIds[bestIdx] != Guid.Empty)
           doc.Objects.Select(candidateIds[bestIdx], true);
         doc.Views.Redraw();
@@ -933,6 +969,27 @@ public sealed class vBiminiParts : Command
   /// are all within <paramref name="threshold"/> of <paramref name="target"/>.
   /// Used to detect a pre-existing Finished curve inside the selected boundary.
   /// </summary>
+  /// Finds all doc curves on <paramref name="layerIdx"/> whose midpoint lies within
+  /// <paramref name="threshold"/> of <paramref name="target"/>. Works for open segments too.
+  private static List<RhinoObject> FindNearCurves(RhinoDoc doc, Curve target,
+                                                   HashSet<Guid> excludeIds, double threshold,
+                                                   int layerIdx = -1)
+  {
+    var result = new List<RhinoObject>();
+    foreach (var ro in doc.Objects.GetObjectList(ObjectType.Curve))
+    {
+      if (ro == null || excludeIds.Contains(ro.Id)) continue;
+      if (layerIdx >= 0 && ro.Attributes.LayerIndex != layerIdx) continue;
+      var c = ro.Geometry as Curve;
+      if (c == null) continue;
+      var cMid = c.PointAtNormalizedLength(0.5);
+      target.ClosestPoint(cMid, out var t);
+      if (cMid.DistanceTo(target.PointAt(t)) < threshold)
+        result.Add(ro);
+    }
+    return result;
+  }
+
   private static RhinoObject? FindNearCurve(RhinoDoc doc, Curve target, HashSet<Guid> excludeIds, double threshold)
   {
     const int samples = 20;
