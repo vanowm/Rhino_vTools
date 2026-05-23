@@ -45,7 +45,7 @@ public sealed class vBiminiParts : Command
 
   private const string LayerPlot       = "PLOT";
   private const string LayerCut1       = "CUT1";
-  private const string LayerRef        = "REF";
+  private const string LayerRef        = "Reference";
 
   // ── Persisted state ─────────────────────────────────────────────────────────
 
