@@ -636,30 +636,49 @@ public sealed class vBiminiParts : Command
         interiorObjects = CollectInsideObjects(doc, globalExclude, pocketOutline, Plane.WorldXY, tol);
       L($"  mc: interior collected={interiorObjects.Count}");
 
-      // Move pocket outward so its closest edge ends up exactly PktSeamClearance from the seam.
-      // outDir = true perpendicular to adjSeam (derived from the actual zipper offset direction).
-      // distToMove is computed by sampling the pocket outline to find its deepest interior point
-      // (min projection along outDir), then moving that point to +PktSeamClearance from the seam.
-      // This accounts for the zipSeg being deeper than pocketDepth due to side-seam extension.
+      // outDir = perpendicular to adjSeam pointing outward, derived from the zipper offset.
       var adjMid = adjSeam.PointAtNormalizedLength(0.5);
       var outDir = adjMid - zipperRaw.PointAtNormalizedLength(0.5);
       outDir.Unitize();
+
+      // Move pocket so the minimum 3D closest-point distance from the pocket's inner boundary
+      // to adjSeam equals PktSeamClearance.  The seam is curved (arched), so the projection
+      // approach gives wrong results; binary-search for the exact move distance instead.
+      // "Inner boundary" = outline points whose closest adjSeam point is in the -outDir direction
+      // (i.e. the pocket is currently inside the bimini relative to adjSeam at those points).
       double distToMove;
       if (pocketOutline != null && pocketOutline.IsClosed)
       {
-        var minProj = double.MaxValue;
-        for (var si = 0; si < 64; si++)
+        var innerPts = new List<Point3d>();
+        for (var si = 0; si < 128; si++)
         {
-          var proj = Vector3d.Multiply(pocketOutline.PointAtNormalizedLength((double)si / 64) - adjMid, outDir);
-          if (proj < minProj) minProj = proj;
+          var pt = pocketOutline.PointAtNormalizedLength((double)si / 128);
+          adjSeam.ClosestPoint(pt, out var tAdj);
+          if (Vector3d.Multiply(pt - adjSeam.PointAt(tAdj), outDir) < 0)
+            innerPts.Add(pt);
         }
-        distToMove = -minProj + PktSeamClearance;
+
+        double lo = 0, hi = 100;
+        for (var iter = 0; iter < 24; iter++)
+        {
+          var dm = (lo + hi) * 0.5;
+          var minD = double.MaxValue;
+          foreach (var pt in innerPts)
+          {
+            var mpt = pt + dm * outDir;
+            adjSeam.ClosestPoint(mpt, out var tAdj);
+            var d = mpt.DistanceTo(adjSeam.PointAt(tAdj));
+            if (d < minD) minD = d;
+          }
+          if (minD < PktSeamClearance) lo = dm; else hi = dm;
+        }
+        distToMove = (lo + hi) * 0.5;
       }
       else
       {
         distToMove = pocketDepth + PktSeamClearance;  // fallback when outline failed
       }
-      L($"  mc: distToMove={distToMove:F3}  outDir={outDir}");
+      L($"  mc: distToMove={distToMove:F3}  outDir={outDir}  innerCount={(pocketOutline != null ? (int)(distToMove * 0) : 0)}");
       var xf = Transform.Translation(outDir * distToMove);
 
       var addedIds = new List<Guid>();
