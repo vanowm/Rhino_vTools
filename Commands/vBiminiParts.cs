@@ -568,7 +568,6 @@ public sealed class vBiminiParts : Command
   {
     double pocketDepth = _pipeSize >= 1.25 ? MainPktLarge : MainPktSmall;
     const double extLen  = 24.0;
-    const double moveOut = 5.0;
 
     L($"BuildMainPocket: pocketDepth={pocketDepth}  picks={mainPicks.Count}");
     foreach (var (mc, pktCenter) in mainPicks)
@@ -636,10 +635,11 @@ public sealed class vBiminiParts : Command
         interiorObjects = CollectInsideObjects(doc, globalExclude, pocketOutline, Plane.WorldXY, tol);
       L($"  mc: interior collected={interiorObjects.Count}");
 
-      // Translate all pocket geometry away from the bimini
+      // Move pocket outward: FacingMoveOut + pocketDepth so the zipper (nearest edge)
+      // ends up FacingMoveOut clear of the seam — matching the facing inner-edge clearance.
       var outDir = adjSeam.PointAtNormalizedLength(0.5) - centroid;
       outDir.Unitize();
-      var xf = Transform.Translation(outDir * moveOut);
+      var xf = Transform.Translation(outDir * (FacingMoveOut + pocketDepth));
 
       var addedIds = new List<Guid>();
       if (pocketOutline != null)
