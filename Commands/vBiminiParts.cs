@@ -511,7 +511,7 @@ public sealed class vBiminiParts : Command
 
     // ── Stage 6: Secondary pocket geometry ──────────────────────────────────────
 
-    if (secPicks.Count > 0 && (mainPicks.Count > 0 || secPicks.Count >= 2))
+    if (secPicks.Count > 0)
       BuildSecondaryPockets(doc, secPicks, mainPicks, seamParts, finParts, centroid, cut1Idx, tol, pocketExclude);
 
     // ── Stage 7: Extra rectangle for 1-1/2" pipe ────────────────────────────
@@ -1004,6 +1004,26 @@ public sealed class vBiminiParts : Command
           attr.AddToGroup(grpIdx);
           doc.Objects.ModifyAttributes(obj, attr, true);
         }
+      }
+    }
+
+    // Center line between main finished-curve centers (only when 2+ mains selected).
+    if (mainPicks.Count >= 2)
+    {
+      var refIdx = EnsureLayer(doc, _layerRef, _layerRefColor);
+      var finCenters = new List<Point3d>();
+      foreach (var (mc, pktCtr) in mainPicks)
+      {
+        var adjFinM = ClosestOf(mc, fin.Top, fin.Bottom, fin.Left, fin.Right);
+        Point3d ptF = pktCtr;
+        if (adjFinM != null) { adjFinM.ClosestPoint(pktCtr, out var tF); ptF = adjFinM.PointAt(tF); }
+        finCenters.Add(ptF);
+      }
+      for (var i = 0; i < finCenters.Count - 1; i++)
+      {
+        doc.Objects.AddLine(finCenters[i], finCenters[i + 1],
+                            new ObjectAttributes { LayerIndex = refIdx });
+        L($"  mc: center line {finCenters[i]} \u2192 {finCenters[i + 1]}");
       }
     }
   }
