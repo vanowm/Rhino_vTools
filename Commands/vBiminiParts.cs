@@ -38,14 +38,14 @@ public sealed class vBiminiParts : Command
   private const double MainPktSmall    = 4.0;   // main pocket depth, pipe ≤ 1"
   private const double MainPktLarge    = 5.0;   // main pocket depth, pipe 1-1/4"
   private const double CornerAngleDeg  = 30.0;  // minimum kink angle to split at (degrees)
-  private const double FacingMoveOut   = 5.0;   // gap between moved facing and bimini seam edge
-  private const double PktSeamClearance = 2.0;   // gap between moved pocket (zipper edge) and bimini seam
+  private const double FacingMoveOut   = 4.0;   // gap between moved facing and bimini seam edge
+  private const double PktSeamClearance = 4.0;   // gap between moved pocket (zipper edge) and bimini seam
   private const double SecPktSmall     = 4.5;   // secondary pocket depth, pipe ≤ 1"
   private const double SecPktLarge     = 5.5;   // secondary pocket depth, pipe 1-1/4"
-  private const double SecFilletR      = 0.5;   // secondary pocket corner fillet radius
 
   private const string LayerPlot       = "PLOT";
   private const string LayerCut1       = "CUT1";
+  private const string LayerRef        = "REF";
 
   // ── Persisted state ─────────────────────────────────────────────────────────
 
@@ -155,6 +155,7 @@ public sealed class vBiminiParts : Command
     // Ensure layers exist first (needed to filter PLOT layer in existing-curve detection)
     var plotIdx = EnsureLayer(doc, LayerPlot, Color.FromArgb(15, 138, 138));
     var cut1Idx = EnsureLayer(doc, LayerCut1, Color.FromArgb(204, 51, 51));
+    var refIdx  = EnsureLayer(doc, LayerRef,  Color.FromArgb(0,  180,  60));
 
     // Determine Finished vs Seam.
     // Scan PLOT layer for existing finished curves near the inward offset (handles broken pieces too).
@@ -828,6 +829,7 @@ public sealed class vBiminiParts : Command
     Point3d centroid, int cut1Idx,
     double tol, HashSet<Guid> globalExclude)
   {
+    var refIdx   = EnsureLayer(doc, LayerRef, Color.FromArgb(0, 180, 60));
     var mainHalf  = mainPicks[0].Curve.GetLength() / 2.0;
     var secondary = Math.Ceiling(mainHalf / 6.0) * 6.0;
     if (secondary - mainHalf < 2.0) secondary += 6.0;
@@ -894,7 +896,7 @@ public sealed class vBiminiParts : Command
       var wallLrev = new LineCurve(ptZL, ptL);
 
       // Closed outline: seamSeg → wallR → zipSeg(R→L) → wallLrev
-      var pocketOutline = BuildSecondaryOutline(seamSeg, wallR, zipSeg, wallLrev, SecFilletR, tol);
+      var pocketOutline = BuildSecondaryOutline(seamSeg, wallR, zipSeg, wallLrev, tol);
       if (pocketOutline == null) { L("  sc: outline build failed"); continue; }
 
       var interiorObjects = CollectInsideObjects(doc, globalExclude, pocketOutline, Plane.WorldXY, tol);
@@ -962,7 +964,7 @@ public sealed class vBiminiParts : Command
         }
       }
 
-      // Place ±halfInner stitch marks on the FINISHED curve — not moved with the pocket.
+      // Place ±halfInner stitch marks on the FINISHED curve and draw center line in REF layer.
       if (adjFin != null)
       {
         adjFin.ClosestPoint(pickPt, out var tCtrFin);
@@ -977,6 +979,18 @@ public sealed class vBiminiParts : Command
           doc.Objects.AddPoint(pt, MakeAttr(cut1Idx));
           L($"    sc: fin mark sign={sign:+#;-#}  pt={pt}");
         }
+
+        // Center line from secondary pocket center to main pocket center (both on finished curve).
+        var ptSecCtr  = adjFin.PointAt(tCtrFin);
+        var mainAdjFin = ClosestOf(mainPicks[0].Curve, fin.Top, fin.Bottom, fin.Left, fin.Right);
+        if (mainAdjFin != null)
+        {
+          mainAdjFin.ClosestPoint(mainPicks[0].Center, out var tMainCtr);
+          var ptMainCtr = mainAdjFin.PointAt(tMainCtr);
+          var lineAttr  = new ObjectAttributes { LayerIndex = refIdx };
+          doc.Objects.AddLine(ptSecCtr, ptMainCtr, lineAttr);
+          L($"    sc: center line {ptSecCtr} → {ptMainCtr}");
+        }
       }
 
       L($"  sc: added {addedIds.Count} pocket objects for {seamKey}");
@@ -984,52 +998,16 @@ public sealed class vBiminiParts : Command
   }
 
   /// <summary>
-  /// Joins seamSeg → wallR → zipSeg → wallLrev into a closed outline,
-  /// filleting each of the 4 corners at <paramref name="filletR"/>.
-  /// Falls back to sharp corners if any fillet fails.
+  /// Joins seamSeg → wallR → zipSeg → wallLrev into a closed sharp-cornered outline.
   /// </summary>
   private static Curve? BuildSecondaryOutline(
-    Curve seamSeg, Curve wallR, Curve zipSeg, Curve wallLrev,
-    double filletR, double tol)
+    Curve seamSeg, Curve wallR, Curve zipSeg, Curve wallLrev, double tol)
   {
-    var segs    = new Curve[] { seamSeg.DuplicateCurve(), wallR.DuplicateCurve(),
-                                zipSeg.DuplicateCurve(),  wallLrev.DuplicateCurve() };
-    var arcs    = new Curve?[4];
     var joinTol = Math.Max(tol * 200, 0.1);
-
-    // For each corner i: fillet end of segs[i] with start of segs[i+1].
-    for (var i = 0; i < 4; i++)
-    {
-      var c1 = segs[i];
-      var c2 = segs[(i + 1) % 4];
-      try
-      {
-        var filletArc = Curve.CreateFillet(c1, c2, filletR, c1.Domain.T1, c2.Domain.T0);
-        if (!filletArc.IsValid) continue;
-        Curve arcCrv = new ArcCurve(filletArc);
-        var ev1 = Intersection.CurveCurve(c1, arcCrv, tol, tol);
-        var ev2 = Intersection.CurveCurve(c2, arcCrv, tol, tol);
-        if (ev1 == null || ev1.Count == 0 || ev2 == null || ev2.Count == 0) continue;
-        var c1t = c1.Trim(c1.Domain.T0, ev1[0].ParameterA);
-        var c2t = c2.Trim(ev2[0].ParameterA, c2.Domain.T1);
-        if (c1t == null || c2t == null) continue;
-        segs[i]            = c1t;
-        segs[(i + 1) % 4]  = c2t;
-        arcs[i]            = arcCrv;
-      }
-      catch { /* fillet failed at this corner — leave sharp */ }
-    }
-
-    var all = new List<Curve>();
-    for (var i = 0; i < 4; i++) { all.Add(segs[i]); if (arcs[i] != null) all.Add(arcs[i]!); }
-    var joined = Curve.JoinCurves(all.ToArray(), joinTol);
-    if (joined?.Length == 1 && joined[0].IsClosed) return joined[0];
-
-    L("  BuildSecondaryOutline: filleted join failed, falling back to sharp corners");
-    var fallback = Curve.JoinCurves(
+    var joined  = Curve.JoinCurves(
       new Curve[] { seamSeg.DuplicateCurve(), wallR.DuplicateCurve(),
-                    zipSeg.DuplicateCurve(),   wallLrev.DuplicateCurve() }, joinTol);
-    return fallback?.Length == 1 && fallback[0].IsClosed ? fallback[0] : null;
+                    zipSeg.DuplicateCurve(),  wallLrev.DuplicateCurve() }, joinTol);
+    return joined?.Length == 1 && joined[0].IsClosed ? joined[0] : null;
   }
 
   /// <summary>
