@@ -216,6 +216,9 @@ public sealed class vBiminiParts : Command
     // Delete source curves and any previously generated finished pieces (plugin output)
     foreach (var id in selIds) doc.Objects.Delete(id, false);
     foreach (var o in existingFinPieces) doc.Objects.Delete(o.Id, false);
+    // Delete stale closed curves on CUT1 from older runs (hover-highlights whole boundary otherwise).
+    foreach (var ro in FindNearCurves(doc, seamCrv, seamIds, tol * 100.0, cut1Idx))
+      if ((ro.Geometry as Curve)?.IsClosed == true) doc.Objects.Delete(ro.Id, false);
     doc.Views.Redraw();  // show seam/fin segments before stage-2 prompt
 
     // Exclude original selected curves + seam segments (seam boundary is added explicitly as facing edges).
