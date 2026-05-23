@@ -197,10 +197,19 @@ public sealed class vBiminiParts : Command
     var toExclude = new HashSet<Guid>(selIds);
     foreach (var o in existingFinPieces) toExclude.Add(o.Id);
 
-    // Add finished as a single intact object — finSegs are internal-only for building geometry.
+    // Add finished as a single intact permanent object.
     var finOrigId = FindOrAddCurve(doc, finishedCrv, plotIdx, plotAttr, toExclude, doc.ModelAbsoluteTolerance);
     if (finOrigId != Guid.Empty) finIds.Add(finOrigId);
-    for (var _i = 0; _i < finSegs.Count; _i++) finDocIds.Add(finOrigId);
+
+    // Add broken finSegs as temporary objects — needed for per-segment picking and interior
+    // collection inside pocket outlines. Deleted after all parts are built.
+    var finTempIds = new List<Guid>();
+    foreach (var s in finSegs)
+    {
+      var id = doc.Objects.AddCurve(s, plotAttr);
+      finTempIds.Add(id);
+      finDocIds.Add(id != Guid.Empty ? id : finOrigId);
+    }
     foreach (var s in seamSegs)
     {
       var id = FindOrAddCurve(doc, s, cut1Idx, cut1Attr, toExclude, doc.ModelAbsoluteTolerance);
@@ -303,6 +312,9 @@ public sealed class vBiminiParts : Command
 
     if (mainPicks.Count > 0)
       BuildMainPocket(doc, mainPicks, seamParts, finParts, centroid, cut1Idx, tol, pocketExclude);
+
+    // Remove temporary finished segments — the single intact finished curve remains.
+    foreach (var id in finTempIds) if (id != Guid.Empty) doc.Objects.Delete(id, false);
 
     doc.Views.Redraw();
     _log?.Dispose();
