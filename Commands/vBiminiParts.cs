@@ -637,7 +637,10 @@ public sealed class vBiminiParts : Command
 
       // Move pocket outward: FacingMoveOut + pocketDepth so the zipper (nearest edge)
       // ends up FacingMoveOut clear of the seam — matching the facing inner-edge clearance.
-      var outDir = adjSeam.PointAtNormalizedLength(0.5) - centroid;
+      // Use (adjSeam.mid − zipper.mid) as outDir: this is the true perpendicular to the seam
+      // (derived from the actual offset, not centroid direction) so the clearance is exact
+      // even when the bimini is trapezoidal and the centroid direction is not ⊥ to the seam.
+      var outDir = adjSeam.PointAtNormalizedLength(0.5) - zipperRaw.PointAtNormalizedLength(0.5);
       outDir.Unitize();
       var xf = Transform.Translation(outDir * (FacingMoveOut + pocketDepth));
 
