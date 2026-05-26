@@ -76,7 +76,8 @@ public sealed class vTrimOff : Command
     }
 
     // Split each original curve against the boundary; keep inside/on segments.
-    var keepPairs = new List<(Curve Curve, ObjectAttributes Attr)>();
+    var keepPairs       = new List<(Curve Curve, ObjectAttributes Attr)>();
+    var discardedCount  = 0;
 
     for (var i = 0; i < curves.Count; i++)
     {
@@ -100,6 +101,8 @@ public sealed class vTrimOff : Command
         var testPt = crv.PointAtNormalizedLength(0.5);
         if (IsInsideOrOn(testPt, boundary, plane, tol))
           keepPairs.Add((crv, srcAttr));
+        else
+          discardedCount++;
       }
       else
       {
@@ -111,6 +114,8 @@ public sealed class vTrimOff : Command
           var mid = seg.PointAtNormalizedLength(0.5);
           if (IsInsideOrOn(mid, boundary, plane, tol))
             keepPairs.Add((seg, srcAttr));
+          else
+            discardedCount++;
         }
       }
     }
@@ -127,6 +132,7 @@ public sealed class vTrimOff : Command
     foreach (var (crv, attr) in keepPairs)
       doc.Objects.AddCurve(crv, attr);
 
+    RhinoApp.WriteLine($"vTrimOff: trimmed off {discardedCount} segment{(discardedCount == 1 ? "" : "s")}.");
     doc.Views.Redraw();
     return Result.Success;
   }
