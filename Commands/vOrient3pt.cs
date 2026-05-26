@@ -22,34 +22,34 @@ public sealed class vOrient3pt : Command
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
-    var objectIds = OrientCommandCommon.SelectObjectsToOrient(doc);
+    var objectIds = OrientCommon.SelectObjectsToOrient(doc);
     if (objectIds.Count == 0)
       return Result.Cancel;
 
-    var copyMode = OrientCommandCommon.LoadCopyOption();
-    var previewSegments = new List<OrientCommandCommon.PreviewSegment>();
+    var copyMode = OrientCommon.LoadCopyOption();
+    var previewSegments = new List<OrientCommon.PreviewSegment>();
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Source first point", ref copyMode, out var sourceOrigin, previewSegments: previewSegments))
+    if (!OrientCommon.TryGetPointWithCopyOption(doc, "Source first point", ref copyMode, out var sourceOrigin, previewSegments: previewSegments))
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Target first point", ref copyMode, out var targetOrigin, traceFrom: sourceOrigin, previewSegments: previewSegments))
+    if (!OrientCommon.TryGetPointWithCopyOption(doc, "Target first point", ref copyMode, out var targetOrigin, traceFrom: sourceOrigin, previewSegments: previewSegments))
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
-    previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceOrigin, targetOrigin));
+    previewSegments.Add(new OrientCommon.PreviewSegment(sourceOrigin, targetOrigin));
 
     // Source second point is optional — Enter falls back to 1-point orient (translation)
-    var src2 = OrientCommandCommon.TryGetOptionalPointWithCopyOption(
+    var src2 = OrientCommon.TryGetOptionalPointWithCopyOption(
       doc, "Source second point. Press Enter for 1-point orient",
       ref copyMode, out var sourceXAxisPoint, previewSegments: previewSegments);
 
     if (src2 == GetResult.Cancel)
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
 
@@ -57,39 +57,39 @@ public sealed class vOrient3pt : Command
     {
       // 1-point fallback: translation only
       var xform1pt = Transform.Translation(targetOrigin - sourceOrigin);
-      var transformedIds1pt = OrientCommandCommon.TransformObjects(doc, objectIds, xform1pt, copyMode);
+      var transformedIds1pt = OrientCommon.TransformObjects(doc, objectIds, xform1pt, copyMode);
       if (copyMode)
-        OrientCommandCommon.RecreateGroupsForCopiedObjects(doc, objectIds, transformedIds1pt);
-      OrientCommandCommon.SaveCopyOption(copyMode);
+        OrientCommon.RecreateGroupsForCopiedObjects(doc, objectIds, transformedIds1pt);
+      OrientCommon.SaveCopyOption(copyMode);
       doc.Views.Redraw();
       return Result.Success;
     }
 
     // Target second point is optional — Enter uses source point as target
-    var tgt2 = OrientCommandCommon.TryGetOptionalPointWithCopyOption(
+    var tgt2 = OrientCommon.TryGetOptionalPointWithCopyOption(
       doc, "Target second point. Press Enter to use source point",
       ref copyMode, out var targetXAxisPoint,
       basePoint: targetOrigin, traceFrom: sourceXAxisPoint, previewSegments: previewSegments);
 
     if (tgt2 == GetResult.Cancel)
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
 
     if (tgt2 == GetResult.Nothing)
       targetXAxisPoint = sourceXAxisPoint;
     else
-      previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceXAxisPoint, targetXAxisPoint));
+      previewSegments.Add(new OrientCommon.PreviewSegment(sourceXAxisPoint, targetXAxisPoint));
 
     // Source third point is optional — Enter falls back to 2-point orient
-    var src3 = OrientCommandCommon.TryGetOptionalPointWithCopyOption(
+    var src3 = OrientCommon.TryGetOptionalPointWithCopyOption(
       doc, "Source third point. Press Enter for 2-point orient",
       ref copyMode, out var sourceYAxisPoint, previewSegments: previewSegments);
 
     if (src3 == GetResult.Cancel)
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
 
@@ -98,10 +98,10 @@ public sealed class vOrient3pt : Command
     if (src3 == GetResult.Nothing)
     {
       // 2-point fallback
-      if (!OrientCommandCommon.TryBuildPlaneFromTwoPoints(doc, sourceOrigin, sourceXAxisPoint, out sourcePlane) ||
-          !OrientCommandCommon.TryBuildPlaneFromTwoPoints(doc, targetOrigin, targetXAxisPoint, out targetPlane))
+      if (!OrientCommon.TryBuildPlaneFromTwoPoints(doc, sourceOrigin, sourceXAxisPoint, out sourcePlane) ||
+          !OrientCommon.TryBuildPlaneFromTwoPoints(doc, targetOrigin, targetXAxisPoint, out targetPlane))
       {
-        OrientCommandCommon.SaveCopyOption(copyMode);
+        OrientCommon.SaveCopyOption(copyMode);
         RhinoApp.WriteLine("vOrient3pt: Could not build orientation plane.");
         return Result.Failure;
       }
@@ -109,38 +109,38 @@ public sealed class vOrient3pt : Command
     else
     {
       // Target third point is optional — Enter uses source point as target
-      var tgt3 = OrientCommandCommon.TryGetOptionalPointWithCopyOption(
+      var tgt3 = OrientCommon.TryGetOptionalPointWithCopyOption(
         doc, "Target third point. Press Enter to use source point",
         ref copyMode, out var targetYAxisPoint,
         basePoint: targetOrigin, traceFrom: sourceYAxisPoint, previewSegments: previewSegments);
 
       if (tgt3 == GetResult.Cancel)
       {
-        OrientCommandCommon.SaveCopyOption(copyMode);
+        OrientCommon.SaveCopyOption(copyMode);
         return Result.Cancel;
       }
 
       if (tgt3 == GetResult.Nothing)
         targetYAxisPoint = sourceYAxisPoint;
       else
-        previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceYAxisPoint, targetYAxisPoint));
+        previewSegments.Add(new OrientCommon.PreviewSegment(sourceYAxisPoint, targetYAxisPoint));
 
-      if (!OrientCommandCommon.TryBuildPlaneFromThreePoints(sourceOrigin, sourceXAxisPoint, sourceYAxisPoint, out sourcePlane) ||
-          !OrientCommandCommon.TryBuildPlaneFromThreePoints(targetOrigin, targetXAxisPoint, targetYAxisPoint, out targetPlane))
+      if (!OrientCommon.TryBuildPlaneFromThreePoints(sourceOrigin, sourceXAxisPoint, sourceYAxisPoint, out sourcePlane) ||
+          !OrientCommon.TryBuildPlaneFromThreePoints(targetOrigin, targetXAxisPoint, targetYAxisPoint, out targetPlane))
       {
-        OrientCommandCommon.SaveCopyOption(copyMode);
+        OrientCommon.SaveCopyOption(copyMode);
         RhinoApp.WriteLine("vOrient3pt: Could not build orientation plane.");
         return Result.Failure;
       }
     }
 
     var xform = Transform.PlaneToPlane(sourcePlane, targetPlane);
-    var transformedIds = OrientCommandCommon.TransformObjects(doc, objectIds, xform, copyMode);
+    var transformedIds = OrientCommon.TransformObjects(doc, objectIds, xform, copyMode);
 
     if (copyMode)
-      OrientCommandCommon.RecreateGroupsForCopiedObjects(doc, objectIds, transformedIds);
+      OrientCommon.RecreateGroupsForCopiedObjects(doc, objectIds, transformedIds);
 
-    OrientCommandCommon.SaveCopyOption(copyMode);
+    OrientCommon.SaveCopyOption(copyMode);
     doc.Views.Redraw();
     return Result.Success;
   }
