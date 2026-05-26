@@ -17,7 +17,7 @@ namespace vTools.Commands;
 /// <summary>
 /// Shared types, constants, and helpers used by both vUzip and vUzipParts commands.
 /// </summary>
-internal static class UzipCommandCommon
+internal static class UzipCommon
 {
   // ── Constants ──────────────────────────────────────────────────────────────
   internal const string ToolsConfigFileName = "vTools.config.json";

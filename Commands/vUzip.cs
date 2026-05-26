@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using static vTools.Commands.UzipCommandCommon;
+using static vTools.Commands.UzipCommon;
 using Rhino;
 using Rhino.Commands;
 using Rhino.Display;

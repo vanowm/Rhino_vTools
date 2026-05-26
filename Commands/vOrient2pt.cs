@@ -21,54 +21,54 @@ public sealed class vOrient2pt : Command
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
-    var objectIds = OrientCommandCommon.SelectObjectsToOrient(doc);
+    var objectIds = OrientCommon.SelectObjectsToOrient(doc);
     if (objectIds.Count == 0)
       return Result.Cancel;
 
-    var copyMode = OrientCommandCommon.LoadCopyOption();
-    var previewSegments = new List<OrientCommandCommon.PreviewSegment>();
+    var copyMode = OrientCommon.LoadCopyOption();
+    var previewSegments = new List<OrientCommon.PreviewSegment>();
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Source first point", ref copyMode, out var sourceOrigin, previewSegments: previewSegments))
+    if (!OrientCommon.TryGetPointWithCopyOption(doc, "Source first point", ref copyMode, out var sourceOrigin, previewSegments: previewSegments))
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Target first point", ref copyMode, out var targetOrigin, traceFrom: sourceOrigin, previewSegments: previewSegments))
+    if (!OrientCommon.TryGetPointWithCopyOption(doc, "Target first point", ref copyMode, out var targetOrigin, traceFrom: sourceOrigin, previewSegments: previewSegments))
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
-    previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceOrigin, targetOrigin));
+    previewSegments.Add(new OrientCommon.PreviewSegment(sourceOrigin, targetOrigin));
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Source second point", ref copyMode, out var sourceXAxisPoint, previewSegments: previewSegments))
+    if (!OrientCommon.TryGetPointWithCopyOption(doc, "Source second point", ref copyMode, out var sourceXAxisPoint, previewSegments: previewSegments))
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
 
-    if (!OrientCommandCommon.TryGetPointWithCopyOption(doc, "Target second point", ref copyMode, out var targetXAxisPoint, basePoint: targetOrigin, traceFrom: sourceXAxisPoint, previewSegments: previewSegments))
+    if (!OrientCommon.TryGetPointWithCopyOption(doc, "Target second point", ref copyMode, out var targetXAxisPoint, basePoint: targetOrigin, traceFrom: sourceXAxisPoint, previewSegments: previewSegments))
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       return Result.Cancel;
     }
-    previewSegments.Add(new OrientCommandCommon.PreviewSegment(sourceXAxisPoint, targetXAxisPoint));
+    previewSegments.Add(new OrientCommon.PreviewSegment(sourceXAxisPoint, targetXAxisPoint));
 
-    if (!OrientCommandCommon.TryBuildPlaneFromTwoPoints(doc, sourceOrigin, sourceXAxisPoint, out var sourcePlane) ||
-        !OrientCommandCommon.TryBuildPlaneFromTwoPoints(doc, targetOrigin, targetXAxisPoint, out var targetPlane))
+    if (!OrientCommon.TryBuildPlaneFromTwoPoints(doc, sourceOrigin, sourceXAxisPoint, out var sourcePlane) ||
+        !OrientCommon.TryBuildPlaneFromTwoPoints(doc, targetOrigin, targetXAxisPoint, out var targetPlane))
     {
-      OrientCommandCommon.SaveCopyOption(copyMode);
+      OrientCommon.SaveCopyOption(copyMode);
       RhinoApp.WriteLine("vOrient2pt: Could not build orientation plane from selected points.");
       return Result.Failure;
     }
 
     var xform = Transform.PlaneToPlane(sourcePlane, targetPlane);
-    var transformedIds = OrientCommandCommon.TransformObjects(doc, objectIds, xform, copyMode);
+    var transformedIds = OrientCommon.TransformObjects(doc, objectIds, xform, copyMode);
 
     if (copyMode)
-      OrientCommandCommon.RecreateGroupsForCopiedObjects(doc, objectIds, transformedIds);
+      OrientCommon.RecreateGroupsForCopiedObjects(doc, objectIds, transformedIds);
 
-    OrientCommandCommon.SaveCopyOption(copyMode);
+    OrientCommon.SaveCopyOption(copyMode);
     doc.Views.Redraw();
     return Result.Success;
   }

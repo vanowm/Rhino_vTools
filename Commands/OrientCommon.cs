@@ -14,7 +14,7 @@ namespace vTools.Commands;
 /// <summary>
 /// Shared utilities for native orient commands.
 /// </summary>
-internal static class OrientCommandCommon
+internal static class OrientCommon
 {
   private const string OrientOptionsSectionName = "vOrient";
   private const string CopyOptionKey = "copy";
