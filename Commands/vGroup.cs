@@ -9,10 +9,13 @@ using Rhino.Input.Custom;
 namespace vTools.Commands;
 
 /// <summary>
-/// Groups selected objects by closed-curve boundaries: each closed planar
-/// curve in the selection becomes the boundary of a new group that contains
-/// itself and every other selected object whose representative point lies
-/// inside it.
+/// Groups selected objects by closed-curve boundaries.
+/// Boundaries are detected by joining all selected curves with
+/// <see cref="Curve.JoinCurves"/>: any joined result that is closed and
+/// planar becomes a boundary, so open or overlapping curves that together
+/// enclose a region are handled correctly.
+/// Every selected object whose representative point falls inside a boundary
+/// is added to that boundary's group.
 /// </summary>
 public sealed class vGroup : Command
 {
@@ -20,9 +23,9 @@ public sealed class vGroup : Command
   public override string EnglishName => "vGroup";
 
   /// <summary>
-  /// For every closed planar curve in the selection, creates a group
-  /// containing that curve and all other selected objects whose
-  /// representative point falls inside it.
+  /// Joins all selected curves, uses any closed planar results as
+  /// boundaries, and groups each selected object with the boundary that
+  /// contains it.
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
@@ -35,53 +38,58 @@ public sealed class vGroup : Command
     if (go.CommandResult() != Result.Success)
       return go.CommandResult();
 
-    // Separate closed planar curves (boundaries) from everything else.
-    var boundaries = new List<(Guid Id, Curve Curve, Plane Plane)>();
-    var allIds = new List<Guid>();
-
     var tol = doc.ModelAbsoluteTolerance;
+
+    // Collect all selected objects and extract curves for joining.
+    var allIds   = new List<Guid>();
+    var allCurves = new List<Curve>();
 
     foreach (var objRef in go.Objects())
     {
-      var id = objRef.ObjectId;
+      var id  = objRef.ObjectId;
       allIds.Add(id);
 
       var obj = doc.Objects.FindId(id);
-      if (obj?.Geometry is Curve c
-          && c.IsClosed
-          && c.TryGetPlane(out var pln, tol))
+      if (obj?.Geometry is Curve c)
+        allCurves.Add(c);
+    }
+
+    // Join all curves and keep only closed planar results as boundaries.
+    var boundaries = new List<(Curve Curve, Plane Plane)>();
+
+    if (allCurves.Count > 0)
+    {
+      var joined = Curve.JoinCurves(allCurves, tol);
+      if (joined != null)
       {
-        boundaries.Add((id, c, pln));
+        foreach (var j in joined)
+        {
+          if (j != null && j.IsClosed && j.TryGetPlane(out var pln, tol))
+            boundaries.Add((j, pln));
+        }
       }
     }
 
     if (boundaries.Count == 0)
     {
-      var sb = new System.Text.StringBuilder("No closed planar curves found.");
-      foreach (var objRef in go.Objects())
-      {
-        var o = doc.Objects.FindId(objRef.ObjectId);
-        if (o?.Geometry is not Curve c) continue;
+      var sb = new System.Text.StringBuilder("No closed planar boundary found after joining curves.");
+      foreach (var c in allCurves)
         sb.Append($" [{c.GetType().Name} IsClosed={c.IsClosed} TryGetPlane={c.TryGetPlane(out _, tol)}]");
-      }
       Log.Write(EnglishName, sb.ToString());
-      RhinoApp.WriteLine("vGroup: no closed planar curves found in selection.");
+      RhinoApp.WriteLine("vGroup: no closed planar boundary found in selection.");
       return Result.Nothing;
     }
 
-    // For each boundary, collect the objects whose representative point
-    // is inside it (other closed curves are also tested for containment).
+    // For each boundary, collect selected objects whose representative
+    // point is inside or on the boundary (segment curves land Coincident).
     int groupCount = 0;
 
-    foreach (var (boundId, bound, plane) in boundaries)
+    foreach (var (bound, plane) in boundaries)
     {
-      var members = new List<Guid> { boundId };
+      var members = new List<Guid>();
 
       foreach (var id in allIds)
       {
-        if (id == boundId)
-          continue;
-
         var obj = doc.Objects.FindId(id);
         if (obj == null)
           continue;
@@ -95,8 +103,8 @@ public sealed class vGroup : Command
           members.Add(id);
       }
 
-      if (allIds.Count < 2)
-        continue; // only one object selected — nothing to group
+      if (members.Count < 2)
+        continue;
 
       var grpIdx = doc.Groups.Add();
       foreach (var id in members)
