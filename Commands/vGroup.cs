@@ -59,6 +59,22 @@ public sealed class vGroup : Command
     // Handles both curves connected end-to-end AND curves that cross each other.
     var boundaries = new List<(Curve Curve, Plane Plane)>();
 
+    Log.Write(EnglishName, $"--- run start --- tol={tol:G4} curves={allCurves.Count} totalObjects={allIds.Count}");
+
+    // Log every input curve.
+    for (int i = 0; i < allCurves.Count; i++)
+    {
+      var c = allCurves[i];
+      var s = c.PointAtStart;
+      var e = c.PointAtEnd;
+      Log.Write(EnglishName,
+        $"  curve[{i}] {c.GetType().Name} IsClosed={c.IsClosed}" +
+        $" TryGetPlane={c.TryGetPlane(out _, tol)}" +
+        $" start=({s.X:F3},{s.Y:F3},{s.Z:F3})" +
+        $" end=({e.X:F3},{e.Y:F3},{e.Z:F3})" +
+        $" gap={s.DistanceTo(e):G4}");
+    }
+
     if (allCurves.Count > 0)
     {
       // Collect split parameters per curve index.
@@ -67,15 +83,26 @@ public sealed class vGroup : Command
       for (int j = i + 1; j < allCurves.Count; j++)
       {
         var events = Intersection.CurveCurve(allCurves[i], allCurves[j], tol, tol);
-        if (events == null) continue;
-        foreach (var e in events)
+        int ptCount = 0, ovCount = 0;
+        if (events != null)
         {
-          if (!e.IsPoint) continue;
-          if (!splitParams.ContainsKey(i)) splitParams[i] = new List<double>();
-          if (!splitParams.ContainsKey(j)) splitParams[j] = new List<double>();
-          splitParams[i].Add(e.ParameterA);
-          splitParams[j].Add(e.ParameterB);
+          foreach (var ev in events)
+          {
+            if (ev.IsPoint)
+            {
+              ptCount++;
+              if (!splitParams.ContainsKey(i)) splitParams[i] = new List<double>();
+              if (!splitParams.ContainsKey(j)) splitParams[j] = new List<double>();
+              splitParams[i].Add(ev.ParameterA);
+              splitParams[j].Add(ev.ParameterB);
+            }
+            else { ovCount++; }
+          }
         }
+        if (ptCount > 0 || ovCount > 0)
+          Log.Write(EnglishName, $"  intersect[{i},{j}] pointEvents={ptCount} overlapEvents={ovCount}");
+        else
+          Log.Write(EnglishName, $"  intersect[{i},{j}] none");
       }
 
       // Split each curve at its intersection parameters.
@@ -85,33 +112,55 @@ public sealed class vGroup : Command
         if (!splitParams.TryGetValue(i, out var parms) || parms.Count == 0)
         {
           segments.Add(allCurves[i]);
+          Log.Write(EnglishName, $"  split[{i}] no intersections → kept as-is");
           continue;
         }
         var splits = allCurves[i].Split(parms);
         if (splits != null && splits.Length > 0)
+        {
           segments.AddRange(splits);
+          Log.Write(EnglishName, $"  split[{i}] {parms.Count} params → {splits.Length} segments");
+        }
         else
+        {
           segments.Add(allCurves[i]);
+          Log.Write(EnglishName, $"  split[{i}] Split() returned null/empty → kept as-is");
+        }
       }
 
-      // Join all segments; keep closed planar results as boundaries.
+      Log.Write(EnglishName, $"  joining {segments.Count} segments...");
+
+      // Join all segments; log ALL results, keep closed planar ones as boundaries.
       var joined = Curve.JoinCurves(segments, tol);
-      if (joined != null)
+      if (joined == null || joined.Length == 0)
       {
-        foreach (var j in joined)
+        Log.Write(EnglishName, "  JoinCurves returned null/empty");
+      }
+      else
+      {
+        for (int k = 0; k < joined.Length; k++)
         {
-          if (j != null && j.IsClosed && j.TryGetPlane(out var pln, tol))
+          var j = joined[k];
+          if (j == null) { Log.Write(EnglishName, $"  joined[{k}] null"); continue; }
+          var hasPln = j.TryGetPlane(out var pln, tol);
+          var jS = j.PointAtStart;
+          var jE = j.PointAtEnd;
+          Log.Write(EnglishName,
+            $"  joined[{k}] {j.GetType().Name} IsClosed={j.IsClosed} TryGetPlane={hasPln}" +
+            $" start=({jS.X:F3},{jS.Y:F3},{jS.Z:F3})" +
+            $" end=({jE.X:F3},{jE.Y:F3},{jE.Z:F3})" +
+            $" gap={jS.DistanceTo(jE):G4}");
+          if (j.IsClosed && hasPln)
             boundaries.Add((j, pln));
         }
       }
     }
 
+    Log.Write(EnglishName, $"  boundaries found: {boundaries.Count}");
+
     if (boundaries.Count == 0)
     {
-      var sb = new System.Text.StringBuilder("No closed planar boundary found after joining curves.");
-      foreach (var c in allCurves)
-        sb.Append($" [{c.GetType().Name} IsClosed={c.IsClosed} TryGetPlane={c.TryGetPlane(out _, tol)}]");
-      Log.Write(EnglishName, sb.ToString());
+      Log.Write(EnglishName, "No closed planar boundary found — see details above.");
       RhinoApp.WriteLine("vGroup: no closed planar boundary found in selection.");
       return Result.Nothing;
     }
@@ -135,9 +184,14 @@ public sealed class vGroup : Command
           continue;
 
         var containment = bound.Contains(pt.Value, plane, tol);
+        Log.Write(EnglishName,
+          $"  containment obj={id} type={obj.Geometry?.GetType().Name}" +
+          $" pt=({pt.Value.X:F3},{pt.Value.Y:F3},{pt.Value.Z:F3}) → {containment}");
         if (containment is PointContainment.Inside or PointContainment.Coincident)
           members.Add(id);
       }
+
+      Log.Write(EnglishName, $"  boundary members={members.Count}");
 
       if (members.Count < 2)
         continue;
