@@ -4,6 +4,7 @@ using Rhino;
 using Rhino.Commands;
 using Rhino.DocObjects;
 using Rhino.Geometry;
+using Rhino.Geometry.Intersect;
 using Rhino.Input.Custom;
 
 namespace vTools.Commands;
@@ -54,12 +55,47 @@ public sealed class vGroup : Command
         allCurves.Add(c);
     }
 
-    // Join all curves and keep only closed planar results as boundaries.
+    // Split all curves at their mutual intersections, then join the segments.
+    // Handles both curves connected end-to-end AND curves that cross each other.
     var boundaries = new List<(Curve Curve, Plane Plane)>();
 
     if (allCurves.Count > 0)
     {
-      var joined = Curve.JoinCurves(allCurves, tol);
+      // Collect split parameters per curve index.
+      var splitParams = new Dictionary<int, List<double>>();
+      for (int i = 0; i < allCurves.Count; i++)
+      for (int j = i + 1; j < allCurves.Count; j++)
+      {
+        var events = Intersection.CurveCurve(allCurves[i], allCurves[j], tol, tol);
+        if (events == null) continue;
+        foreach (var e in events)
+        {
+          if (!e.IsPoint) continue;
+          if (!splitParams.ContainsKey(i)) splitParams[i] = new List<double>();
+          if (!splitParams.ContainsKey(j)) splitParams[j] = new List<double>();
+          splitParams[i].Add(e.ParameterA);
+          splitParams[j].Add(e.ParameterB);
+        }
+      }
+
+      // Split each curve at its intersection parameters.
+      var segments = new List<Curve>();
+      for (int i = 0; i < allCurves.Count; i++)
+      {
+        if (!splitParams.TryGetValue(i, out var parms) || parms.Count == 0)
+        {
+          segments.Add(allCurves[i]);
+          continue;
+        }
+        var splits = allCurves[i].Split(parms);
+        if (splits != null && splits.Length > 0)
+          segments.AddRange(splits);
+        else
+          segments.Add(allCurves[i]);
+      }
+
+      // Join all segments; keep closed planar results as boundaries.
+      var joined = Curve.JoinCurves(segments, tol);
       if (joined != null)
       {
         foreach (var j in joined)
