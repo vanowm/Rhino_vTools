@@ -47,6 +47,7 @@ public class vToolsPlugIn : PlugIn
       ? System.Diagnostics.FileVersionInfo.GetVersionInfo(asm.Location).FileVersion
       : null) ?? asm.GetName().Version?.ToString() ?? "unknown";
     var commandNames = CollectRegisteredCommandNames();
+    vDebug.Initialize();
     TryLog($"OnLoad OK. Version={version}. Assembly={GetType().Assembly.Location}");
     Commands.vBiminiParts.InitLog();
     RhinoApp.WriteLine($"vTools v{version} loaded. Commands registered ({commandNames.Count}): {string.Join(", ", commandNames)}");

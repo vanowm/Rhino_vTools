@@ -14,9 +14,8 @@ namespace vTools;
 ///   vDebug.Log("vFitBox", "msg {0}", value);
 ///   vDebug.Disable("vFitBox");
 ///
-/// One log file is created per Rhino session under the project logs directory,
-/// named  debug_YYYYMMDD_HHmmss.log  (set at first write).
-/// All writes append so multiple commands share the same session file.
+/// A single file  logs/debug.log  is used for the whole session.
+/// Call  vDebug.Initialize()  from the plug-in OnLoad to clear it on startup.
 /// </summary>
 internal static class vDebug
 {
@@ -28,8 +27,28 @@ internal static class vDebug
   private static readonly HashSet<string> _enabled =
     new(StringComparer.OrdinalIgnoreCase);
 
-  private static string? _logPath;      // set once on first write
+  private static string? _logPath;      // resolved once on first write
   private static readonly object _lock = new();
+
+  // -- Startup --------------------------------------------------------------
+
+  /// <summary>
+  /// Clears the log file and re-resolves the path.  Call once from
+  /// <c>PlugIn.OnLoad</c> so each Rhino session starts with a clean file.
+  /// </summary>
+  public static void Initialize()
+  {
+    try
+    {
+      lock (_lock)
+      {
+        _logPath = ResolveLogPath();
+        if (!string.IsNullOrEmpty(_logPath))
+          File.WriteAllText(_logPath, $"[{DateTime.Now:HH:mm:ss.fff}] vDebug initialized\n");
+      }
+    }
+    catch { }
+  }
 
   // -- Tag control ----------------------------------------------------------
 
@@ -94,7 +113,7 @@ internal static class vDebug
       var logsDir = ResolveLogsDir();
       if (string.IsNullOrEmpty(logsDir)) return string.Empty;
       Directory.CreateDirectory(logsDir);
-      return Path.Combine(logsDir, $"debug_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+      return Path.Combine(logsDir, "debug.log");
     }
     catch { return string.Empty; }
   }
