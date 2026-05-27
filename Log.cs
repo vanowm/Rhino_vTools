@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Runtime.CompilerServices;
 
 namespace vTools;
 
@@ -45,15 +44,13 @@ internal static class Log
 
   // ── Write overloads ───────────────────────────────────────────────────────
 
-  /// <summary>Appends a plain message; the caller member name is included automatically.</summary>
-  public static void Write(string message,
-    [CallerMemberName] string caller = "")
-    => Append($"[{caller}] {message}");
+  /// <summary>Appends a plain message.</summary>
+  public static void Write(string message)
+    => Append(message);
 
   /// <summary>Appends a tagged message (tag is typically the command name).</summary>
-  public static void Write(string tag, string message,
-    [CallerMemberName] string caller = "")
-    => Append($"[{tag}] [{caller}] {message}");
+  public static void Write(string tag, string message)
+    => Append($"[{tag}] {message}");
 
   /// <summary>Appends a tagged formatted message.</summary>
   public static void Write(string tag, string format, params object[] args)
