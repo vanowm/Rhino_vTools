@@ -281,17 +281,14 @@ public sealed class vTextAligned : Command
       var upAxis = getter.View()?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
       var previewTemplateTextId = getter.PreviewTemplateTextId;
 
-      // Use the already-computed preview plane (includes deadband/side-persistence logic)
-      // to guarantee placement matches what was shown.
-      var plane = getter.PreviewPlane ?? Plane.Unset;
-      var primarySideSign = 1;
-      if (!plane.IsValid)
+      // Use the last stable side sign from the preview to match what was shown.
+      var placeSideSign = getter.LastSideSign != 0 ? getter.LastSideSign : 0;
+      var placeSideDeadband = getter.LastSideSign != 0 ? Math.Max(doc.ModelAbsoluteTolerance * 4.0, _height * 0.1) : 0.0;
+
+      if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, _height, _rotate90, upAxis, out var plane, out var primarySideSign, sideSignHint: placeSideSign, sideDeadband: placeSideDeadband, previewTemplateTextId))
       {
-        if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, _height, _rotate90, upAxis, out plane, out primarySideSign, sideSignHint: 0, sideDeadband: 0.0, previewTemplateTextId))
-        {
-          RhinoApp.WriteLine("vTextAligned: could not compute text plane.");
-          continue;
-        }
+        RhinoApp.WriteLine("vTextAligned: could not compute text plane.");
+        continue;
       }
 
       if (activeTextId.HasValue)
@@ -1065,6 +1062,7 @@ public sealed class vTextAligned : Command
     public Plane? PreviewPlaneOpp { get; private set; }
     public Guid? PreviewTemplateTextId { get; }
     public Point3d? LastCursorPoint { get; private set; }
+    public int LastSideSign => _lastSideSign;
 
     public double SnapTolerance { get; }
     public double HoverSnapTolerance { get; }
