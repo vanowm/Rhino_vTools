@@ -874,6 +874,9 @@ public sealed class vTextAligned : Command
     var baseStyle = doc.DimStyles.FindId(baseStyleId) ?? doc.DimStyles.Current;
     var overrideStyle = baseStyle.Duplicate();
     overrideStyle.TextHeight = Math.Max(height, RhinoMath.ZeroTolerance);
+    // Force in-plane orientation so placed text matches the preview (which has no dim style override).
+    overrideStyle.TextOrientation = TextOrientation.InPlane;
+    overrideStyle.TextRotation = 0.0;
     te.SetOverrideDimStyle(overrideStyle);
   }
 
