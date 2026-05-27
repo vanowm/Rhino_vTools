@@ -131,7 +131,11 @@ public sealed class vGroup : Command
       Log.Write(EnglishName, $"  joining {segments.Count} segments...");
 
       // Join all segments; log ALL results, keep closed planar ones as boundaries.
+      // If a result is nearly closed (gap < 100× model tol), bridge the gap with
+      // a tiny line so small endpoint mismatches don't silently drop a boundary.
       var joined = Curve.JoinCurves(segments, tol);
+      var closingGapTol = tol * 100;
+
       if (joined == null || joined.Length == 0)
       {
         Log.Write(EnglishName, "  JoinCurves returned null/empty");
@@ -142,9 +146,25 @@ public sealed class vGroup : Command
         {
           var j = joined[k];
           if (j == null) { Log.Write(EnglishName, $"  joined[{k}] null"); continue; }
-          var hasPln = j.TryGetPlane(out var pln, tol);
           var jS = j.PointAtStart;
           var jE = j.PointAtEnd;
+          var jGap = jS.DistanceTo(jE);
+
+          // Close a small endpoint gap by bridging with a line segment.
+          if (!j.IsClosed && jGap > 0 && jGap < closingGapTol)
+          {
+            var bridge = new LineCurve(jE, jS);
+            var reclosed = Curve.JoinCurves(new Curve[] { j, bridge }, tol);
+            if (reclosed?.Length == 1 && reclosed[0] != null && reclosed[0].IsClosed)
+            {
+              Log.Write(EnglishName, $"  joined[{k}] gap={jGap:G4} < closingTol={closingGapTol:G4} → bridged and closed");
+              j = reclosed[0];
+              jS = j.PointAtStart;
+              jE = j.PointAtEnd;
+            }
+          }
+
+          var hasPln = j.TryGetPlane(out var pln, tol);
           Log.Write(EnglishName,
             $"  joined[{k}] {j.GetType().Name} IsClosed={j.IsClosed} TryGetPlane={hasPln}" +
             $" start=({jS.X:F3},{jS.Y:F3},{jS.Z:F3})" +
