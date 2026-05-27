@@ -88,8 +88,8 @@ public sealed class vGroup : Command
           members.Add(id);
       }
 
-      if (members.Count < 2)
-        continue; // nothing inside this boundary — skip
+      if (allIds.Count < 2)
+        continue; // only one object selected — nothing to group
 
       var grpIdx = doc.Groups.Add();
       foreach (var id in members)
