@@ -752,51 +752,16 @@ public sealed class vTextAligned : Command
     var text = new TextEntity
     {
       Plane = plane,
+      TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance),
       Justification = TextJustification.MiddleCenter
     };
 
     SetTextEntityValue(text, textValue);
-
-    try
-    {
-      text.DimensionStyleId = doc.DimStyles.Current.Id;
-    }
-    catch
-    {
-    }
-
-    try
-    {
-      text.DimensionScale = 1.0;
-    }
-    catch
-    {
-    }
-
-    // Set height after the style so it overrides the style's text height.
-    text.TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
-
     return text;
   }
 
   private static TextEntity BuildProbeTextEntity(RhinoDoc doc, string textValue, double heightValue, Plane plane, Guid? templateTextId)
   {
-    if (templateTextId.HasValue)
-    {
-      var obj = doc.Objects.FindId(templateTextId.Value);
-      if (obj?.Geometry is TextEntity source)
-      {
-        var probe = source.Duplicate() as TextEntity;
-        if (probe != null)
-        {
-          probe.Plane = plane;
-          SetTextEntityValue(probe, textValue);
-          probe.TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
-          return probe;
-        }
-      }
-    }
-
     return BuildTextEntity(doc, textValue, heightValue, plane);
   }
 
@@ -1258,18 +1223,6 @@ public sealed class vTextAligned : Command
 
     private TextEntity BuildPreviewText(Plane plane)
     {
-      if (PreviewTemplateTextId.HasValue)
-      {
-        var templateObj = _doc.Objects.FindId(PreviewTemplateTextId.Value);
-        if (templateObj?.Geometry is TextEntity template)
-        {
-          var geo = template.Duplicate() as TextEntity ?? BuildTextEntity(_doc, _text, _height, plane);
-          geo.Plane = plane;
-          SetTextEntityValue(geo, _text);
-          geo.TextHeight = _height;
-          return geo;
-        }
-      }
       return BuildTextEntity(_doc, _text, _height, plane);
     }
   }
