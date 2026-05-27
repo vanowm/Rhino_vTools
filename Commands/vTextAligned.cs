@@ -752,7 +752,6 @@ public sealed class vTextAligned : Command
     var text = new TextEntity
     {
       Plane = plane,
-      TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance),
       Justification = TextJustification.MiddleCenter
     };
 
@@ -773,6 +772,9 @@ public sealed class vTextAligned : Command
     catch
     {
     }
+
+    // Set height after the style so it overrides the style's text height.
+    text.TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
 
     return text;
   }
