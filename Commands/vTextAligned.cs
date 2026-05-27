@@ -121,9 +121,8 @@ public sealed class vTextAligned : Command
             var updated = te.Duplicate() as TextEntity;
             if (updated != null)
             {
-              updated.DimensionStyleId = Guid.Empty;
               SetTextEntityValue(updated, _text);
-              updated.TextHeight = _height;
+              ApplyHeightOverride(doc, updated, _height);
               _ = doc.Objects.Replace(activeTextId.Value, updated);
               doc.Views.Redraw();
             }
@@ -828,15 +827,13 @@ public sealed class vTextAligned : Command
     if (updated == null)
       return false;
 
-    updated.DimensionStyleId = Guid.Empty;
     updated.Plane = plane;
     SetTextEntityValue(updated, textValue);
-    updated.TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
+    ApplyHeightOverride(doc, updated, heightValue);
 
     if (!doc.Objects.Replace(textId, updated))
       return false;
 
-    _ = ForceTextObjectHeight(doc, textId, heightValue);
     return true;
   }
 
@@ -871,6 +868,15 @@ public sealed class vTextAligned : Command
     }
   }
 
+  private static void ApplyHeightOverride(RhinoDoc doc, TextEntity te, double height)
+  {
+    var baseStyleId = te.DimensionStyleId != Guid.Empty ? te.DimensionStyleId : doc.DimStyles.Current.Id;
+    var baseStyle = doc.DimStyles.FindId(baseStyleId) ?? doc.DimStyles.Current;
+    var overrideStyle = baseStyle.Duplicate();
+    overrideStyle.TextHeight = Math.Max(height, RhinoMath.ZeroTolerance);
+    te.SetOverrideDimStyle(overrideStyle);
+  }
+
   private static bool ForceTextObjectHeight(RhinoDoc doc, Guid objectId, double height)
   {
     var obj = doc.Objects.FindId(objectId);
@@ -881,8 +887,7 @@ public sealed class vTextAligned : Command
     if (dup == null)
       return false;
 
-    dup.DimensionStyleId = Guid.Empty;
-    dup.TextHeight = Math.Max(height, RhinoMath.ZeroTolerance);
+    ApplyHeightOverride(doc, dup, height);
     return doc.Objects.Replace(objectId, dup);
   }
 
