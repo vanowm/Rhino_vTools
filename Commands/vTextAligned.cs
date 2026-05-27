@@ -121,6 +121,7 @@ public sealed class vTextAligned : Command
             var updated = te.Duplicate() as TextEntity;
             if (updated != null)
             {
+              updated.DimensionStyleId = Guid.Empty;
               SetTextEntityValue(updated, _text);
               updated.TextHeight = _height;
               _ = doc.Objects.Replace(activeTextId.Value, updated);
@@ -280,10 +281,17 @@ public sealed class vTextAligned : Command
       var upAxis = getter.View()?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
       var previewTemplateTextId = getter.PreviewTemplateTextId;
 
-      if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, _height, _rotate90, upAxis, out var plane, out var primarySideSign, sideSignHint: 0, sideDeadband: 0.0, previewTemplateTextId))
+      // Use the already-computed preview plane (includes deadband/side-persistence logic)
+      // to guarantee placement matches what was shown.
+      var plane = getter.PreviewPlane ?? Plane.Unset;
+      var primarySideSign = 1;
+      if (!plane.IsValid)
       {
-        RhinoApp.WriteLine("vTextAligned: could not compute text plane.");
-        continue;
+        if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, _height, _rotate90, upAxis, out plane, out primarySideSign, sideSignHint: 0, sideDeadband: 0.0, previewTemplateTextId))
+        {
+          RhinoApp.WriteLine("vTextAligned: could not compute text plane.");
+          continue;
+        }
       }
 
       if (activeTextId.HasValue)
@@ -823,6 +831,7 @@ public sealed class vTextAligned : Command
     if (updated == null)
       return false;
 
+    updated.DimensionStyleId = Guid.Empty;
     updated.Plane = plane;
     SetTextEntityValue(updated, textValue);
     updated.TextHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
@@ -875,6 +884,7 @@ public sealed class vTextAligned : Command
     if (dup == null)
       return false;
 
+    dup.DimensionStyleId = Guid.Empty;
     dup.TextHeight = Math.Max(height, RhinoMath.ZeroTolerance);
     return doc.Objects.Replace(objectId, dup);
   }
