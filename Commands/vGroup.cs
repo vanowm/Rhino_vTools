@@ -57,7 +57,6 @@ public sealed class vGroup : Command
 
     if (boundaries.Count == 0)
     {
-      vDebug.Enable(EnglishName);
       var sb = new System.Text.StringBuilder("No closed planar curves found.");
       foreach (var objRef in go.Objects())
       {
@@ -65,7 +64,7 @@ public sealed class vGroup : Command
         if (o?.Geometry is not Curve c) continue;
         sb.Append($" [{c.GetType().Name} IsClosed={c.IsClosed} TryGetPlane={c.TryGetPlane(out _, tol)}]");
       }
-      vDebug.Log(EnglishName, sb.ToString());
+      Log.Write(EnglishName, sb.ToString());
       RhinoApp.WriteLine("vGroup: no closed planar curves found in selection.");
       return Result.Nothing;
     }
