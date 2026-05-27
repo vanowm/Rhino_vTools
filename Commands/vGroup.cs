@@ -49,7 +49,6 @@ public sealed class vGroup : Command
       var obj = doc.Objects.FindId(id);
       if (obj?.Geometry is Curve c
           && c.IsClosed
-          && c.IsPlanar(tol)
           && c.TryGetPlane(out var pln, tol))
       {
         boundaries.Add((id, c, pln));
