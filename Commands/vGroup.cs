@@ -42,8 +42,9 @@ public sealed class vGroup : Command
     var tol = doc.ModelAbsoluteTolerance;
 
     // Collect all selected objects and extract curves for joining.
-    var allIds   = new List<Guid>();
-    var allCurves = new List<Curve>();
+    var allIds      = new List<Guid>();
+    var allCurves   = new List<Curve>();
+    var allCurveIds = new List<Guid>(); // ID for each entry in allCurves
 
     foreach (var objRef in go.Objects())
     {
@@ -52,12 +53,17 @@ public sealed class vGroup : Command
 
       var obj = doc.Objects.FindId(id);
       if (obj?.Geometry is Curve c)
+      {
         allCurves.Add(c);
+        allCurveIds.Add(id);
+      }
     }
 
-    // Split all curves at their mutual intersections, then join the segments.
-    // Handles both curves connected end-to-end AND curves that cross each other.
-    var boundaries = new List<(Curve Curve, Plane Plane)>();
+    // Split all curves at their mutual intersections, trim dead-end segments,
+    // then join the surviving core into closed boundaries.
+    var boundaries    = new List<(Curve Curve, Plane Plane)>();
+    var coreSegments  = new List<Curve>();
+    var coreOriginIdx = new List<int>(); // index into allCurves for each core segment
 
     Log.Write(EnglishName, $"--- run start --- tol={tol:G4} curves={allCurves.Count} totalObjects={allIds.Count}");
 
@@ -106,34 +112,105 @@ public sealed class vGroup : Command
       }
 
       // Split each curve at its intersection parameters.
-      var segments = new List<Curve>();
+      // Track which original curve index each segment comes from.
+      var segments     = new List<Curve>();
+      var segOriginIdx = new List<int>();
       for (int i = 0; i < allCurves.Count; i++)
       {
         if (!splitParams.TryGetValue(i, out var parms) || parms.Count == 0)
         {
           segments.Add(allCurves[i]);
+          segOriginIdx.Add(i);
           Log.Write(EnglishName, $"  split[{i}] no intersections → kept as-is");
           continue;
         }
         var splits = allCurves[i].Split(parms);
         if (splits != null && splits.Length > 0)
         {
-          segments.AddRange(splits);
+          foreach (var s in splits) { segments.Add(s); segOriginIdx.Add(i); }
           Log.Write(EnglishName, $"  split[{i}] {parms.Count} params → {splits.Length} segments");
         }
         else
         {
           segments.Add(allCurves[i]);
+          segOriginIdx.Add(i);
           Log.Write(EnglishName, $"  split[{i}] Split() returned null/empty → kept as-is");
         }
       }
 
-      Log.Write(EnglishName, $"  joining {segments.Count} segments...");
+      // Iteratively remove dead-end segments (degree-1 endpoint nodes).
+      // Lines that extend past the enclosed region have dangling outer tails;
+      // trimming round-by-round peels those off, leaving only segments that
+      // participate in closed cycles (the real boundary polygon).
+      var nodePos      = new List<Point3d>();
+      var segStartNode = new int[segments.Count];
+      var segEndNode   = new int[segments.Count];
+
+      int GetOrAddNode(Point3d pt)
+      {
+        for (int n = 0; n < nodePos.Count; n++)
+          if (pt.DistanceTo(nodePos[n]) <= tol) return n;
+        nodePos.Add(pt);
+        return nodePos.Count - 1;
+      }
+
+      for (int i = 0; i < segments.Count; i++)
+      {
+        segStartNode[i] = GetOrAddNode(segments[i].PointAtStart);
+        segEndNode[i]   = GetOrAddNode(segments[i].PointAtEnd);
+      }
+
+      var removed    = new HashSet<int>();
+      bool anyChange = true;
+      int trimRounds = 0;
+      while (anyChange)
+      {
+        anyChange = false;
+        var degree = new Dictionary<int, int>();
+        for (int i = 0; i < segments.Count; i++)
+        {
+          if (removed.Contains(i)) continue;
+          degree.TryGetValue(segStartNode[i], out var ds);
+          degree[segStartNode[i]] = ds + 1;
+          degree.TryGetValue(segEndNode[i], out var de);
+          degree[segEndNode[i]] = de + 1;
+        }
+        for (int i = 0; i < segments.Count; i++)
+        {
+          if (removed.Contains(i)) continue;
+          if (segStartNode[i] == segEndNode[i]) continue; // self-loop = closed segment
+          if (degree.GetValueOrDefault(segStartNode[i]) == 1 ||
+              degree.GetValueOrDefault(segEndNode[i]) == 1)
+          {
+            removed.Add(i);
+            anyChange = true;
+          }
+        }
+        trimRounds++;
+      }
+
+      for (int i = 0; i < segments.Count; i++)
+      {
+        if (removed.Contains(i)) continue;
+        coreSegments.Add(segments[i]);
+        coreOriginIdx.Add(segOriginIdx[i]);
+      }
+      Log.Write(EnglishName,
+        $"  dead-end trimming: {trimRounds} rounds, {removed.Count} removed," +
+        $" {coreSegments.Count} core segments remain");
+
+      if (coreSegments.Count == 0)
+      {
+        Log.Write(EnglishName, "  no core segments after trimming → no boundaries");
+      }
+      else
+      {
+      Log.Write(EnglishName, $"  joining {coreSegments.Count} core segments...");
 
       // Join all segments; log ALL results, keep closed planar ones as boundaries.
       // If a result is nearly closed (gap < 100× model tol), bridge the gap with
       // a tiny line so small endpoint mismatches don't silently drop a boundary.
-      var joined = Curve.JoinCurves(segments, tol);
+      var joined = Curve.JoinCurves(coreSegments.ToArray(), tol);
       var closingGapTol = tol * 100;
 
       if (joined == null || joined.Length == 0)
@@ -174,6 +251,7 @@ public sealed class vGroup : Command
             boundaries.Add((j, pln));
         }
       }
+      } // end if (coreSegments.Count > 0)
     }
 
     Log.Write(EnglishName, $"  boundaries found: {boundaries.Count}");
@@ -185,24 +263,36 @@ public sealed class vGroup : Command
       return Result.Nothing;
     }
 
-    // For each boundary, collect selected objects whose representative
-    // point is inside or on the boundary (segment curves land Coincident).
+    // For each boundary:
+    //   1. Core segments whose midpoints are Coincident reveal which original
+    //      curves formed the boundary — those are always in the group.
+    //   2. All remaining selected objects are tested by representative point.
     int groupCount = 0;
 
     foreach (var (bound, plane) in boundaries)
     {
-      var members = new List<Guid>();
+      var members = new HashSet<Guid>();
 
+      // Add original curves that contributed segments to this boundary.
+      for (int k = 0; k < coreSegments.Count; k++)
+      {
+        var midPt = coreSegments[k].PointAt(coreSegments[k].Domain.Mid);
+        var sc = bound.Contains(midPt, plane, tol);
+        Log.Write(EnglishName,
+          $"  seg[{k}] origin={coreOriginIdx[k]}" +
+          $" mid=({midPt.X:F3},{midPt.Y:F3},{midPt.Z:F3}) → {sc}");
+        if (sc == PointContainment.Coincident)
+          members.Add(allCurveIds[coreOriginIdx[k]]);
+      }
+
+      // Test remaining selected objects for containment.
       foreach (var id in allIds)
       {
+        if (members.Contains(id)) continue;
         var obj = doc.Objects.FindId(id);
-        if (obj == null)
-          continue;
-
+        if (obj == null) continue;
         var pt = RepresentativePoint(obj);
-        if (pt == null)
-          continue;
-
+        if (pt == null) continue;
         var containment = bound.Contains(pt.Value, plane, tol);
         Log.Write(EnglishName,
           $"  containment obj={id} type={obj.Geometry?.GetType().Name}" +
@@ -220,8 +310,7 @@ public sealed class vGroup : Command
       foreach (var id in members)
       {
         var obj = doc.Objects.FindId(id);
-        if (obj == null)
-          continue;
+        if (obj == null) continue;
         obj.Attributes.AddToGroup(grpIdx);
         obj.CommitChanges();
       }
