@@ -24,6 +24,14 @@ public sealed class vGroup : Command
   public override string EnglishName => "vGroup";
 
   /// <summary>
+  /// Group indices created by vGroup in this Rhino session.
+  /// On each run these are deleted before new groups are created, so
+  /// re-running vGroup on the same objects replaces its own groups without
+  /// touching any groups the user made manually.
+  /// </summary>
+  private static readonly HashSet<int> _ourGroupIndices = new();
+
+  /// <summary>
   /// Joins all selected curves, uses any closed planar results as
   /// boundaries, and groups each selected object with the boundary that
   /// contains it.
@@ -64,6 +72,13 @@ public sealed class vGroup : Command
     var boundaries    = new List<(Curve Curve, Plane Plane)>();
     var coreSegments  = new List<Curve>();
     var coreOriginIdx = new List<int>(); // index into allCurves for each core segment
+
+    // Delete only the groups that were created by vGroup in this session.
+    // This replaces our own previous output without touching any groups
+    // the user created manually.
+    foreach (var idx in _ourGroupIndices)
+      doc.Groups.Delete(idx);
+    _ourGroupIndices.Clear();
 
     Log.Write(EnglishName, $"--- run start --- tol={tol:G4} curves={allCurves.Count} totalObjects={allIds.Count}");
 
@@ -314,7 +329,7 @@ public sealed class vGroup : Command
         obj.Attributes.AddToGroup(grpIdx);
         obj.CommitChanges();
       }
-
+      _ourGroupIndices.Add(grpIdx);
       groupCount++;
     }
 
