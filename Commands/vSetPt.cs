@@ -59,8 +59,6 @@ public sealed class vSetPt : Command
       return go.CommandResult();
     }
 
-    var tol = doc.ModelAbsoluteTolerance;
-
     // Collect open curves only — closed curves have no distinct endpoints.
     var curveData = new List<(Guid id, Curve c)>();
     foreach (var objRef in go.Objects())
@@ -109,15 +107,11 @@ public sealed class vSetPt : Command
     var pB     = eps[bestB].pt;
     var meetPt = pA + (pB - pA) * 0.5;
 
-    // Search radius: 3× the initial gap, at least 100× model tolerance.
-    var radius = Math.Max(bestDist * 3.0, tol * 100.0);
-
     Log.Write(Tag,
-      $"  meet=({meetPt.X:F3},{meetPt.Y:F3},{meetPt.Z:F3})" +
-      $" gap={bestDist:G4} radius={radius:G4}");
+      $"  meet=({meetPt.X:F3},{meetPt.Y:F3},{meetPt.Z:F3}) gap={bestDist:G4}");
 
-    // For each curve, pick the endpoint closer to the meeting point,
-    // and include it only if it falls within the search radius.
+    // For every selected open curve, pick the endpoint closer to the meeting
+    // point.  The user's selection is the explicit intent — no radius filter.
     var picks = new List<(Guid id, bool isStart)>();
     for (int i = 0; i < curveData.Count; i++)
     {
@@ -125,19 +119,17 @@ public sealed class vSetPt : Command
       var dStart       = meetPt.DistanceTo(c.PointAtStart);
       var dEnd         = meetPt.DistanceTo(c.PointAtEnd);
       bool chooseStart = dStart <= dEnd;
-      double dist      = chooseStart ? dStart : dEnd;
 
       Log.Write(Tag,
         $"  curve[{i}] dStart={dStart:G4} dEnd={dEnd:G4}" +
-        $" pick={( chooseStart ? "start" : "end" )} dist={dist:G4} include={dist <= radius}");
+        $" pick={( chooseStart ? "start" : "end" )}");
 
-      if (dist <= radius)
-        picks.Add((curveData[i].id, chooseStart));
+      picks.Add((curveData[i].id, chooseStart));
     }
 
     if (picks.Count == 0)
     {
-      RhinoApp.WriteLine("vSetPt: no endpoint cluster found.");
+      RhinoApp.WriteLine("vSetPt: no open curves to process.");
       return Result.Nothing;
     }
 
