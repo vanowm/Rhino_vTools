@@ -1,4 +1,4 @@
-# vTools  ·  v26.5.19.1937
+# vTools  ·  v26.5.28.1247
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -6,10 +6,12 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 
 - Rhino plug-in entry point: vToolsPlugIn
 - Native commands:
+  - [vBiminiParts](#vbiminiparts-flow) *(26.5.23.106)* — builds bimini cover pocket parts (facings, main pocket, secondary pockets, center reference line) from a selected boundary curve; pipe size configures pocket depths
   - [vChamfer](#vchamfer-flow) *(26.5.7.723)* — cuts a corner formed by two curves with a straight line perpendicular to the angle bisector at a specified cut length
   - [vCurveToSpline](#vcurvetospline-flow) *(26.4.24.934)* — converts selected curves to interpolated splines with join modes
   - [vDiamonds](#vdiamonds-flow) *(26.5.14.928)* — draws an argyle diamond pattern with optional bounding rectangle and size/count labels; supports BySize centering mode
   - [vFitBox](#vfitbox-flow) *(26.4.24.934)* — finds the minimum bounding box for selected objects by optimizing rotation angle
+  - [vGroup](#vgroup-flow) *(26.5.27.1525)* — groups selected objects by closed-curve boundaries; each boundary is grouped with the objects inside it
   - [vLine](#vline-flow) *(26.4.27.2125)* — draws lines with chain modes, angle lock, length constraint, and perp/tangent endpoint solving
   - [vLineLength](#vlinelength-flow) *(26.4.27.2125)* — resizes an open curve to a target total, additive, or subtractive length
   - [vMiddleCurve](#vmiddlecurve-flow) *(26.4.27.2125)* — creates an interpolated curve equidistant between two selected curves
@@ -22,6 +24,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vPointTrace](#vpointtrace-flow) *(26.4.24.934)* — maps arc-length positions from a source curve onto a destination curve: pick points along the source and a corresponding point is placed on the destination at the same proportional arc-length position
   - [vRectangle](#vrectangle-flow) *(26.4.27.2125)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
+  - [vSetPt](#vsetpt-flow) *(26.5.28.1145)* — aligns the closest-together endpoints of selected open curves to a user-specified location using the built-in SetPt
   - [vSplitAtCorners](#vsplitatcorners-flow) *(26.4.27.2125)* — splits curves at detected corners with interactive per-corner toggle preview
   - [vTangent](#vtangent-flow) *(26.5.5.757)* — moves a curve rigidly so one or both endpoints align tangentially to selected driver curves
   - [vTextAligned](#vtextaligned-flow) *(26.4.27.2125)* — places or repositions annotation text aligned and offset along a selected curve
@@ -75,10 +78,29 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFitBox](#vfitbox-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
+Native commands: [vBiminiParts](#vbiminiparts-flow), [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFitBox](#vfitbox-flow), [vGroup](#vgroup-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSetPt](#vsetpt-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
+
+### vBiminiParts flow
+
+1. Select bimini boundary curves (preselect supported). Use the `PipeSize` option to select the pipe size group (`7/8`, `1`, `1-1/4`, `1-1/2`).
+1. The command joins the selected curves into a single closed boundary, then determines the seam curve (outward offset) and finished curve (either detected from an existing curve on the PLOT layer or computed as an inward offset), and breaks both at corners into top/bottom/left/right segments.
+1. **Stage 2 — Main pocket**: click the center of up to 2 seam or finished top/bottom segments to identify the main pocket side(s). Press Enter to skip.
+1. **Stage 3 — Secondary pocket**: click the center of remaining top/bottom segments for secondary pockets if fewer than 2 main pockets were picked. Press Enter to skip.
+1. Output is built automatically:
+
+    - **Facing parts** (port and starboard sides) with interior objects collected.
+    - **Main pocket outline** — closed filleted rectangle trimmed to the boundary.
+    - **Secondary pocket outline(s)** — closed filleted shapes with seam clearance.
+    - **Center reference line** through all pocket center points.
+
+1. Output layers: `PLOT` (finished curve segments), `CUT1` (seam and pocket outlines), `Reference` (center points and center line).
+
+Options:
+
+- `PipeSize`: selects a pipe size group which sets `MainPktDepth`, `SecPktDepth`, and optional `ExtraRect` dimensions. All groups are configurable in `vTools.config.json` under `vBiminiParts`.
 
 ### vChamfer flow
 
@@ -126,6 +148,18 @@ Native commands: [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-fl
     - `Fit`: optimize by `Height` or `Area`.
 
 1. Confirm selection to generate the fit result.
+
+### vGroup flow
+
+1. Select objects to group — include both the boundary curves and any objects to be placed inside groups.
+1. The command finds all closed polygon boundaries formed by the selected curves:
+
+    - All curves are split at their mutual intersection points.
+    - Segments with dead-end endpoints (degree-1 nodes) are iteratively removed until only closed-cycle core segments remain.
+    - Surviving segments are joined into closed planar boundaries.
+
+1. For each closed boundary, all selected objects whose representative point falls inside it are collected. Original curves that defined the boundary (e.g. crossing lines whose midpoint lies outside the inner polygon) are included via source-curve tracking.
+1. Each boundary and its interior objects are added to a Rhino group (minimum 2 members required).
 
 ### vLine flow
 
@@ -277,6 +311,14 @@ Behavior:
     - `Size`: scallop bulge distance.
     - `Free`: when `Yes`, bulge is measured from midpoint to picked side point; when `No`, uses fixed `Size`.
     - `DeleteOriginal`: when selecting an existing line input, remove that original line after creating the scallop arc.
+
+### vSetPt flow
+
+1. Select open curves to align (preselect supported; closed curves are ignored).
+1. The command finds the globally closest pair of endpoints across all selected curves, computes their centroid as the meeting point, and picks the nearer endpoint (start or end) for every selected open curve.
+1. Control-point grips are enabled for each curve and the identified endpoint grip is selected automatically.
+1. The built-in `-SetPt` command launches with `XSet=Yes YSet=Yes ZSet=Yes Alignment=World Copy=No`; click the target location to commit.
+1. Press Enter to repeat `vSetPt`.
 
 ### vSplitAtCorners flow
 
