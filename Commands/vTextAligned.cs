@@ -227,7 +227,7 @@ public sealed class vTextAligned : Command
 
       var curveHitRaw = FindClosestCurveHit(curveCache, clickPoint);
       var curveHit = IsCurveSnapped(curveHitRaw, getter.SnapTolerance) ? curveHitRaw : null;
-      var textHit = FindClosestTextHit(doc, textIds, textPickPoint, toleranceScale: 1.0, requireInside: true);
+      var textHit = FindClosestTextHit(doc, textIds, textPickPoint, toleranceScale: 1.25, requireInside: false);
 
       Guid? chosenTextId = null;
       if (textHit != null && (
