@@ -1132,7 +1132,7 @@ public sealed class vTextAligned : Command
       HoverCurve = snappedCurveHit;
       HoverText = textHit;
 
-      if (!_curveIsLocked && PreferTextHit(snappedCurveHit, textHit, SnapTolerance))
+      if (!_curveIsLocked && HoverText.HasValue)
         HoverCurve = null;
 
       // Lock pick intent: click will select whatever object was highlighted here.
@@ -1244,10 +1244,13 @@ public sealed class vTextAligned : Command
         {
           try
           {
-            var ap = activeText.Plane;
-            var lb = activeText.GetBoundingBox(ap);
-            if (lb.IsValid)
-              e.Display.DrawBox(new Box(ap, lb), System.Drawing.Color.Cyan, 2);
+            var bounds = CenteredLocalTextBounds(activeText);
+            if (bounds.HasValue)
+            {
+              var (ap, minx, maxx, miny, maxy) = bounds.Value;
+              var localBbox = new BoundingBox(minx, miny, 0, maxx, maxy, 0);
+              e.Display.DrawBox(new Box(ap, localBbox), System.Drawing.Color.Cyan, 2);
+            }
           }
           catch
           {
