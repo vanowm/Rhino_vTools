@@ -170,8 +170,25 @@ public sealed class vFitBox : Command
   {
     public Box PreviewBox = Box.Unset;
 
+    // Debounce: onSelected stamps SelectionChangedTick; DrawOverlay fires the
+    // actual update 80 ms after the last stamp so a group expansion (N rapid
+    // SelectObjects events) produces exactly one UpdatePreviewBox call.
+    public long SelectionChangedTick = 0;
+    private          long _lastComputedTick   = 0;
+
+    // Callback invoked from DrawOverlay once the debounce window has elapsed.
+    public Action<SelectionPreviewConduit>? OnDebouncedUpdate;
+
     protected override void DrawOverlay(DrawEventArgs e)
     {
+      var changeTick = SelectionChangedTick;
+      if (changeTick > 0 && changeTick > _lastComputedTick &&
+          System.Environment.TickCount64 - changeTick >= 80)
+      {
+        _lastComputedTick = System.Environment.TickCount64;
+        SelectionChangedTick = 0;
+        OnDebouncedUpdate?.Invoke(this);
+      }
       if (!PreviewBox.IsValid) return;
       e.Display.DrawBox(PreviewBox, System.Drawing.Color.Gray, 1);
     }
@@ -246,47 +263,37 @@ public sealed class vFitBox : Command
     var conduit = new SelectionPreviewConduit();
     conduit.Enabled = true;
 
-    var lastPrintedSizes  = string.Empty;
-    var pendingPrintSizes = string.Empty;
+    var lastPrintedSizes = string.Empty;
 
-    // SelectObjects: immediate visual update; queue sizes for group-batched print via Idle.
-    // N events for one group expansion all overwrite pendingPrintSizes — Idle reads the final value.
-    EventHandler<RhinoObjectSelectionEventArgs> onSelected = (_, args) =>
+    // DrawOverlay-based debounce: fires the actual compute 80 ms after the last
+    // SelectObjects event, so a group expansion results in a single box update.
+    conduit.OnDebouncedUpdate = c =>
     {
-      var selCount = args.RhinoObjects?.Length ?? 0;
-      var docCount = doc.Objects.GetSelectedObjects(false, false).Count();
-      Log.Write("vFitBox", $"SelectObjects fired: batch={selCount} docSel={docCount} conduit.Enabled={conduit.Enabled}");
-      UpdatePreviewBox(doc, conduit, fitToggle.CurrentValue ? "area" : "height", out var sizes);
-      Log.Write("vFitBox", $"  → PreviewBox.IsValid={conduit.PreviewBox.IsValid} sizes={sizes}");
+      UpdatePreviewBox(doc, c, fitToggle.CurrentValue ? "area" : "height", out var sizes);
       doc.Views.Redraw();
-      pendingPrintSizes = sizes;
+      if (!string.IsNullOrEmpty(sizes) && sizes != lastPrintedSizes)
+      {
+        lastPrintedSizes = sizes;
+        RhinoApp.WriteLine(sizes);
+      }
     };
 
-    // DeselectObjects: update preview box only; cancel any pending print.
+    // SelectObjects: stamp the debounce tick only — no expensive computation here.
+    EventHandler<RhinoObjectSelectionEventArgs> onSelected = (_, _) =>
+    {
+      conduit.SelectionChangedTick = System.Environment.TickCount64;
+    };
+
+    // DeselectObjects: clear the preview box immediately; cancel pending update.
     EventHandler<RhinoObjectSelectionEventArgs> onDeselected = (_, _) =>
     {
-      UpdatePreviewBox(doc, conduit, fitToggle.CurrentValue ? "area" : "height", out _);
+      conduit.SelectionChangedTick = 0;
+      conduit.PreviewBox = Box.Unset;
       doc.Views.Redraw();
-      pendingPrintSizes = string.Empty;
-    };
-
-    // Idle: fires once per Rhino main-loop cycle — prints the final sizes after all
-    // group-expansion events have settled (one print per batch).
-    EventHandler onIdle = (_, _) =>
-    {
-      if (string.IsNullOrEmpty(pendingPrintSizes)) return;
-      var toPrint = pendingPrintSizes;
-      pendingPrintSizes = string.Empty;
-      if (toPrint != lastPrintedSizes)
-      {
-        lastPrintedSizes = toPrint;
-        RhinoApp.WriteLine(toPrint);
-      }
     };
 
     RhinoDoc.SelectObjects   += onSelected;
     RhinoDoc.DeselectObjects += onDeselected;
-    RhinoApp.Idle            += onIdle;
 
     try
     {
@@ -299,6 +306,7 @@ public sealed class vFitBox : Command
 
       var result = go.GetMultiple(1, 0);
       var currentFitMode = fitToggle.CurrentValue ? "area" : "height";
+      conduit.SelectionChangedTick = 0;  // cancel any pending debounced update
       UpdatePreviewBox(doc, conduit, currentFitMode, out var loopSizes);
       doc.Views.Redraw();
       if (!string.IsNullOrEmpty(loopSizes) && loopSizes != lastPrintedSizes)
@@ -366,7 +374,6 @@ public sealed class vFitBox : Command
     {
       RhinoDoc.SelectObjects   -= onSelected;
       RhinoDoc.DeselectObjects -= onDeselected;
-      RhinoApp.Idle            -= onIdle;
       conduit.Enabled = false;
       doc.Views.Redraw();
     }

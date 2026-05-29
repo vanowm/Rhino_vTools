@@ -218,6 +218,17 @@ public sealed class vFacing : Command
     if (crvs.Length == 1 && crvs[0].IsClosed)
       return TryAnalyzeClosedCurve(doc, crvs[0], tol, out baseCurve, out side1, out side2);
 
+    // For exactly 3 input curves, try direct three-chain analysis first.
+    // JoinCurves merges them into one and loses the segment boundaries, causing
+    // FindCornerParams to fail when the junctions are near-tangent (angle < 30°).
+    if (crvs.Length == 3)
+    {
+      Log.Write("vFacing", "3 input curves — trying direct three-chain analysis");
+      if (TryAnalyzeThreeChains(crvs, tol, out baseCurve, out side1, out side2))
+        return true;
+      Log.Write("vFacing", "Direct three-chain failed, falling back to JoinCurves path");
+    }
+
     // Join into connected chains
     var joined = Curve.JoinCurves(crvs, tol * 10);
     if (joined == null || joined.Length == 0)
