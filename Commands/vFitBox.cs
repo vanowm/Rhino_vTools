@@ -246,32 +246,42 @@ public sealed class vFitBox : Command
     var conduit = new SelectionPreviewConduit();
     conduit.Enabled = true;
 
-    // Debounce selection-change events via Idle so a group selection (which fires
-    // one SelectObjects event per member) results in a single preview update.
-    var lastPrintedSizes = string.Empty;
-    var pendingUpdate    = false;
+    var lastPrintedSizes  = string.Empty;
+    var pendingPrintSizes = string.Empty;
 
-    EventHandler<RhinoObjectSelectionEventArgs> onSelChanged = (_, _) =>
+    // SelectObjects: immediate visual update; queue sizes for group-batched print via Idle.
+    // N events for one group expansion all overwrite pendingPrintSizes — Idle reads the final value.
+    EventHandler<RhinoObjectSelectionEventArgs> onSelected = (_, _) =>
     {
-      pendingUpdate = true;
-    };
-
-    EventHandler onIdle = (_, _) =>
-    {
-      if (!pendingUpdate) return;
-      pendingUpdate = false;
       UpdatePreviewBox(doc, conduit, fitToggle.CurrentValue ? "area" : "height", out var sizes);
       doc.Views.Redraw();
-      if (!string.IsNullOrEmpty(sizes) && sizes != lastPrintedSizes)
+      pendingPrintSizes = sizes;
+    };
+
+    // DeselectObjects: update preview box only; cancel any pending print.
+    EventHandler<RhinoObjectSelectionEventArgs> onDeselected = (_, _) =>
+    {
+      UpdatePreviewBox(doc, conduit, fitToggle.CurrentValue ? "area" : "height", out _);
+      doc.Views.Redraw();
+      pendingPrintSizes = string.Empty;
+    };
+
+    // Idle: fires once per Rhino main-loop cycle — prints the final sizes after all
+    // group-expansion events have settled (one print per batch).
+    EventHandler onIdle = (_, _) =>
+    {
+      if (string.IsNullOrEmpty(pendingPrintSizes)) return;
+      var toPrint = pendingPrintSizes;
+      pendingPrintSizes = string.Empty;
+      if (toPrint != lastPrintedSizes)
       {
-        lastPrintedSizes = sizes;
-        RhinoApp.WriteLine(sizes);
+        lastPrintedSizes = toPrint;
+        RhinoApp.WriteLine(toPrint);
       }
     };
 
-    // Update preview whenever doc selection changes (fires during GetMultiple).
-    RhinoDoc.SelectObjects   += onSelChanged;
-    RhinoDoc.DeselectObjects += onSelChanged;
+    RhinoDoc.SelectObjects   += onSelected;
+    RhinoDoc.DeselectObjects += onDeselected;
     RhinoApp.Idle            += onIdle;
 
     try
@@ -285,8 +295,13 @@ public sealed class vFitBox : Command
 
       var result = go.GetMultiple(1, 0);
       var currentFitMode = fitToggle.CurrentValue ? "area" : "height";
-      UpdatePreviewBox(doc, conduit, currentFitMode, out var _);
+      UpdatePreviewBox(doc, conduit, currentFitMode, out var loopSizes);
       doc.Views.Redraw();
+      if (!string.IsNullOrEmpty(loopSizes) && loopSizes != lastPrintedSizes)
+      {
+        lastPrintedSizes = loopSizes;
+        RhinoApp.WriteLine(loopSizes);
+      }
       if (go.CommandResult() != Result.Success)
       {
         angleStepDeg = angleOption.CurrentValue;
@@ -345,8 +360,8 @@ public sealed class vFitBox : Command
     }
     finally
     {
-      RhinoDoc.SelectObjects   -= onSelChanged;
-      RhinoDoc.DeselectObjects -= onSelChanged;
+      RhinoDoc.SelectObjects   -= onSelected;
+      RhinoDoc.DeselectObjects -= onDeselected;
       RhinoApp.Idle            -= onIdle;
       conduit.Enabled = false;
       doc.Views.Redraw();

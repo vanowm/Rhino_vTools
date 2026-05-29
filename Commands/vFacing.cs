@@ -228,9 +228,9 @@ public sealed class vFacing : Command
 
     joined = joined.Where(c => c.GetLength() > tol).ToArray();
 
-    RhinoApp.WriteLine($"vFacing debug: JoinCurves → {joined.Length} chain(s)");
+    Log.Write("vFacing", $"JoinCurves → {joined.Length} chain(s)");
     for (var _di = 0; _di < joined.Length; _di++)
-      RhinoApp.WriteLine($"  chain[{_di}]: type={joined[_di].GetType().Name} IsClosed={joined[_di].IsClosed} len={joined[_di].GetLength():F3}");
+      Log.Write("vFacing", $"  chain[{_di}]: type={joined[_di].GetType().Name} IsClosed={joined[_di].IsClosed} len={joined[_di].GetLength():F3}");
 
     if (joined.Length == 1 && joined[0].IsClosed)
       return TryAnalyzeClosedCurve(doc, joined[0], tol, out baseCurve, out side1, out side2);
@@ -418,13 +418,13 @@ public sealed class vFacing : Command
 
     if (curve is not PolyCurve poly)
     {
-      RhinoApp.WriteLine($"vFacing debug: FindCornerParams got {curve.GetType().Name}, not PolyCurve — no corners detected");
+      Log.Write("vFacing", $"FindCornerParams got {curve.GetType().Name}, not PolyCurve — no corners detected");
       return result;
     }
 
     var n     = poly.SegmentCount;
     var count = poly.IsClosed ? n : n - 1;
-    RhinoApp.WriteLine($"vFacing debug: PolyCurve segments={n} IsClosed={poly.IsClosed} checking {count} junction(s) (min angle={minAngleDeg}°)");
+    Log.Write("vFacing", $"PolyCurve segments={n} IsClosed={poly.IsClosed} checking {count} junction(s) (min angle={minAngleDeg}°)");
 
     for (var i = 0; i < count; i++)
     {
@@ -433,7 +433,7 @@ public sealed class vFacing : Command
       var seg2 = poly.SegmentCurve(j);
       if (seg1 == null || seg2 == null)
       {
-        RhinoApp.WriteLine($"  junction[{i}→{j}]: null segment, skipped");
+        Log.Write("vFacing", $"  junction[{i}→{j}]: null segment, skipped");
         continue;
       }
 
@@ -441,7 +441,7 @@ public sealed class vFacing : Command
       var t2 = seg2.TangentAtStart;
 
       var angleDeg = Vector3d.VectorAngle(t1, t2) * (180.0 / Math.PI);
-      RhinoApp.WriteLine($"  junction[{i}→{j}]: angle={angleDeg:F1}° {(angleDeg >= minAngleDeg ? "✓ CORNER" : "(skip)")} seg1={seg1.GetType().Name} seg2={seg2.GetType().Name}");
+      Log.Write("vFacing", $"  junction[{i}→{j}]: angle={angleDeg:F1}° {(angleDeg >= minAngleDeg ? "✓ CORNER" : "(skip)")} seg1={seg1.GetType().Name} seg2={seg2.GetType().Name}");
 
       if (angleDeg < minAngleDeg) continue;
 
@@ -452,7 +452,7 @@ public sealed class vFacing : Command
       }
     }
 
-    RhinoApp.WriteLine($"vFacing debug: FindCornerParams → {result.Count} corner(s) found");
+    Log.Write("vFacing", $"FindCornerParams → {result.Count} corner(s) found");
     return result;
   }
 
