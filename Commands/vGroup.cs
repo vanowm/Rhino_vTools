@@ -73,12 +73,29 @@ public sealed class vGroup : Command
     var coreSegments  = new List<Curve>();
     var coreOriginIdx = new List<int>(); // index into allCurves for each core segment
 
-    // Delete only the groups that were created by vGroup in this session.
-    // This replaces our own previous output without touching any groups
-    // the user created manually.
-    foreach (var idx in _ourGroupIndices)
-      doc.Groups.Delete(idx);
-    _ourGroupIndices.Clear();
+    // Properly clean up groups created by a previous vGroup run.
+    // doc.Groups.Delete() marks the group deleted in the table but does NOT
+    // remove the index from object attributes, so objects would accumulate
+    // memberships across runs and appear nested.  Strip attributes first.
+    if (_ourGroupIndices.Count > 0)
+    {
+      foreach (RhinoObject obj in doc.Objects)
+      {
+        var groups = obj.Attributes.GetGroupList();
+        if (groups == null || groups.Length == 0) continue;
+        bool dirty = false;
+        foreach (var gi in groups)
+        {
+          if (!_ourGroupIndices.Contains(gi)) continue;
+          obj.Attributes.RemoveFromGroup(gi);
+          dirty = true;
+        }
+        if (dirty) obj.CommitChanges();
+      }
+      foreach (var idx in _ourGroupIndices)
+        doc.Groups.Delete(idx);
+      _ourGroupIndices.Clear();
+    }
 
     Log.Write(EnglishName, $"--- run start --- tol={tol:G4} curves={allCurves.Count} totalObjects={allIds.Count}");
 
