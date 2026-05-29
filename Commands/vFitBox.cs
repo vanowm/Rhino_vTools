@@ -251,9 +251,13 @@ public sealed class vFitBox : Command
 
     // SelectObjects: immediate visual update; queue sizes for group-batched print via Idle.
     // N events for one group expansion all overwrite pendingPrintSizes — Idle reads the final value.
-    EventHandler<RhinoObjectSelectionEventArgs> onSelected = (_, _) =>
+    EventHandler<RhinoObjectSelectionEventArgs> onSelected = (_, args) =>
     {
+      var selCount = args.RhinoObjects?.Length ?? 0;
+      var docCount = doc.Objects.GetSelectedObjects(false, false).Count();
+      Log.Write("vFitBox", $"SelectObjects fired: batch={selCount} docSel={docCount} conduit.Enabled={conduit.Enabled}");
       UpdatePreviewBox(doc, conduit, fitToggle.CurrentValue ? "area" : "height", out var sizes);
+      Log.Write("vFitBox", $"  → PreviewBox.IsValid={conduit.PreviewBox.IsValid} sizes={sizes}");
       doc.Views.Redraw();
       pendingPrintSizes = sizes;
     };
