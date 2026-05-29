@@ -98,11 +98,26 @@ public sealed class vGroup : Command
 
     if (allCurves.Count > 0)
     {
+      // Pre-compute bounding boxes inflated by tolerance for fast pair rejection.
+      var bboxes = new BoundingBox[allCurves.Count];
+      for (int i = 0; i < allCurves.Count; i++)
+      {
+        bboxes[i] = allCurves[i].GetBoundingBox(false);
+        bboxes[i].Inflate(tol);
+      }
+
       // Collect split parameters per curve index.
       var splitParams = new Dictionary<int, List<double>>();
       for (int i = 0; i < allCurves.Count; i++)
       for (int j = i + 1; j < allCurves.Count; j++)
       {
+        // Skip pairs whose bounding boxes don't overlap — they can't intersect.
+        // (bboxes are already inflated by tol, so no extra tolerance needed here.)
+        { var a = bboxes[i]; var b = bboxes[j];
+          if (a.Max.X < b.Min.X || b.Max.X < a.Min.X ||
+              a.Max.Y < b.Min.Y || b.Max.Y < a.Min.Y ||
+              a.Max.Z < b.Min.Z || b.Max.Z < a.Min.Z) continue; }
+
         var events = Intersection.CurveCurve(allCurves[i], allCurves[j], tol, tol);
         int ptCount = 0, ovCount = 0;
         if (events != null)
@@ -122,8 +137,6 @@ public sealed class vGroup : Command
         }
         if (ptCount > 0 || ovCount > 0)
           Log.Write(EnglishName, $"  intersect[{i},{j}] pointEvents={ptCount} overlapEvents={ovCount}");
-        else
-          Log.Write(EnglishName, $"  intersect[{i},{j}] none");
       }
 
       // Split each curve at its intersection parameters.
@@ -293,9 +306,6 @@ public sealed class vGroup : Command
       {
         var midPt = coreSegments[k].PointAt(coreSegments[k].Domain.Mid);
         var sc = bound.Contains(midPt, plane, tol);
-        Log.Write(EnglishName,
-          $"  seg[{k}] origin={coreOriginIdx[k]}" +
-          $" mid=({midPt.X:F3},{midPt.Y:F3},{midPt.Z:F3}) → {sc}");
         if (sc == PointContainment.Coincident)
           members.Add(allCurveIds[coreOriginIdx[k]]);
       }
@@ -309,9 +319,6 @@ public sealed class vGroup : Command
         var pt = RepresentativePoint(obj);
         if (pt == null) continue;
         var containment = bound.Contains(pt.Value, plane, tol);
-        Log.Write(EnglishName,
-          $"  containment obj={id} type={obj.Geometry?.GetType().Name}" +
-          $" pt=({pt.Value.X:F3},{pt.Value.Y:F3},{pt.Value.Z:F3}) → {containment}");
         if (containment is PointContainment.Inside or PointContainment.Coincident)
           members.Add(id);
       }
