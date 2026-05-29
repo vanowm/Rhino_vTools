@@ -112,18 +112,7 @@ public sealed class vFitBox : Command
       }
     }
 
-    var outWidth = bestFit.Mode == "2d" ? Math.Max(bestFit.Width, bestFit.Depth) : bestFit.Width;
-    var outHeight = bestFit.Mode == "2d" ? Math.Min(bestFit.Width, bestFit.Depth) : bestFit.Height;
-
-    if (outWidth < outHeight)
-      (outWidth, outHeight) = (outHeight, outWidth);
-
-    var primaryIsFractional = IsFractionalDisplayMode(doc);
-    var widthPrimary = FormatLengthByMode(doc, outWidth, primaryIsFractional);
-    var heightPrimary = FormatLengthByMode(doc, outHeight, primaryIsFractional);
-    var widthAlternate = FormatLengthByMode(doc, outWidth, !primaryIsFractional);
-    var heightAlternate = FormatLengthByMode(doc, outHeight, !primaryIsFractional);
-    RhinoApp.WriteLine($"{widthPrimary} x {heightPrimary} ({widthAlternate} x {heightAlternate})");
+    RhinoApp.WriteLine(FormatFitSizes(doc, bestFit));
 
     SelectFitResultObjects(doc, outputObjectIds, fitId);
     doc.Views.Redraw();
@@ -205,6 +194,21 @@ public sealed class vFitBox : Command
       new Interval(fit.MinX, fit.MaxX),
       new Interval(fit.MinY, fit.MaxY),
       new Interval(fit.MinZ, fit.MaxZ));
+    RhinoApp.WriteLine(FormatFitSizes(doc, fit));
+  }
+
+  private static string FormatFitSizes(RhinoDoc doc, FitCandidate fit)
+  {
+    var outWidth = fit.Mode == "2d" ? Math.Max(fit.Width, fit.Depth) : fit.Width;
+    var outHeight = fit.Mode == "2d" ? Math.Min(fit.Width, fit.Depth) : fit.Height;
+    if (outWidth < outHeight)
+      (outWidth, outHeight) = (outHeight, outWidth);
+    var primaryIsFractional = IsFractionalDisplayMode(doc);
+    var wP = FormatLengthByMode(doc, outWidth, primaryIsFractional);
+    var hP = FormatLengthByMode(doc, outHeight, primaryIsFractional);
+    var wA = FormatLengthByMode(doc, outWidth, !primaryIsFractional);
+    var hA = FormatLengthByMode(doc, outHeight, !primaryIsFractional);
+    return $"{wP} x {hP} ({wA} x {hA})";
   }
 
   /// <summary>

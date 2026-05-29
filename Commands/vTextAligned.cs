@@ -1288,9 +1288,7 @@ public sealed class vTextAligned : Command
 
     private TextEntity BuildPreviewText(Plane plane)
     {
-      var text = BuildTextEntity(_doc, _text, _height, plane);
-      ApplyHeightOverride(_doc, text, _height);
-      return text;
+      return BuildTextEntity(_doc, _text, _height, plane);
     }
   }
 }
