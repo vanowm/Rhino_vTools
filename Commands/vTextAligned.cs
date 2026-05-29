@@ -1247,9 +1247,12 @@ public sealed class vTextAligned : Command
             var bounds = CenteredLocalTextBounds(activeText);
             if (bounds.HasValue)
             {
-              var (ap, minx, maxx, miny, maxy) = bounds.Value;
+              var (_, minx, maxx, miny, maxy) = bounds.Value;
+              // Use the current-frame preview plane so the box stays in sync with
+              // the floating cursor preview, not the one-frame-behind doc object.
+              var boxPlane = PreviewPlane ?? activeText.Plane;
               var localBbox = new BoundingBox(minx, miny, 0, maxx, maxy, 0);
-              e.Display.DrawBox(new Box(ap, localBbox), System.Drawing.Color.Cyan, 2);
+              e.Display.DrawBox(new Box(boxPlane, localBbox), System.Drawing.Color.Cyan, 2);
             }
           }
           catch
