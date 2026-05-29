@@ -223,17 +223,13 @@ public sealed class vTextAligned : Command
         continue;
 
       var clickPoint = getter.Point();
-      var textPickPoint = getter.LastCursorPoint ?? clickPoint;
 
-      var curveHitRaw = FindClosestCurveHit(curveCache, clickPoint);
-      var curveHit = IsCurveSnapped(curveHitRaw, getter.SnapTolerance) ? curveHitRaw : null;
-      var textHit = FindClosestTextHit(doc, textIds, textPickPoint, toleranceScale: 1.25, requireInside: false);
+      // Use hover state: click always selects whatever was highlighted on last mouse move.
+      var curveHit = getter.HoverCurve;
+      var textHit = getter.HoverText;
 
       Guid? chosenTextId = null;
-      if (textHit != null && (
-            curveIsLocked ||
-            curveHit == null ||
-            PreferTextHit(curveHit, textHit, getter.SnapTolerance)))
+      if (getter.HoverIntentIsText && textHit != null)
       {
         var hitId = textHit.Value.ObjectId;
         if (!(curveIsLocked && activeTextId.HasValue && hitId == activeTextId.Value))
@@ -1108,12 +1104,13 @@ public sealed class vTextAligned : Command
       _bothSides = bothSides;
 
       SnapTolerance = Math.Max(doc.ModelAbsoluteTolerance * 3.0, 0.25);
-      HoverSnapTolerance = Math.Max(doc.ModelAbsoluteTolerance * 2.0, SnapTolerance * 0.35);
+      HoverSnapTolerance = SnapTolerance;
       PreviewTemplateTextId = _activeTextId ?? (_textIds.Count > 0 ? _textIds[0] : (Guid?)null);
     }
 
     public CurveHit? HoverCurve { get; private set; }
     public TextHit? HoverText { get; private set; }
+    public bool HoverIntentIsText { get; private set; }
     public Plane? PreviewPlane { get; private set; }
     public Plane? PreviewPlaneOpp { get; private set; }
     public Guid? PreviewTemplateTextId { get; }
@@ -1147,6 +1144,9 @@ public sealed class vTextAligned : Command
 
       if (!_curveIsLocked && PreferTextHit(snappedCurveHit, textHit, SnapTolerance))
         HoverCurve = null;
+
+      // Lock pick intent: click will select whatever object was highlighted here.
+      HoverIntentIsText = HoverText.HasValue && (_curveIsLocked ? true : !HoverCurve.HasValue);
 
       PreviewPlane = null;
       PreviewPlaneOpp = null;
@@ -1235,6 +1235,23 @@ public sealed class vTextAligned : Command
 
       if (HoverCurve.HasValue)
         e.Display.DrawCurve(HoverCurve.Value.Curve, System.Drawing.Color.Orange, 3);
+
+      if (_activeTextId.HasValue)
+      {
+        var activeObj = _doc.Objects.FindId(_activeTextId.Value);
+        if (activeObj?.Geometry is TextEntity activeText)
+        {
+          try
+          {
+            var bbox = activeText.GetBoundingBox(true);
+            if (bbox.IsValid)
+              e.Display.DrawBox(bbox, System.Drawing.Color.Cyan);
+          }
+          catch
+          {
+          }
+        }
+      }
 
       if (HoverText.HasValue)
       {
