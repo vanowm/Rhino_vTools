@@ -168,7 +168,8 @@ public sealed class vFitBox : Command
 
   private sealed class SelectionPreviewConduit : DisplayConduit
   {
-    public Box PreviewBox = Box.Unset;
+    public Box    PreviewBox = Box.Unset;
+    public string LastSizes  = string.Empty;
 
     protected override void DrawOverlay(DrawEventArgs e)
     {
@@ -194,7 +195,12 @@ public sealed class vFitBox : Command
       new Interval(fit.MinX, fit.MaxX),
       new Interval(fit.MinY, fit.MaxY),
       new Interval(fit.MinZ, fit.MaxZ));
-    RhinoApp.WriteLine(FormatFitSizes(doc, fit));
+    var sizes = FormatFitSizes(doc, fit);
+    if (sizes != conduit.LastSizes)
+    {
+      conduit.LastSizes = sizes;
+      RhinoApp.WriteLine(sizes);
+    }
   }
 
   private static string FormatFitSizes(RhinoDoc doc, FitCandidate fit)
