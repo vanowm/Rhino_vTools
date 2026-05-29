@@ -49,6 +49,14 @@ public sealed class vTextAligned : Command
     var undoStack = new Stack<TextAction>();
     var redoStack = new Stack<TextAction>();
 
+    // Values read from the most-recently-selected text object.
+    // Command options (_text/_height) are NOT overwritten when the user picks
+    // an existing text; only changed if the user explicitly uses Text/Height.
+    string? selectedObjText  = null;
+    double  selectedObjHeight = 0.0;
+    bool    textUserChanged   = false;
+    bool    heightUserChanged = false;
+
     var optHeight = new OptionDouble(_height, RhinoMath.ZeroTolerance, 1e9);
     var optOffset = new OptionDouble(_offset);
     var optBothSides = new OptionToggle(_bothSides, "No", "Yes");
@@ -58,7 +66,12 @@ public sealed class vTextAligned : Command
       var curveCache = CollectCurveObjects(doc);
       var textIds = CollectTextIds(doc);
 
-      var getter = new MainPointGetter(doc, _text, _height, _offset, _rotate90, _bothSides, curveCache, textIds, activeCurveId, activeTextId, curveIsLocked);
+      // Use the selected object's text/height unless the user explicitly changed
+      // them via Text/Height options since the object was picked.
+      var effText   = textUserChanged   || selectedObjText == null                       ? _text   : selectedObjText;
+      var effHeight = heightUserChanged || selectedObjHeight <= RhinoMath.ZeroTolerance  ? _height : selectedObjHeight;
+
+      var getter = new MainPointGetter(doc, effText, effHeight, _offset, _rotate90, _bothSides, curveCache, textIds, activeCurveId, activeTextId, curveIsLocked);
 
       getter.SetCommandPrompt(curveIsLocked && activeCurveId.HasValue
         ? "Curve locked. Click to set text position, or click text to switch active text. Enter to finish"
@@ -100,7 +113,10 @@ public sealed class vTextAligned : Command
           {
             var proposed = _text;
             if (RhinoGet.GetString("Text", true, ref proposed) == Result.Success && proposed != null)
+            {
               _text = proposed;
+              textUserChanged = true;
+            }
           }
           else if (option.Index == idxRotate)
           {
@@ -109,7 +125,10 @@ public sealed class vTextAligned : Command
           }
         }
 
+        var prevHeight = _height;
         _height = Math.Max(optHeight.CurrentValue, RhinoMath.ZeroTolerance);
+        if (Math.Abs(_height - prevHeight) > RhinoMath.ZeroTolerance)
+          heightUserChanged = true;
         _offset = optOffset.CurrentValue;
         _bothSides = optBothSides.CurrentValue;
 
@@ -121,8 +140,10 @@ public sealed class vTextAligned : Command
             var updated = te.Duplicate() as TextEntity;
             if (updated != null)
             {
-              SetTextEntityValue(updated, _text);
-              ApplyHeightOverride(doc, updated, _height);
+              var effTextOpt   = textUserChanged   || selectedObjText == null                      ? _text   : selectedObjText;
+              var effHeightOpt = heightUserChanged || selectedObjHeight <= RhinoMath.ZeroTolerance ? _height : selectedObjHeight;
+              SetTextEntityValue(updated, effTextOpt);
+              ApplyHeightOverride(doc, updated, effHeightOpt);
               _ = doc.Objects.Replace(activeTextId.Value, updated);
               doc.Views.Redraw();
             }
@@ -228,8 +249,15 @@ public sealed class vTextAligned : Command
         if (obj?.Geometry is TextEntity textObj)
         {
           activeTextId = chosenTextId.Value;
-          UpdateSettingsFromTextObject(textObj, ref _text, ref _height);
-          optHeight.CurrentValue = _height;
+
+          // Record the selected object's text/height WITHOUT overwriting command
+          // options.  _text/_height only change if the user explicitly edits them
+          // via the Text/Height option menus after this selection.
+          selectedObjText   = TextEntityValue(textObj, _text);
+          var selH = textObj.TextHeight;
+          selectedObjHeight = selH > RhinoMath.ZeroTolerance ? selH : _height;
+          textUserChanged   = false;
+          heightUserChanged = false;
 
           // Move the selected text to the current active layer.
           var layerAttr = obj.Attributes.Duplicate();
@@ -292,7 +320,9 @@ public sealed class vTextAligned : Command
 
       if (activeTextId.HasValue)
       {
-        if (ApplySettingsToTextObject(doc, activeTextId.Value, _text, _height, plane))
+        var effTextPlace   = textUserChanged   || selectedObjText == null                      ? _text   : selectedObjText;
+        var effHeightPlace = heightUserChanged || selectedObjHeight <= RhinoMath.ZeroTolerance ? _height : selectedObjHeight;
+        if (ApplySettingsToTextObject(doc, activeTextId.Value, effTextPlace, effHeightPlace, plane))
         {
           doc.Views.Redraw();
 
@@ -310,6 +340,10 @@ public sealed class vTextAligned : Command
 
         activeTextId = null;
         activeMoveStartGeo = null;
+        selectedObjText   = null;
+        selectedObjHeight = 0.0;
+        textUserChanged   = false;
+        heightUserChanged = false;
         curveIsLocked = false;
         SavePersistedOptions();
         continue;
