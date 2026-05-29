@@ -618,9 +618,9 @@ public sealed class vTextAligned : Command
     try
     {
       var plane = textEntity.Plane;
-      double? w = null;
-      double? h = null;
 
+      // Probe: duplicate and reset to WorldXY so the bbox reflects actual
+      // offsets from plane.Origin regardless of text justification.
       try
       {
         var probe = textEntity.Duplicate() as TextEntity;
@@ -633,10 +633,7 @@ public sealed class vTextAligned : Command
             var ww = wb.Max.X - wb.Min.X;
             var hh = wb.Max.Y - wb.Min.Y;
             if (ww > RhinoMath.ZeroTolerance && hh > RhinoMath.ZeroTolerance)
-            {
-              w = ww;
-              h = hh;
-            }
+              return (plane, wb.Min.X, wb.Max.X, wb.Min.Y, wb.Max.Y);
           }
         }
       }
@@ -644,24 +641,19 @@ public sealed class vTextAligned : Command
       {
       }
 
-      if (!w.HasValue || !h.HasValue)
-      {
-        var lb = textEntity.GetBoundingBox(plane);
-        if (!lb.IsValid)
-          return null;
+      // Fallback: GetBoundingBox in the text's own plane (may be inaccurate for
+      // rotated text, but better than nothing).
+      var lb = textEntity.GetBoundingBox(plane);
+      if (!lb.IsValid)
+        return null;
 
-        w = lb.Max.X - lb.Min.X;
-        h = lb.Max.Y - lb.Min.Y;
+      var w = lb.Max.X - lb.Min.X;
+      var h = lb.Max.Y - lb.Min.Y;
 
-        if (w <= RhinoMath.ZeroTolerance || h <= RhinoMath.ZeroTolerance)
-          return null;
-      }
+      if (w <= RhinoMath.ZeroTolerance || h <= RhinoMath.ZeroTolerance)
+        return null;
 
-      var minx = -0.5 * w.Value;
-      var maxx = 0.5 * w.Value;
-      var miny = -0.5 * h.Value;
-      var maxy = 0.5 * h.Value;
-      return (plane, minx, maxx, miny, maxy);
+      return (plane, lb.Min.X, lb.Max.X, lb.Min.Y, lb.Max.Y);
     }
     catch
     {
@@ -1296,7 +1288,9 @@ public sealed class vTextAligned : Command
 
     private TextEntity BuildPreviewText(Plane plane)
     {
-      return BuildTextEntity(_doc, _text, _height, plane);
+      var text = BuildTextEntity(_doc, _text, _height, plane);
+      ApplyHeightOverride(_doc, text, _height);
+      return text;
     }
   }
 }

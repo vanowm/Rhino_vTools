@@ -473,7 +473,7 @@ public sealed class vTrim : Command
     go.SetCommandPrompt("Select cutting curves or press Enter for AutoClosest");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
-    go.GroupSelect = true;
+    go.GroupSelect = false;
     go.AcceptNothing(true);
     go.EnablePreSelect(false, true);
     go.EnableClearObjectsOnEntry(false);
