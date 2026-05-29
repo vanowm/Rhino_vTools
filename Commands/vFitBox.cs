@@ -170,25 +170,8 @@ public sealed class vFitBox : Command
   {
     public Box PreviewBox = Box.Unset;
 
-    // Debounce: onSelected stamps SelectionChangedTick; DrawOverlay fires the
-    // actual update 80 ms after the last stamp so a group expansion (N rapid
-    // SelectObjects events) produces exactly one UpdatePreviewBox call.
-    public long SelectionChangedTick = 0;
-    private          long _lastComputedTick   = 0;
-
-    // Callback invoked from DrawOverlay once the debounce window has elapsed.
-    public Action<SelectionPreviewConduit>? OnDebouncedUpdate;
-
     protected override void DrawOverlay(DrawEventArgs e)
     {
-      var changeTick = SelectionChangedTick;
-      if (changeTick > 0 && changeTick > _lastComputedTick &&
-          System.Environment.TickCount64 - changeTick >= 80)
-      {
-        _lastComputedTick = System.Environment.TickCount64;
-        SelectionChangedTick = 0;
-        OnDebouncedUpdate?.Invoke(this);
-      }
       if (!PreviewBox.IsValid) return;
       e.Display.DrawBox(PreviewBox, System.Drawing.Color.Gray, 1);
     }
@@ -265,11 +248,14 @@ public sealed class vFitBox : Command
 
     var lastPrintedSizes = string.Empty;
 
-    // DrawOverlay-based debounce: fires the actual compute 80 ms after the last
-    // SelectObjects event, so a group expansion results in a single box update.
-    conduit.OnDebouncedUpdate = c =>
+    // WinForms Timer fires on the UI message-pump thread, which continues running
+    // during GetMultiple's modal loop — so it reliably fires 90 ms after the last
+    // SelectObjects event, giving group expansion time to finish.
+    var debounceTimer = new System.Windows.Forms.Timer { Interval = 90 };
+    debounceTimer.Tick += (_, _) =>
     {
-      UpdatePreviewBox(doc, c, fitToggle.CurrentValue ? "area" : "height", out var sizes);
+      debounceTimer.Stop();
+      UpdatePreviewBox(doc, conduit, fitToggle.CurrentValue ? "area" : "height", out var sizes);
       doc.Views.Redraw();
       if (!string.IsNullOrEmpty(sizes) && sizes != lastPrintedSizes)
       {
@@ -278,16 +264,17 @@ public sealed class vFitBox : Command
       }
     };
 
-    // SelectObjects: stamp the debounce tick only — no expensive computation here.
+    // SelectObjects: restart the debounce window — no expensive work here.
     EventHandler<RhinoObjectSelectionEventArgs> onSelected = (_, _) =>
     {
-      conduit.SelectionChangedTick = System.Environment.TickCount64;
+      debounceTimer.Stop();
+      debounceTimer.Start();
     };
 
-    // DeselectObjects: clear the preview box immediately; cancel pending update.
+    // DeselectObjects: cancel pending update; clear the box immediately.
     EventHandler<RhinoObjectSelectionEventArgs> onDeselected = (_, _) =>
     {
-      conduit.SelectionChangedTick = 0;
+      debounceTimer.Stop();
       conduit.PreviewBox = Box.Unset;
       doc.Views.Redraw();
     };
@@ -305,8 +292,8 @@ public sealed class vFitBox : Command
       go.AddOptionToggle("Fit", ref fitToggle);
 
       var result = go.GetMultiple(1, 0);
+      debounceTimer.Stop();  // cancel any pending debounced update
       var currentFitMode = fitToggle.CurrentValue ? "area" : "height";
-      conduit.SelectionChangedTick = 0;  // cancel any pending debounced update
       UpdatePreviewBox(doc, conduit, currentFitMode, out var loopSizes);
       doc.Views.Redraw();
       if (!string.IsNullOrEmpty(loopSizes) && loopSizes != lastPrintedSizes)
@@ -374,6 +361,8 @@ public sealed class vFitBox : Command
     {
       RhinoDoc.SelectObjects   -= onSelected;
       RhinoDoc.DeselectObjects -= onDeselected;
+      debounceTimer.Stop();
+      debounceTimer.Dispose();
       conduit.Enabled = false;
       doc.Views.Redraw();
     }
