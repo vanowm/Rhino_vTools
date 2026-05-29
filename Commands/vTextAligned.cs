@@ -88,7 +88,6 @@ public sealed class vTextAligned : Command
 
       var result = getter.Get();
       var commandResult = getter.CommandResult();
-      getter.Cleanup();
 
       if (commandResult != Result.Success)
       {
@@ -1067,7 +1066,6 @@ public sealed class vTextAligned : Command
     private readonly bool _bothSides;
 
     private int _lastSideSign;
-    private Guid? _highlightedTextId;
 
     public MainPointGetter(
       RhinoDoc doc,
@@ -1112,15 +1110,6 @@ public sealed class vTextAligned : Command
     public double SnapTolerance { get; }
     public double HoverSnapTolerance { get; }
 
-    public void Cleanup()
-    {
-      if (_highlightedTextId.HasValue)
-      {
-        _doc.Objects.FindId(_highlightedTextId.Value)?.Highlight(false);
-        _highlightedTextId = null;
-      }
-    }
-
     private Curve? CurveById(Guid objectId)
     {
       foreach (var item in _curveCache)
@@ -1148,17 +1137,6 @@ public sealed class vTextAligned : Command
 
       // Lock pick intent: click will select whatever object was highlighted here.
       HoverIntentIsText = HoverText.HasValue && (_curveIsLocked ? true : !HoverCurve.HasValue);
-
-      // Update built-in pre-highlight on the hovered text object.
-      var newHighlightId = HoverText.HasValue ? HoverText.Value.ObjectId : (Guid?)null;
-      if (newHighlightId != _highlightedTextId)
-      {
-        if (_highlightedTextId.HasValue)
-          _doc.Objects.FindId(_highlightedTextId.Value)?.Highlight(false);
-        _highlightedTextId = newHighlightId;
-        if (_highlightedTextId.HasValue)
-          _doc.Objects.FindId(_highlightedTextId.Value)?.Highlight(true);
-      }
 
       PreviewPlane = null;
       PreviewPlaneOpp = null;
@@ -1247,6 +1225,17 @@ public sealed class vTextAligned : Command
 
       if (HoverCurve.HasValue)
         e.Display.DrawCurve(HoverCurve.Value.Curve, System.Drawing.Color.Orange, 3);
+
+      // Overdraw hovered text in gold to override Rhino's layer-color pre-selection display.
+      if (HoverIntentIsText)
+      {
+        var hoverObj = _doc.Objects.FindId(HoverText.Value.ObjectId);
+        if (hoverObj?.Geometry is TextEntity hoverAnnotation)
+        {
+          try { e.Display.DrawAnnotation(hoverAnnotation, System.Drawing.Color.Gold); }
+          catch { }
+        }
+      }
 
       if (_activeTextId.HasValue)
       {
