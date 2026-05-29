@@ -1243,20 +1243,26 @@ public sealed class vTextAligned : Command
         }
       }
 
-      if (HoverText.HasValue)
+      // Draw gold box for any text object the cursor is inside or near, using
+      // a direct bbox check so Rhino's layer-color snap highlight is always overridden.
+      foreach (var textId in _textIds)
       {
-        var obj = _doc.Objects.FindId(HoverText.Value.ObjectId);
-        if (obj?.Geometry is TextEntity text)
+        var textObj = _doc.Objects.FindId(textId);
+        if (textObj?.Geometry is not TextEntity hoverText)
+          continue;
+        try
         {
-          try
-          {
-            var bbox = text.GetBoundingBox(true);
-            if (bbox.IsValid)
-              e.Display.DrawBox(bbox, System.Drawing.Color.Gold);
-          }
-          catch
-          {
-          }
+          var bbox = hoverText.GetBoundingBox(true);
+          if (!bbox.IsValid)
+            continue;
+          var check = bbox;
+          check.Inflate(SnapTolerance);
+          if (!check.Contains(e.CurrentPoint))
+            continue;
+          e.Display.DrawBox(bbox, System.Drawing.Color.Gold);
+        }
+        catch
+        {
         }
       }
 
