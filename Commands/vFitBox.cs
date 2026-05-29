@@ -178,8 +178,9 @@ public sealed class vFitBox : Command
   }
 
   private static void UpdatePreviewBox(
-    RhinoDoc doc, SelectionPreviewConduit conduit, string fitMode)
+    RhinoDoc doc, SelectionPreviewConduit conduit, string fitMode, out string sizes)
   {
+    sizes = string.Empty;
     var ids = CollectIdsFromDocSelection(doc);
     if (ids.Count == 0) { conduit.PreviewBox = Box.Unset; return; }
     var geoms = CollectGeometries(doc, ids);
@@ -194,6 +195,7 @@ public sealed class vFitBox : Command
       new Interval(fit.MinX, fit.MaxX),
       new Interval(fit.MinY, fit.MaxY),
       new Interval(fit.MinZ, fit.MaxZ));
+    sizes = FormatFitSizes(doc, fit);
   }
 
   private static string FormatFitSizes(RhinoDoc doc, FitCandidate fit)
@@ -244,14 +246,33 @@ public sealed class vFitBox : Command
     var conduit = new SelectionPreviewConduit();
     conduit.Enabled = true;
 
-    // Update preview whenever doc selection changes (fires during GetMultiple).
+    // Debounce selection-change events via Idle so a group selection (which fires
+    // one SelectObjects event per member) results in a single preview update.
+    var lastPrintedSizes = string.Empty;
+    var pendingUpdate    = false;
+
     EventHandler<RhinoObjectSelectionEventArgs> onSelChanged = (_, _) =>
     {
-      UpdatePreviewBox(doc, conduit, fitToggle.CurrentValue ? "area" : "height");
-      doc.Views.Redraw();
+      pendingUpdate = true;
     };
+
+    EventHandler onIdle = (_, _) =>
+    {
+      if (!pendingUpdate) return;
+      pendingUpdate = false;
+      UpdatePreviewBox(doc, conduit, fitToggle.CurrentValue ? "area" : "height", out var sizes);
+      doc.Views.Redraw();
+      if (!string.IsNullOrEmpty(sizes) && sizes != lastPrintedSizes)
+      {
+        lastPrintedSizes = sizes;
+        RhinoApp.WriteLine(sizes);
+      }
+    };
+
+    // Update preview whenever doc selection changes (fires during GetMultiple).
     RhinoDoc.SelectObjects   += onSelChanged;
     RhinoDoc.DeselectObjects += onSelChanged;
+    RhinoApp.Idle            += onIdle;
 
     try
     {
@@ -264,7 +285,7 @@ public sealed class vFitBox : Command
 
       var result = go.GetMultiple(1, 0);
       var currentFitMode = fitToggle.CurrentValue ? "area" : "height";
-      UpdatePreviewBox(doc, conduit, currentFitMode);
+      UpdatePreviewBox(doc, conduit, currentFitMode, out var _);
       doc.Views.Redraw();
       if (go.CommandResult() != Result.Success)
       {
@@ -326,6 +347,7 @@ public sealed class vFitBox : Command
     {
       RhinoDoc.SelectObjects   -= onSelChanged;
       RhinoDoc.DeselectObjects -= onSelChanged;
+      RhinoApp.Idle            -= onIdle;
       conduit.Enabled = false;
       doc.Views.Redraw();
     }
