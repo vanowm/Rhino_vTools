@@ -1233,9 +1233,10 @@ public sealed class vTextAligned : Command
         {
           try
           {
-            var bbox = activeText.GetBoundingBox(true);
-            if (bbox.IsValid)
-              e.Display.DrawBox(bbox, System.Drawing.Color.Cyan);
+            var ap = activeText.Plane;
+            var lb = activeText.GetBoundingBox(ap);
+            if (lb.IsValid)
+              e.Display.DrawBox(new Box(ap, lb), System.Drawing.Color.Cyan, 2);
           }
           catch
           {
@@ -1252,14 +1253,18 @@ public sealed class vTextAligned : Command
           continue;
         try
         {
-          var bbox = hoverText.GetBoundingBox(true);
-          if (!bbox.IsValid)
+          var hp = hoverText.Plane;
+          var lb = hoverText.GetBoundingBox(hp);
+          if (!lb.IsValid)
             continue;
-          var check = bbox;
+          var xformToLocal = Transform.PlaneToPlane(hp, Plane.WorldXY);
+          var localPoint = new Point3d(e.CurrentPoint);
+          localPoint.Transform(xformToLocal);
+          var check = lb;
           check.Inflate(SnapTolerance);
-          if (!check.Contains(e.CurrentPoint))
+          if (!check.Contains(localPoint))
             continue;
-          e.Display.DrawBox(bbox, System.Drawing.Color.Gold);
+          e.Display.DrawBox(new Box(hp, lb), System.Drawing.Color.Gold, 2);
         }
         catch
         {
