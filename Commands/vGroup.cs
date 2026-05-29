@@ -308,26 +308,27 @@ public sealed class vGroup : Command
       return Result.Nothing;
     }
 
-    // For each boundary:
-    //   1. Core segments whose midpoints are Coincident reveal which original
-    //      curves formed the boundary — those are always in the group.
-    //   2. All remaining selected objects are tested by representative point.
-    int groupCount = 0;
+    // Compute member sets for every boundary first, then filter.
+    // Each physical region often produces two closed loops from JoinCurves:
+    // a tight inner perimeter (just the boundary curves) and a larger outer
+    // envelope (everything inside).  We keep only the outermost loop per
+    // region by dropping any boundary whose member set is a strict subset
+    // of another boundary's member set.
 
+    var boundaryMembers = new List<HashSet<Guid>>(boundaries.Count);
     foreach (var (bound, plane) in boundaries)
     {
       var members = new HashSet<Guid>();
 
-      // Add original curves that contributed segments to this boundary.
+      // Curves whose segment midpoints are Coincident with this boundary.
       for (int k = 0; k < coreSegments.Count; k++)
       {
         var midPt = coreSegments[k].PointAt(coreSegments[k].Domain.Mid);
-        var sc = bound.Contains(midPt, plane, tol);
-        if (sc == PointContainment.Coincident)
+        if (bound.Contains(midPt, plane, tol) == PointContainment.Coincident)
           members.Add(allCurveIds[coreOriginIdx[k]]);
       }
 
-      // Test remaining selected objects for containment.
+      // All remaining selected objects whose representative point is inside.
       foreach (var id in allIds)
       {
         if (members.Contains(id)) continue;
@@ -335,18 +336,36 @@ public sealed class vGroup : Command
         if (obj == null) continue;
         var pt = RepresentativePoint(obj);
         if (pt == null) continue;
-        var containment = bound.Contains(pt.Value, plane, tol);
-        if (containment is PointContainment.Inside or PointContainment.Coincident)
+        if (bound.Contains(pt.Value, plane, tol) is PointContainment.Inside
+                                                   or PointContainment.Coincident)
           members.Add(id);
       }
 
-      Log.Write(EnglishName, $"  boundary members={members.Count}");
+      boundaryMembers.Add(members);
+    }
 
-      if (members.Count < 2)
-        continue;
+    // Drop subset boundaries and create groups for the survivors.
+    int groupCount = 0;
+    for (int i = 0; i < boundaries.Count; i++)
+    {
+      var mi = boundaryMembers[i];
+      if (mi.Count < 2) continue;
+
+      // Skip if every member of mi also appears in some larger boundary mj.
+      bool isSubset = false;
+      for (int j = 0; j < boundaries.Count; j++)
+      {
+        if (j == i) continue;
+        var mj = boundaryMembers[j];
+        if (mj.Count <= mi.Count) continue; // can't be a strict superset
+        if (mi.IsSubsetOf(mj)) { isSubset = true; break; }
+      }
+      if (isSubset) continue;
+
+      Log.Write(EnglishName, $"  boundary[{i}] members={mi.Count} → group");
 
       var grpIdx = doc.Groups.Add();
-      foreach (var id in members)
+      foreach (var id in mi)
       {
         var obj = doc.Objects.FindId(id);
         if (obj == null) continue;
