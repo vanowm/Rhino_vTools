@@ -219,6 +219,12 @@ public sealed class vFacing : Command
     var crvs   = input.Select(t => t.Crv).ToArray();
     var layers = input.Select(t => t.Layer).ToArray();
 
+    Log.Write("vFacing", $"TryAnalyzeTopology: {input.Count} input curve(s), tol={tol:G4}");
+    for (var _i = 0; _i < input.Count; _i++)
+      Log.Write("vFacing", $"  [{_i}] layer={layers[_i]} len={crvs[_i].GetLength():F3} " +
+                            $"start=({crvs[_i].PointAtStart.X:F3},{crvs[_i].PointAtStart.Y:F3}) " +
+                            $"end=({crvs[_i].PointAtEnd.X:F3},{crvs[_i].PointAtEnd.Y:F3})");
+
     // Single closed curve: split at corners, let user pick base
     if (crvs.Length == 1 && crvs[0].IsClosed)
     {
@@ -230,46 +236,100 @@ public sealed class vFacing : Command
       return true;
     }
 
-    // Group curves into connected components by shared endpoints
-    var groups = GroupByConnectivity(crvs, tol);
-    Log.Write("vFacing", $"GroupByConnectivity: {crvs.Length} curve(s) -> {groups.Count} group(s)");
+    // PRIMARY: group curves by layer index.
+    // Curves on the same layer belong to the same role (base / side1 / side2 / chamfer).
+    var layerGroups = input
+      .GroupBy(t => t.Layer)
+      .Select(g => g.Select(t => (t.Crv, t.Layer)).ToList())
+      .ToList();
 
-    // 4 groups: shortest is likely a chamfer corner piece — merge into adjacent side
-    if (groups.Count == 4)
+    Log.Write("vFacing", $"Layer-based groups: {layerGroups.Count}");
+    for (var _i = 0; _i < layerGroups.Count; _i++)
+      Log.Write("vFacing", $"  group[{_i}] layer={layerGroups[_i][0].Layer} count={layerGroups[_i].Count}");
+
+    // FALLBACK: all curves on the same layer — treat each curve as its own group.
+    if (layerGroups.Count == 1 && input.Count >= 3)
     {
-      groups.Sort((a, b) =>
-        a.Sum(i => crvs[i].GetLength()).CompareTo(b.Sum(i => crvs[i].GetLength())));
-      var chamfer      = groups[0];
-      var rest         = groups.Skip(1).ToList();
-      var chamferChain = JoinChain(chamfer.Select(i => crvs[i]).ToArray(), tol);
-      var restChains   = rest.Select(g => JoinChain(g.Select(i => crvs[i]).ToArray(), tol)).ToArray();
-      var adjIdx       = Array.FindIndex(restChains, c => SharesEndpoint(chamferChain, c, tol));
+      Log.Write("vFacing", "All curves on same layer — treating each curve as separate group");
+      layerGroups = input
+        .Select(t => new List<(Curve Crv, int Layer)> { (t.Crv, t.Layer) })
+        .ToList();
+    }
+
+    // 4 groups: one is likely a chamfer piece — merge the single-curve group that
+    // shares an endpoint with exactly one of the non-chamfer groups.
+    if (layerGroups.Count == 4)
+    {
+      var joinedForMerge = layerGroups.Select(g => JoinChain(g.Select(p => p.Crv).ToArray(), tol)).ToArray();
+      var chamferIdx = -1;
+
+      // Prefer: single-curve group whose joined chain is not the base (shares endpoint with only 1 other)
+      for (var _i = 0; _i < 4 && chamferIdx < 0; _i++)
+      {
+        if (layerGroups[_i].Count != 1) continue;
+        var shareCount = 0;
+        for (var _j = 0; _j < 4; _j++)
+          if (_j != _i && SharesEndpoint(joinedForMerge[_i], joinedForMerge[_j], tol))
+            shareCount++;
+        Log.Write("vFacing", $"  group[{_i}] single-curve, shareCount={shareCount}");
+        if (shareCount == 1) chamferIdx = _i;
+      }
+
+      // Fallback: shortest group by total length
+      if (chamferIdx < 0)
+      {
+        chamferIdx = Enumerable.Range(0, 4)
+          .OrderBy(i => layerGroups[i].Sum(p => p.Crv.GetLength()))
+          .First();
+        Log.Write("vFacing", $"  chamfer fallback (shortest): group[{chamferIdx}]");
+      }
+
+      // Find the adjacent group (shares endpoint with chamfer)
+      var adjIdx = -1;
+      for (var _j = 0; _j < 4; _j++)
+      {
+        if (_j == chamferIdx) continue;
+        if (SharesEndpoint(joinedForMerge[chamferIdx], joinedForMerge[_j], tol))
+        { adjIdx = _j; break; }
+      }
+
       if (adjIdx >= 0)
       {
-        rest[adjIdx].AddRange(chamfer);
-        groups = rest;
-        Log.Write("vFacing", $"Merged chamfer group into group[{adjIdx}]");
+        Log.Write("vFacing", $"  merging chamfer group[{chamferIdx}] into group[{adjIdx}]");
+        layerGroups[adjIdx].AddRange(layerGroups[chamferIdx]);
+        layerGroups.RemoveAt(chamferIdx);
+      }
+      else
+      {
+        Log.Write("vFacing", "  chamfer merge: no adjacent group found, proceeding with 4 groups");
       }
     }
 
-    if (groups.Count != 3)
+    if (layerGroups.Count != 3)
     {
       RhinoApp.WriteLine(
-        $"vFacing: expected 3 connected chains (base + 2 sides), found {groups.Count}. " +
-        "Check that all curves connect at their endpoints.");
+        $"vFacing: need curves on exactly 3 layers (base + 2 sides), found {layerGroups.Count} layer group(s). " +
+        "Place base curves on one layer and each side on its own layer.");
       return false;
     }
 
-    var chains = groups.Select(g => JoinChain(g.Select(i => crvs[i]).ToArray(), tol)).ToArray();
+    // Build joined chain per group for topology detection
+    var chains = layerGroups.Select(g => JoinChain(g.Select(p => p.Crv).ToArray(), tol)).ToArray();
+    for (var _i = 0; _i < 3; _i++)
+      Log.Write("vFacing", $"  chain[{_i}] layer={layerGroups[_i][0].Layer} " +
+                            $"start=({chains[_i].PointAtStart.X:F3},{chains[_i].PointAtStart.Y:F3}) " +
+                            $"end=({chains[_i].PointAtEnd.X:F3},{chains[_i].PointAtEnd.Y:F3})");
 
+    // Base = chain whose endpoints each connect to one of the other two chains
     var baseIdx = -1;
     for (var i = 0; i < 3; i++)
     {
       var j = (i + 1) % 3;
       var k = (i + 2) % 3;
-      if (SharesEndpoint(chains[i], chains[j], tol) &&
-          SharesEndpoint(chains[i], chains[k], tol))
-      { baseIdx = i; break; }
+      var ij = SharesEndpoint(chains[i], chains[j], tol);
+      var ik = SharesEndpoint(chains[i], chains[k], tol);
+      Log.Write("vFacing", $"  SharesEndpoint([{i}],[{j}])={ij}  SharesEndpoint([{i}],[{k}])={ik}");
+      if (ij && ik) { baseIdx = i; break; }
     }
 
     if (baseIdx < 0)
@@ -279,6 +339,7 @@ public sealed class vFacing : Command
       return false;
     }
 
+    Log.Write("vFacing", $"  base=group[{baseIdx}]");
     var s1Idx = (baseIdx + 1) % 3;
     var s2Idx = (baseIdx + 2) % 3;
 
@@ -287,25 +348,10 @@ public sealed class vFacing : Command
     var s2Chain = chains[s2Idx];
     OrientSides(ref bChain, ref s1Chain, ref s2Chain, tol);
 
-    baseParts  = OrderChain(groups[baseIdx].Select(i => (crvs[i].DuplicateCurve(), layers[i])).ToList(), bChain,  tol);
-    side1Parts = OrderChain(groups[s1Idx].Select(i  => (crvs[i].DuplicateCurve(), layers[i])).ToList(), s1Chain, tol);
-    side2Parts = OrderChain(groups[s2Idx].Select(i  => (crvs[i].DuplicateCurve(), layers[i])).ToList(), s2Chain, tol);
+    baseParts  = OrderChain(layerGroups[baseIdx], bChain,  tol);
+    side1Parts = OrderChain(layerGroups[s1Idx],   s1Chain, tol);
+    side2Parts = OrderChain(layerGroups[s2Idx],   s2Chain, tol);
     return true;
-  }
-
-  private static List<List<int>> GroupByConnectivity(Curve[] crvs, double tol)
-  {
-    var parent = Enumerable.Range(0, crvs.Length).ToArray();
-    int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
-    void Union(int a, int b) { parent[Find(a)] = Find(b); }
-    for (var i = 0; i < crvs.Length; i++)
-      for (var j = i + 1; j < crvs.Length; j++)
-        if (SharesEndpoint(crvs[i], crvs[j], tol * 2))
-          Union(i, j);
-    return Enumerable.Range(0, crvs.Length)
-      .GroupBy(i => Find(i))
-      .Select(g => g.ToList())
-      .ToList();
   }
 
   private static Curve JoinChain(Curve[] crvs, double tol)
