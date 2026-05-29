@@ -15,8 +15,9 @@ namespace vTools.Commands;
 
 /// <summary>
 /// Creates a facing piece from selected base + side curves.
-/// Offsets the base by Size toward the sides, closes the boundary,
-/// captures inside objects, and places the group at a user-picked point.
+/// Accepts multiple curves per role (base / side1 / side2) and a chamfer piece.
+/// All output curves are placed on the same layer as their corresponding input.
+/// The offset curve inherits the layer of the base.
 /// </summary>
 public sealed class vFacing : Command
 {
@@ -44,54 +45,55 @@ public sealed class vFacing : Command
     LoadOptions();
     var tol = doc.ModelAbsoluteTolerance;
 
-    // 1. Pick curves
+    // 1. Pick curves (each carries its original layer index)
     if (!TryPickCurves(doc, out var selectedCurves))
       return Result.Cancel;
 
-    // 2. Analyze topology → base, side1, side2 (oriented: side starts at base endpoint)
+    // 2. Analyze topology → base, side1, side2 (each as a list of curve+layer)
     if (!TryAnalyzeTopology(doc, selectedCurves, tol,
-          out var baseCurve, out var side1, out var side2))
+          out var baseParts, out var side1Parts, out var side2Parts))
     {
-      foreach (var (id, _) in selectedCurves)
+      foreach (var (id, _, _) in selectedCurves)
         doc.Objects.FindId(id)?.Select(false);
       doc.Views.Redraw();
       return Result.Nothing;
     }
 
-    // 3. Offset base + extend sides → closed boundary
+    // 3. Build facing pieces; boundaryCurve is used only for inside-object collection
     var cplane = ActiveCPlane(doc);
-    var boundary = BuildFacingBoundary(baseCurve!, side1!, side2!, _size, tol, cplane);
-    if (boundary == null)
+    if (!BuildFacingPieces(baseParts!, side1Parts!, side2Parts!,
+          _size, tol, cplane,
+          out var outPieces, out var boundaryCurve))
     {
       RhinoApp.WriteLine("vFacing: could not build facing boundary. Check that sides are long enough.");
       return Result.Nothing;
     }
 
-    // 4. Collect inside objects (trimmed to boundary, like vPart)
+    // 4. Collect inside objects
     var excludeIds = new HashSet<Guid>(selectedCurves.Select(c => c.Id));
     var viewPlane = ViewPlane(doc);
-    var inside    = CollectInsideObjects(doc, excludeIds, boundary, viewPlane, tol);
+    var inside    = CollectInsideObjects(doc, excludeIds, boundaryCurve!, viewPlane, tol);
 
-    // 5. Build item list: boundary + inside
-    var currentAttr = new ObjectAttributes { LayerIndex = doc.Layers.CurrentLayerIndex };
-    var items = new List<(GeometryBase Geom, ObjectAttributes Attr)>
-    {
-      (boundary, currentAttr.Duplicate())
-    };
+    // 5. Build item list: boundary pieces (each on its original layer) + inside
+    var items = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
+    foreach (var (crv, layerIdx) in outPieces!)
+      items.Add((crv, new ObjectAttributes { LayerIndex = layerIdx }));
     items.AddRange(inside);
 
     // 6. Deselect source curves
-    foreach (var (id, _) in selectedCurves)
+    foreach (var (id, _, _) in selectedCurves)
       doc.Objects.FindId(id)?.Select(false);
     doc.Views.Redraw();
 
     // 7. Placement: DynamicDraw preview + pick point
-    var bbox      = boundary.GetBoundingBox(true);
-    var basePoint = bbox.IsValid ? bbox.Center : boundary.PointAtStart;
+    var bbox      = BoundingBox.Empty;
+    foreach (var (crv, _) in outPieces!) bbox.Union(crv.GetBoundingBox(true));
+    var basePoint = bbox.IsValid ? bbox.Center : outPieces![0].Crv.PointAtStart;
 
-    var currentColor  = doc.Layers[doc.Layers.CurrentLayerIndex]?.Color ?? Color.Cyan;
     var previewGeoms  = items
-      .Select(p => (Geom: p.Geom.Duplicate()!, Color: doc.Layers[p.Attr.LayerIndex]?.Color ?? currentColor))
+      .Select(p => (Geom: p.Geom.Duplicate()!,
+                    Color: (p.Attr.LayerIndex < doc.Layers.Count
+                            ? doc.Layers[p.Attr.LayerIndex]?.Color : null) ?? Color.Cyan))
       .Where(p => p.Geom != null)
       .ToList();
 
@@ -158,9 +160,9 @@ public sealed class vFacing : Command
 
   // ── Selection ────────────────────────────────────────────────────────────
 
-  private static bool TryPickCurves(RhinoDoc doc, out List<(Guid Id, Curve Crv)> result)
+  private static bool TryPickCurves(RhinoDoc doc, out List<(Guid Id, Curve Crv, int Layer)> result)
   {
-    result = new List<(Guid, Curve)>();
+    result = new List<(Guid, Curve, int)>();
 
     var sizeOpt = new OptionDouble(_size, 0.001, double.MaxValue);
     var go      = new GetObject();
@@ -192,9 +194,11 @@ public sealed class vFacing : Command
 
     for (var i = 0; i < go.ObjectCount; i++)
     {
-      var r = go.Object(i);
+      var r   = go.Object(i);
+      var obj = r.Object();
       if (r.Curve() is { } crv)
-        result.Add((r.ObjectId, crv.DuplicateCurve()));
+        result.Add((r.ObjectId, crv.DuplicateCurve(),
+                    obj?.Attributes.LayerIndex ?? doc.Layers.CurrentLayerIndex));
     }
 
     return result.Count > 0;
@@ -204,135 +208,146 @@ public sealed class vFacing : Command
 
   private static bool TryAnalyzeTopology(
     RhinoDoc doc,
-    List<(Guid Id, Curve Crv)> input,
+    List<(Guid Id, Curve Crv, int Layer)> input,
     double tol,
-    out Curve? baseCurve,
-    out Curve? side1,
-    out Curve? side2)
+    out List<(Curve Crv, int Layer)>? baseParts,
+    out List<(Curve Crv, int Layer)>? side1Parts,
+    out List<(Curve Crv, int Layer)>? side2Parts)
   {
-    baseCurve = null; side1 = null; side2 = null;
+    baseParts = side1Parts = side2Parts = null;
 
-    var crvs = input.Select(c => c.Crv).ToArray();
+    var crvs   = input.Select(t => t.Crv).ToArray();
+    var layers = input.Select(t => t.Layer).ToArray();
 
-    // Special case: single closed curve object already closed
+    // Single closed curve: split at corners, let user pick base
     if (crvs.Length == 1 && crvs[0].IsClosed)
-      return TryAnalyzeClosedCurve(doc, crvs[0], tol, out baseCurve, out side1, out side2);
-
-    // For exactly 3 input curves, try direct three-chain analysis first.
-    // JoinCurves merges them into one and loses the segment boundaries, causing
-    // FindCornerParams to fail when the junctions are near-tangent (angle < 30°).
-    if (crvs.Length == 3)
     {
-      Log.Write("vFacing", "3 input curves — trying direct three-chain analysis");
-      if (TryAnalyzeThreeChains(crvs, tol, out baseCurve, out side1, out side2))
-        return true;
-      Log.Write("vFacing", "Direct three-chain failed, falling back to JoinCurves path");
+      if (!TryAnalyzeClosedCurve(doc, crvs[0], tol, out var bCrv, out var s1Crv, out var s2Crv))
+        return false;
+      baseParts  = new List<(Curve, int)> { (bCrv!,  layers[0]) };
+      side1Parts = new List<(Curve, int)> { (s1Crv!, layers[0]) };
+      side2Parts = new List<(Curve, int)> { (s2Crv!, layers[0]) };
+      return true;
     }
 
-    // Join into connected chains
-    var joined = Curve.JoinCurves(crvs, tol * 10);
-    if (joined == null || joined.Length == 0)
+    // Group curves into connected components by shared endpoints
+    var groups = GroupByConnectivity(crvs, tol);
+    Log.Write("vFacing", $"GroupByConnectivity: {crvs.Length} curve(s) -> {groups.Count} group(s)");
+
+    // 4 groups: shortest is likely a chamfer corner piece — merge into adjacent side
+    if (groups.Count == 4)
     {
-      RhinoApp.WriteLine("vFacing: could not join selected curves — check connectivity.");
-      return false;
+      groups.Sort((a, b) =>
+        a.Sum(i => crvs[i].GetLength()).CompareTo(b.Sum(i => crvs[i].GetLength())));
+      var chamfer      = groups[0];
+      var rest         = groups.Skip(1).ToList();
+      var chamferChain = JoinChain(chamfer.Select(i => crvs[i]).ToArray(), tol);
+      var restChains   = rest.Select(g => JoinChain(g.Select(i => crvs[i]).ToArray(), tol)).ToArray();
+      var adjIdx       = Array.FindIndex(restChains, c => SharesEndpoint(chamferChain, c, tol));
+      if (adjIdx >= 0)
+      {
+        rest[adjIdx].AddRange(chamfer);
+        groups = rest;
+        Log.Write("vFacing", $"Merged chamfer group into group[{adjIdx}]");
+      }
     }
 
-    joined = joined.Where(c => c.GetLength() > tol).ToArray();
-
-    Log.Write("vFacing", $"JoinCurves → {joined.Length} chain(s)");
-    for (var _di = 0; _di < joined.Length; _di++)
-      Log.Write("vFacing", $"  chain[{_di}]: type={joined[_di].GetType().Name} IsClosed={joined[_di].IsClosed} len={joined[_di].GetLength():F3}");
-
-    if (joined.Length == 1 && joined[0].IsClosed)
-      return TryAnalyzeClosedCurve(doc, joined[0], tol, out baseCurve, out side1, out side2);
-
-    if (joined.Length == 1)
-      return TryAnalyzeOpenChain(joined[0], tol, out baseCurve, out side1, out side2);
-
-    if (joined.Length == 3)
-      return TryAnalyzeThreeChains(joined, tol, out baseCurve, out side1, out side2);
-
-    RhinoApp.WriteLine(
-      $"vFacing: expected 1 connected chain or 3 separate chains, got {joined.Length}. " +
-      "Select curves that form exactly base + two sides.");
-    return false;
-  }
-
-  /// <summary>
-  /// Open chain: find 2 corners ≥ 30°, middle segment = base.
-  /// </summary>
-  private static bool TryAnalyzeOpenChain(
-    Curve chain, double tol,
-    out Curve? baseCurve, out Curve? side1, out Curve? side2)
-  {
-    baseCurve = null; side1 = null; side2 = null;
-
-    var corners = FindCornerParams(chain, 30.0);
-    if (corners.Count != 2)
+    if (groups.Count != 3)
     {
       RhinoApp.WriteLine(
-        $"vFacing: found {corners.Count} corner(s) ≥30° in the selected curves; " +
-        "need exactly 2 (one at each end of the base). " +
-        "Select base and sides as separate curve objects for cleaner detection.");
+        $"vFacing: expected 3 connected chains (base + 2 sides), found {groups.Count}. " +
+        "Check that all curves connect at their endpoints.");
       return false;
     }
 
-    corners.Sort();
-    var pieces = chain.Split(corners.ToArray());
-    if (pieces == null || pieces.Length != 3)
-    {
-      RhinoApp.WriteLine("vFacing: could not split the curve chain at detected corners.");
-      return false;
-    }
+    var chains = groups.Select(g => JoinChain(g.Select(i => crvs[i]).ToArray(), tol)).ToArray();
 
-    // pieces[0] = before first corner (side1, going toward base), needs reversal
-    // pieces[1] = between corners (base)
-    // pieces[2] = after second corner (side2)
-    baseCurve = pieces[1];
-
-    var s1 = pieces[0].DuplicateCurve();
-    s1.Reverse(); // now s1 starts at corner1 = base.PointAtStart, ends at free
-    side1 = s1;
-    side2 = pieces[2]; // starts at corner2 = base.PointAtEnd, ends at free
-
-    return true;
-  }
-
-  /// <summary>
-  /// Three separate chains: base = the one that connects to both others at its endpoints.
-  /// </summary>
-  private static bool TryAnalyzeThreeChains(
-    Curve[] chains, double tol,
-    out Curve? baseCurve, out Curve? side1, out Curve? side2)
-  {
-    baseCurve = null; side1 = null; side2 = null;
-
-    int baseIdx = -1;
+    var baseIdx = -1;
     for (var i = 0; i < 3; i++)
     {
       var j = (i + 1) % 3;
       var k = (i + 2) % 3;
       if (SharesEndpoint(chains[i], chains[j], tol) &&
           SharesEndpoint(chains[i], chains[k], tol))
-      {
-        baseIdx = i;
-        break;
-      }
+      { baseIdx = i; break; }
     }
 
     if (baseIdx < 0)
     {
-      RhinoApp.WriteLine("vFacing: could not identify the base curve — " +
-                         "make sure base endpoints connect to both sides.");
+      RhinoApp.WriteLine("vFacing: could not identify the base curve. " +
+                         "Ensure its endpoints each connect to one side.");
       return false;
     }
 
-    baseCurve = chains[baseIdx];
-    side1     = chains[(baseIdx + 1) % 3];
-    side2     = chains[(baseIdx + 2) % 3];
+    var s1Idx = (baseIdx + 1) % 3;
+    var s2Idx = (baseIdx + 2) % 3;
 
-    OrientSides(ref baseCurve, ref side1, ref side2, tol);
+    var bChain  = chains[baseIdx];
+    var s1Chain = chains[s1Idx];
+    var s2Chain = chains[s2Idx];
+    OrientSides(ref bChain, ref s1Chain, ref s2Chain, tol);
+
+    baseParts  = OrderChain(groups[baseIdx].Select(i => (crvs[i].DuplicateCurve(), layers[i])).ToList(), bChain,  tol);
+    side1Parts = OrderChain(groups[s1Idx].Select(i  => (crvs[i].DuplicateCurve(), layers[i])).ToList(), s1Chain, tol);
+    side2Parts = OrderChain(groups[s2Idx].Select(i  => (crvs[i].DuplicateCurve(), layers[i])).ToList(), s2Chain, tol);
     return true;
+  }
+
+  private static List<List<int>> GroupByConnectivity(Curve[] crvs, double tol)
+  {
+    var parent = Enumerable.Range(0, crvs.Length).ToArray();
+    int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    void Union(int a, int b) { parent[Find(a)] = Find(b); }
+    for (var i = 0; i < crvs.Length; i++)
+      for (var j = i + 1; j < crvs.Length; j++)
+        if (SharesEndpoint(crvs[i], crvs[j], tol * 2))
+          Union(i, j);
+    return Enumerable.Range(0, crvs.Length)
+      .GroupBy(i => Find(i))
+      .Select(g => g.ToList())
+      .ToList();
+  }
+
+  private static Curve JoinChain(Curve[] crvs, double tol)
+  {
+    if (crvs.Length == 1) return crvs[0].DuplicateCurve();
+    var joined = Curve.JoinCurves(crvs, tol * 2);
+    return (joined != null && joined.Length == 1) ? joined[0] : crvs[0].DuplicateCurve();
+  }
+
+  private static List<(Curve Crv, int Layer)> OrderChain(
+    List<(Curve Crv, int Layer)> parts, Curve reference, double tol)
+  {
+    if (parts.Count == 1)
+    {
+      var (c, l) = parts[0];
+      var dup = c.DuplicateCurve();
+      if (dup.PointAtStart.DistanceTo(reference.PointAtStart) >
+          dup.PointAtEnd.DistanceTo(reference.PointAtStart))
+        dup.Reverse();
+      return new List<(Curve, int)> { (dup, l) };
+    }
+    var eps       = tol * 2;
+    var remaining = parts.Select(p => (Crv: p.Crv.DuplicateCurve(), p.Layer)).ToList();
+    var ordered   = new List<(Curve, int)>();
+    var current   = reference.PointAtStart;
+    while (remaining.Count > 0)
+    {
+      var found = -1; var flip = false;
+      for (var i = 0; i < remaining.Count; i++)
+      {
+        if (remaining[i].Crv.PointAtStart.DistanceTo(current) < eps) { found = i; flip = false; break; }
+        if (remaining[i].Crv.PointAtEnd.DistanceTo(current)   < eps) { found = i; flip = true;  break; }
+      }
+      if (found < 0) break;
+      var (crv, layer) = remaining[found];
+      remaining.RemoveAt(found);
+      if (flip) crv.Reverse();
+      ordered.Add((crv, layer));
+      current = crv.PointAtEnd;
+    }
+    ordered.AddRange(remaining);
+    return ordered;
   }
 
   /// <summary>
@@ -515,113 +530,96 @@ public sealed class vFacing : Command
     baseCurve = b; side1 = s1; side2 = s2;
   }
 
-  // ── Boundary construction ────────────────────────────────────────────────
+  // ── Boundary construction (multi-curve, layer-aware) ────────────────────
 
   /// <summary>
-  /// Offsets baseCurve toward the sides by size, extends each side to meet the
-  /// offset, and joins the four pieces into a closed boundary:
-  ///   A→B (base) + B→D' (side2 trimmed) + D'→C' (offset) + C'→A (side1 reversed).
+  /// Builds the 4-piece facing boundary from multi-curve base + side chains.
+  /// Each output piece carries the layer of its corresponding input.
+  /// Also returns a joined closed boundaryCurve for inside-object collection.
   /// </summary>
-  private static Curve? BuildFacingBoundary(
-    Curve baseCurve, Curve side1, Curve side2,
-    double size, double tol, Plane cplane)
+  private static bool BuildFacingPieces(
+    List<(Curve Crv, int Layer)> baseParts,
+    List<(Curve Crv, int Layer)> side1Parts,
+    List<(Curve Crv, int Layer)> side2Parts,
+    double size, double tol, Plane cplane,
+    out List<(Curve Crv, int Layer)>? outPieces,
+    out Curve? boundaryCurve)
   {
-    // Offset base toward side free-end centroid
-    var sideCenter = (side1.PointAtEnd + side2.PointAtEnd) / 2.0;
-    var offsetCurve = OffsetTowardPoint(baseCurve, size, sideCenter, tol, cplane);
+    outPieces = null; boundaryCurve = null;
+
+    var baseLayer  = baseParts.Count  > 0 ? baseParts[0].Layer  : 0;
+    var side1Layer = side1Parts.Count > 0 ? side1Parts[0].Layer : 0;
+    var side2Layer = side2Parts.Count > 0 ? side2Parts[0].Layer : 0;
+
+    var baseJoined = JoinChain(baseParts.Select(p  => p.Crv).ToArray(), tol);
+    var s1Joined   = JoinChain(side1Parts.Select(p => p.Crv).ToArray(), tol);
+    var s2Joined   = JoinChain(side2Parts.Select(p => p.Crv).ToArray(), tol);
+
+    OrientSides(ref baseJoined, ref s1Joined, ref s2Joined, tol);
+
+    var sideCenter  = (s1Joined.PointAtEnd + s2Joined.PointAtEnd) / 2.0;
+    var offsetCurve = OffsetTowardPoint(baseJoined, size, sideCenter, tol, cplane);
     if (offsetCurve == null)
     {
       RhinoApp.WriteLine("vFacing: could not offset base curve.");
-      return null;
+      return false;
     }
 
-    // Generous extension length
-    var extLen = Math.Max(baseCurve.GetLength(), side1.GetLength() + side2.GetLength()) + size * 10;
-
-    // Extend side1 beyond free end, extend side2 beyond free end, extend offset beyond both ends
-    var s1Ext  = TryExtend(side1,       CurveEnd.End,  extLen) ?? side1.DuplicateCurve();
-    var s2Ext  = TryExtend(side2,       CurveEnd.End,  extLen) ?? side2.DuplicateCurve();
+    var extLen = Math.Max(baseJoined.GetLength(), s1Joined.GetLength() + s2Joined.GetLength()) + size * 10;
+    var s1Ext  = TryExtend(s1Joined,    CurveEnd.End,  extLen) ?? s1Joined.DuplicateCurve();
+    var s2Ext  = TryExtend(s2Joined,    CurveEnd.End,  extLen) ?? s2Joined.DuplicateCurve();
     var offExt = TryExtend(offsetCurve, CurveEnd.Both, extLen) ?? offsetCurve.DuplicateCurve();
 
-    // Intersect side1 with offset
+    double t1s1, t1off, t2s2, t2off;
     var ev1 = Intersection.CurveCurve(s1Ext, offExt, tol, tol);
-    var ev2 = Intersection.CurveCurve(s2Ext, offExt, tol, tol);
-
-    Point3d ptC, ptD;
-    double  t1s1, t1off, t2s2, t2off;
-
     if (ev1 != null && ev1.Count > 0)
-    {
-      t1s1  = ev1[0].ParameterA;
-      t1off = ev1[0].ParameterB;
-      ptC   = ev1[0].PointA;
-    }
+      (t1s1, t1off) = (ev1[0].ParameterA, ev1[0].ParameterB);
     else
     {
-      // Fallback: closest approach between extended side1 free end and offset curve
-      if (!offExt.ClosestPoint(side1.PointAtEnd, out t1off))
-        return null;
-      ptC   = offExt.PointAt(t1off);
-      if (!s1Ext.ClosestPoint(ptC, out t1s1))
-        return null;
+      if (!offExt.ClosestPoint(s1Joined.PointAtEnd, out t1off)) return false;
+      if (!s1Ext.ClosestPoint(offExt.PointAt(t1off), out t1s1)) return false;
     }
 
+    var ev2 = Intersection.CurveCurve(s2Ext, offExt, tol, tol);
     if (ev2 != null && ev2.Count > 0)
-    {
-      t2s2  = ev2[0].ParameterA;
-      t2off = ev2[0].ParameterB;
-      ptD   = ev2[0].PointA;
-    }
+      (t2s2, t2off) = (ev2[0].ParameterA, ev2[0].ParameterB);
     else
     {
-      if (!offExt.ClosestPoint(side2.PointAtEnd, out t2off))
-        return null;
-      ptD   = offExt.PointAt(t2off);
-      if (!s2Ext.ClosestPoint(ptD, out t2s2))
-        return null;
+      if (!offExt.ClosestPoint(s2Joined.PointAtEnd, out t2off)) return false;
+      if (!s2Ext.ClosestPoint(offExt.PointAt(t2off), out t2s2)) return false;
     }
 
-    // Trim side1: base.Start (A) → C'
     var s1Trimmed = s1Ext.Trim(s1Ext.Domain.Min, t1s1);
-    if (s1Trimmed == null) return null;
-
-    // Trim side2: base.End (B) → D'
     var s2Trimmed = s2Ext.Trim(s2Ext.Domain.Min, t2s2);
-    if (s2Trimmed == null) return null;
+    if (s1Trimmed == null || s2Trimmed == null) return false;
 
-    // Trim offset between C' and D' (order param range correctly)
-    var offMin = Math.Min(t1off, t2off);
-    var offMax = Math.Max(t1off, t2off);
-    var offTrimmed = offExt.Trim(offMin, offMax);
-    if (offTrimmed == null) return null;
+    var offTrimmed = offExt.Trim(Math.Min(t1off, t2off), Math.Max(t1off, t2off));
+    if (offTrimmed == null) return false;
 
-    // Orient offset so it goes from D' to C' (closing side2 → offset → side1_reversed)
-    var offForJoin = offTrimmed.DuplicateCurve();
-    if (offForJoin.PointAtStart.DistanceTo(ptD) > offForJoin.PointAtEnd.DistanceTo(ptD))
-      offForJoin.Reverse();
+    if (offTrimmed.PointAtStart.DistanceTo(s2Trimmed.PointAtEnd) >
+        offTrimmed.PointAtEnd.DistanceTo(s2Trimmed.PointAtEnd))
+      offTrimmed.Reverse();
 
-    // s1 reversed: C' → A
     var s1Rev = s1Trimmed.DuplicateCurve();
     s1Rev.Reverse();
 
-    // Join: base(A→B) + side2(B→D') + offset(D'→C') + side1_rev(C'→A)
-    var piecesToJoin = new[]
+    // Joined boundary for CollectInsideObjects only
+    var bndPieces = new Curve[] { baseJoined, s2Trimmed!, offTrimmed!, s1Rev };
+    var bnd = Curve.JoinCurves(bndPieces, tol * 10);
+    if (bnd == null || bnd.Length != 1 || !bnd[0].IsClosed)
+      bnd = Curve.JoinCurves(bndPieces, tol * 100);
+    if (bnd == null || bnd.Length != 1 || !bnd[0].IsClosed) return false;
+    boundaryCurve = bnd[0];
+
+    // Output: base, side2 trimmed, offset (on base layer), side1 trimmed+reversed
+    outPieces = new List<(Curve, int)>
     {
-      baseCurve.DuplicateCurve(),
-      s2Trimmed,
-      offForJoin,
-      s1Rev
+      (baseJoined,   baseLayer),
+      (s2Trimmed!,   side2Layer),
+      (offTrimmed!,  baseLayer),
+      (s1Rev,        side1Layer),
     };
-
-    var joined = Curve.JoinCurves(piecesToJoin, tol * 10);
-    if (joined != null && joined.Length == 1 && joined[0].IsClosed)
-      return joined[0];
-
-    joined = Curve.JoinCurves(piecesToJoin, tol * 100);
-    if (joined != null && joined.Length == 1 && joined[0].IsClosed)
-      return joined[0];
-
-    return null;
+    return true;
   }
 
   private static Curve? TryExtend(Curve crv, CurveEnd end, double length)
