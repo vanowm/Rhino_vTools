@@ -308,11 +308,15 @@ public sealed class vTextAligned : Command
       var upAxis = getter.View()?.ActiveViewport.ConstructionPlane().ZAxis ?? Vector3d.ZAxis;
       var previewTemplateTextId = getter.PreviewTemplateTextId;
 
+      // Compute effective text/height here so plane calculation and placement use the same values.
+      var effTextPlace   = textUserChanged   || selectedObjText == null                      ? _text   : selectedObjText;
+      var effHeightPlace = heightUserChanged || selectedObjHeight <= RhinoMath.ZeroTolerance ? _height : selectedObjHeight;
+
       // Use the last stable side sign from the preview to match what was shown.
       var placeSideSign = getter.LastSideSign != 0 ? getter.LastSideSign : 0;
-      var placeSideDeadband = getter.LastSideSign != 0 ? Math.Max(doc.ModelAbsoluteTolerance * 4.0, _height * 0.1) : 0.0;
+      var placeSideDeadband = getter.LastSideSign != 0 ? Math.Max(doc.ModelAbsoluteTolerance * 4.0, effHeightPlace * 0.1) : 0.0;
 
-      if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, _height, _rotate90, upAxis, out var plane, out var primarySideSign, sideSignHint: placeSideSign, sideDeadband: placeSideDeadband, previewTemplateTextId))
+      if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, effHeightPlace, _rotate90, upAxis, out var plane, out var primarySideSign, sideSignHint: placeSideSign, sideDeadband: placeSideDeadband, previewTemplateTextId))
       {
         RhinoApp.WriteLine("vTextAligned: could not compute text plane.");
         continue;
@@ -320,8 +324,6 @@ public sealed class vTextAligned : Command
 
       if (activeTextId.HasValue)
       {
-        var effTextPlace   = textUserChanged   || selectedObjText == null                      ? _text   : selectedObjText;
-        var effHeightPlace = heightUserChanged || selectedObjHeight <= RhinoMath.ZeroTolerance ? _height : selectedObjHeight;
         if (ApplySettingsToTextObject(doc, activeTextId.Value, effTextPlace, effHeightPlace, plane))
         {
           doc.Views.Redraw();
