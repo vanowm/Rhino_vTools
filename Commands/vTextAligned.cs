@@ -88,6 +88,7 @@ public sealed class vTextAligned : Command
 
       var result = getter.Get();
       var commandResult = getter.CommandResult();
+      getter.Cleanup();
 
       if (commandResult != Result.Success)
       {
@@ -1066,6 +1067,7 @@ public sealed class vTextAligned : Command
     private readonly bool _bothSides;
 
     private int _lastSideSign;
+    private Guid? _highlightedTextId;
 
     public MainPointGetter(
       RhinoDoc doc,
@@ -1110,6 +1112,15 @@ public sealed class vTextAligned : Command
     public double SnapTolerance { get; }
     public double HoverSnapTolerance { get; }
 
+    public void Cleanup()
+    {
+      if (_highlightedTextId.HasValue)
+      {
+        _doc.Objects.FindId(_highlightedTextId.Value)?.Highlight(false);
+        _highlightedTextId = null;
+      }
+    }
+
     private Curve? CurveById(Guid objectId)
     {
       foreach (var item in _curveCache)
@@ -1137,6 +1148,17 @@ public sealed class vTextAligned : Command
 
       // Lock pick intent: click will select whatever object was highlighted here.
       HoverIntentIsText = HoverText.HasValue && (_curveIsLocked ? true : !HoverCurve.HasValue);
+
+      // Update built-in pre-highlight on the hovered text object.
+      var newHighlightId = HoverText.HasValue ? HoverText.Value.ObjectId : (Guid?)null;
+      if (newHighlightId != _highlightedTextId)
+      {
+        if (_highlightedTextId.HasValue)
+          _doc.Objects.FindId(_highlightedTextId.Value)?.Highlight(false);
+        _highlightedTextId = newHighlightId;
+        if (_highlightedTextId.HasValue)
+          _doc.Objects.FindId(_highlightedTextId.Value)?.Highlight(true);
+      }
 
       PreviewPlane = null;
       PreviewPlaneOpp = null;
@@ -1244,33 +1266,7 @@ public sealed class vTextAligned : Command
         }
       }
 
-      // Draw gold box for any text object the cursor is inside or near, using
-      // a direct bbox check so Rhino's layer-color snap highlight is always overridden.
-      foreach (var textId in _textIds)
-      {
-        var textObj = _doc.Objects.FindId(textId);
-        if (textObj?.Geometry is not TextEntity hoverText)
-          continue;
-        try
-        {
-          var hp = hoverText.Plane;
-          var lb = hoverText.GetBoundingBox(hp);
-          if (!lb.IsValid)
-            continue;
-          var xformToLocal = Transform.PlaneToPlane(hp, Plane.WorldXY);
-          var localPoint = new Point3d(e.CurrentPoint);
-          localPoint.Transform(xformToLocal);
-          var check = lb;
-          check.Inflate(SnapTolerance);
-          if (!check.Contains(localPoint))
-            continue;
-          e.Display.DrawBox(new Box(hp, lb), System.Drawing.Color.Gold, 2);
-        }
-        catch
-        {
-        }
-      }
-
+      // Draw gold box around the text object currently under cursor.
       if (PreviewPlane.HasValue)
       {
         if (_activeTextId.HasValue)
