@@ -723,19 +723,9 @@ public sealed class vTextAligned : Command
     if (!yAxis.Unitize() || !xAxis.Unitize())
       return false;
 
-    // Align text reading direction with the CPlane horizontal so text is never
-    // backward/upside-down on closed curves.  Project world X onto the CPlane
-    // to obtain the reference direction (matches Notches.py _build_readable_text_plane).
-    var refXInPlane = Vector3d.XAxis - normal * Vector3d.Multiply(Vector3d.XAxis, normal);
-    if (!refXInPlane.Unitize())
-    {
-      // Fallback for a vertical CPlane: project world Y instead.
-      refXInPlane = Vector3d.YAxis - normal * Vector3d.Multiply(Vector3d.YAxis, normal);
-      if (!refXInPlane.Unitize())
-        refXInPlane = Vector3d.XAxis;
-    }
-
-    if (Vector3d.Multiply(xAxis, refXInPlane) < 0.0)
+    // Align xAxis with the curve tangent direction so orientation stays
+    // consistent around the full curve regardless of which side the text is on.
+    if (Vector3d.Multiply(xAxis, tangent) < 0.0)
     {
       xAxis.Reverse();
       yAxis.Reverse();
