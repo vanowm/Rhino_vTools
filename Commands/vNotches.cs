@@ -1612,7 +1612,7 @@ public sealed class vNotches : Rhino.Commands.Command
       _fromPrevLbl  = new Label { Text = "-" };
 
       // Undo button
-      _undoBtn = new Button { Text = "Undo" };
+      _undoBtn = new Button { Text = "Undo", Height = 26 };
       _undoBtn.Click += (_, __) =>
       {
         UndoLastNotch(doc, s);
@@ -1636,7 +1636,7 @@ public sealed class vNotches : Rhino.Commands.Command
           SelectBothCurves(doc, s);
           Redraw();
         };
-        _reverseButtons[i] = new Button { Text = $"Reverse {i + 1}" };
+        _reverseButtons[i] = new Button { Text = $"Reverse {i + 1}", Height = 26 };
         _reverseButtons[i].Click += (_, __) =>
         {
           ReverseCurve(doc, s, ci);
@@ -1676,11 +1676,11 @@ public sealed class vNotches : Rhino.Commands.Command
     {
       // ── Notch group ──────────────────────────────────────────────────────
       var notchTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
-      notchTable.Rows.Add(new TableRow(FL("Type"),   new TableCell(_typeDropDown,   true)));
-      notchTable.Rows.Add(new TableRow(FL("Layer"),  new TableCell(_notchLayerDrop, true)));
-      notchTable.Rows.Add(new TableRow(FL("Length"), new TableCell(_lengthBox,      true)));
-      notchTable.Rows.Add(new TableRow(FL("Width"),  new TableCell(_widthBox,       true)));
-      notchTable.Rows.Add(new TableRow(FL("Offset"), new TableCell(_offsetBox,      true)));
+      notchTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Type"),   new TableCell(_typeDropDown,   true) } });
+      notchTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Layer"),  new TableCell(_notchLayerDrop, true) } });
+      notchTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Length"), new TableCell(_lengthBox,      true) } });
+      notchTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Width"),  new TableCell(_widthBox,       true) } });
+      notchTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset"), new TableCell(_offsetBox,      true) } });
       var notchGroup = new GroupBox { Text = "Notch", Content = notchTable };
 
       // ── Label group ──────────────────────────────────────────────────────
@@ -1698,11 +1698,11 @@ public sealed class vNotches : Rhino.Commands.Command
       sizeStack.Items.Add(new StackLayoutItem(_labelSizePctDrop,   false));
 
       var labelTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
-      labelTable.Rows.Add(new TableRow(new TableCell(labelHeader, true)));
-      labelTable.Rows.Add(new TableRow(FL("Layer"),    new TableCell(_labelLayerDrop, true)));
-      labelTable.Rows.Add(new TableRow(FL("Size"),     new TableCell(sizeStack,       true)));
-      labelTable.Rows.Add(new TableRow(FL("Offset X"), new TableCell(_labelOffsetBox, true)));
-      labelTable.Rows.Add(new TableRow(FL("Offset Y"), new TableCell(_labelOffsetYBox,true)));
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { new TableCell(labelHeader, true) } });
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Layer"),    new TableCell(_labelLayerDrop, true) } });
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Size"),     new TableCell(sizeStack,       true) } });
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset X"), new TableCell(_labelOffsetBox, true) } });
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset Y"), new TableCell(_labelOffsetYBox,true) } });
       var labelGroup = new GroupBox { Text = "Label", Content = labelTable };
 
       // ── Percent / Group ──────────────────────────────────────────────────
@@ -1726,9 +1726,9 @@ public sealed class vNotches : Rhino.Commands.Command
 
       // ── Distance info ────────────────────────────────────────────────────
       var distTable = new TableLayout { Spacing = new Eto.Drawing.Size(6, 2) };
-      distTable.Rows.Add(new TableRow(FL("From start"),    new TableCell(_fromStartLbl, true)));
-      distTable.Rows.Add(new TableRow(FL("From end"),      new TableCell(_fromEndLbl,   true)));
-      distTable.Rows.Add(new TableRow(FL("From previous"), new TableCell(_fromPrevLbl,  true)));
+      distTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("From start"),    new TableCell(_fromStartLbl, true) } });
+      distTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("From end"),      new TableCell(_fromEndLbl,   true) } });
+      distTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("From previous"), new TableCell(_fromPrevLbl,  true) } });
 
       // ── Root (vertical stack, no bottom spacer) ──────────────────────────
       var root = new StackLayout
@@ -1738,12 +1738,12 @@ public sealed class vNotches : Rhino.Commands.Command
         Spacing = 6,
         Padding = new Eto.Drawing.Padding(6),
       };
-      root.Items.Add(new StackLayoutItem(notchGroup, true));
-      root.Items.Add(new StackLayoutItem(labelGroup, true));
+      root.Items.Add(new StackLayoutItem(notchGroup, false));
+      root.Items.Add(new StackLayoutItem(labelGroup, false));
       root.Items.Add(new StackLayoutItem(pgStack,    false));
       root.Items.Add(new StackLayoutItem(curveStack, false));
-      root.Items.Add(new StackLayoutItem(distTable,  true));
-      root.Items.Add(new StackLayoutItem(_undoBtn,   true));
+      root.Items.Add(new StackLayoutItem(distTable,  false));
+      root.Items.Add(new StackLayoutItem(_undoBtn,   false));
 
       return root;
     }
@@ -1768,7 +1768,7 @@ public sealed class vNotches : Rhino.Commands.Command
     }
 
     static TextBox MakeTextBox(string text) =>
-      new TextBox { Text = text, Width = 70 };
+      new TextBox { Text = text, Width = 70, Height = 22 };
 
     static void AttachNumericLostFocus(TextBox box, Action handler)
     {
