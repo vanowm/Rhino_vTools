@@ -1687,16 +1687,18 @@ public sealed class vNotches : Rhino.Commands.Command
       var labelHeader = new TableLayout { Spacing = new Eto.Drawing.Size(4, 0) };
       labelHeader.Rows.Add(new TableRow { ScaleHeight = false, Cells = {
         new TableCell(_labelCheck,    false),
-        new TableCell(_labelValueBox, true),
+        new TableCell(_labelValueBox, false),
         new TableCell(_autoAdvCheck,  false),
         new TableCell(_sideFlipCheck, false),
+        new TableCell(null,           true),   // filler — absorbs extra width
       } });
 
       var sizeRow = new TableLayout { Spacing = new Eto.Drawing.Size(4, 0) };
       sizeRow.Rows.Add(new TableRow { ScaleHeight = false, Cells = {
-        new TableCell(_labelSizeBox,      true),
+        new TableCell(_labelSizeBox,       false),
         new TableCell(_labelSizeAutoCheck, false),
         new TableCell(_labelSizePctDrop,   false),
+        new TableCell(null,                true),   // filler
       } });
 
       var labelTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
@@ -1770,7 +1772,7 @@ public sealed class vNotches : Rhino.Commands.Command
     }
 
     static TextBox MakeTextBox(string text) =>
-      new TextBox { Text = text, Width = 50, Height = 22 };
+      new TextBox { Text = text, Width = 70, Height = 22 };
 
     static void AttachNumericLostFocus(TextBox box, Action handler)
     {
