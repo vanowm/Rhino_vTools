@@ -553,6 +553,8 @@ public sealed class vFitBox : Command
         var bb = copy.GetBoundingBox(true);
         if (!bb.IsValid) continue;
 
+        Log.Write("vFitBox", $"  refine {g.GetType().Name}: localY=[{bb.Min.Y:F3},{bb.Max.Y:F3}] localX=[{bb.Min.X:F3},{bb.Max.X:F3}]");
+
         if (first)
         {
           minX = bb.Min.X; maxX = bb.Max.X;
