@@ -474,7 +474,7 @@ public sealed class vFitBox : Command
       planarBest.Mode = "2d";
       planarBest.FitMode = normalizedFitMode;
       CanonicalizeCandidate(planarBest);
-      Log.Write("vFitBox", $"FindBestFit 2d: W={planarBest.Width:F4} D={planarBest.Depth:F4} H={planarBest.Height:F4} area={planarBest.Area:F4}");
+      Log.Write("vFitBox", $"FindBestFit 2d: angle={planarBest.AngleDeg:F4}° W={planarBest.Width:F4} D={planarBest.Depth:F4} H={planarBest.Height:F4} area={planarBest.Area:F4}");
       return planarBest;
     }
 
@@ -526,7 +526,7 @@ public sealed class vFitBox : Command
     best.Mode = "3d";
     best.FitMode = normalizedFitMode;
     CanonicalizeCandidate(best);
-    Log.Write("vFitBox", $"FindBestFit 3d: normals={testedNormals} W={best.Width:F4} D={best.Depth:F4} H={best.Height:F4} area={best.Area:F4} normal=({best.Normal.X:F4},{best.Normal.Y:F4},{best.Normal.Z:F4})");
+    Log.Write("vFitBox", $"FindBestFit 3d: angle={best.AngleDeg:F4}° normals={testedNormals} W={best.Width:F4} D={best.Depth:F4} H={best.Height:F4} area={best.Area:F4} normal=({best.Normal.X:F4},{best.Normal.Y:F4},{best.Normal.Z:F4})");
     return best;
   }
 
@@ -1379,6 +1379,8 @@ public sealed class vFitBox : Command
     var best = FindBestYawForPlane(geometries, basePlane, coarseStep, scoreMode);
     if (best == null)
       return null;
+
+    Log.Write("vFitBox", $"  coarse best: angle={best.AngleDeg:F4}° W={best.Width:F4} D={best.Depth:F4} strip={Math.Min(best.Width, best.Depth):F4} yaws={best.TestedYaws}");
 
     var testedTotal = best.TestedYaws;
     var refineStep = Math.Max(MinYawRefineStepDeg, Math.Min(0.25, coarseStep * 0.25));
