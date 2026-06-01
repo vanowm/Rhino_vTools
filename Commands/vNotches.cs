@@ -1586,6 +1586,7 @@ public sealed class vNotches : Rhino.Commands.Command
       };
 
       _labelSizeBox = MakeTextBox($"{s.ManualLabelSize:G}");
+      _labelSizeBox.Width = 50;
       AttachNumericLostFocus(_labelSizeBox, () =>
       { s.ManualLabelSize = Math.Max(0, ParseDouble(_labelSizeBox.Text, s.ManualLabelSize)); Redraw(); });
 
@@ -1661,6 +1662,7 @@ public sealed class vNotches : Rhino.Commands.Command
       // Layout
       Content = BuildLayout();
       MinimumSize = new Eto.Drawing.Size(280, 0);
+      Shown += (_, __) => MinimumSize = new Eto.Drawing.Size(280, ClientSize.Height);
       ApplyDynamic();
 
       Closed += (_, __) =>
