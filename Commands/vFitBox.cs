@@ -59,6 +59,7 @@ public sealed class vFitBox : Command
     _fitMode = NormalizeFitMode(fitMode);
     SavePersistedOptions();
 
+    Log.Write("vFitBox", $"RunCommand: {objectIds.Count} object(s) selected, angleStep={_angleStepDeg} fitMode={_fitMode} rotate={_rotate}");
     var geometries = CollectGeometries(doc, objectIds);
     if (geometries.Count == 0)
     {
@@ -400,9 +401,14 @@ public sealed class vFitBox : Command
       var obj = doc.Objects.FindId(id);
       var geometry = obj?.Geometry;
       if (geometry != null)
+      {
+        var bb = geometry.GetBoundingBox(true);
+        Log.Write("vFitBox", $"  geom {geometry.GetType().Name} bbox=({bb.Min.X:F3},{bb.Min.Y:F3},{bb.Min.Z:F3})-({bb.Max.X:F3},{bb.Max.Y:F3},{bb.Max.Z:F3})");
         geometries.Add(geometry);
+      }
     }
 
+    Log.Write("vFitBox", $"CollectGeometries: {geometries.Count} object(s)");
     return geometries;
   }
 
@@ -468,6 +474,7 @@ public sealed class vFitBox : Command
       planarBest.Mode = "2d";
       planarBest.FitMode = normalizedFitMode;
       CanonicalizeCandidate(planarBest);
+      Log.Write("vFitBox", $"FindBestFit 2d: W={planarBest.Width:F4} D={planarBest.Depth:F4} H={planarBest.Height:F4} area={planarBest.Area:F4}");
       return planarBest;
     }
 
@@ -519,6 +526,7 @@ public sealed class vFitBox : Command
     best.Mode = "3d";
     best.FitMode = normalizedFitMode;
     CanonicalizeCandidate(best);
+    Log.Write("vFitBox", $"FindBestFit 3d: normals={testedNormals} W={best.Width:F4} D={best.Depth:F4} H={best.Height:F4} area={best.Area:F4} normal=({best.Normal.X:F4},{best.Normal.Y:F4},{best.Normal.Z:F4})");
     return best;
   }
 
@@ -571,6 +579,7 @@ public sealed class vFitBox : Command
     c.Height = Math.Max(0.0, maxZ - minZ);
     c.Area   = c.Width * c.Depth;
     c.Volume = c.Area * c.Height;
+    Log.Write("vFitBox", $"RefineToAccurateBounds: W={c.Width:F4} D={c.Depth:F4} H={c.Height:F4} X=[{c.MinX:F4},{c.MaxX:F4}] Y=[{c.MinY:F4},{c.MaxY:F4}] Z=[{c.MinZ:F4},{c.MaxZ:F4}]");
   }
 
   /// <summary>
