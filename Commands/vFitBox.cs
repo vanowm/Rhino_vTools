@@ -546,30 +546,43 @@ public sealed class vFitBox : Command
 
     foreach (var g in geometries)
     {
+      BoundingBox bb;
       try
       {
-        var copy = g.Duplicate();
-        if (copy == null || !copy.Transform(toLocal)) continue;
-        var bb = copy.GetBoundingBox(true);
-        if (!bb.IsValid) continue;
-
-        Log.Write("vFitBox", $"  refine {g.GetType().Name}: localY=[{bb.Min.Y:F3},{bb.Max.Y:F3}] localX=[{bb.Min.X:F3},{bb.Max.X:F3}]");
-
-        if (first)
+        // AnnotationBase (TextEntity etc.) returns wrong bbox after plane transform;
+        // use world bbox projection instead.
+        if (g is AnnotationBase)
         {
-          minX = bb.Min.X; maxX = bb.Max.X;
-          minY = bb.Min.Y; maxY = bb.Max.Y;
-          minZ = bb.Min.Z; maxZ = bb.Max.Z;
-          first = false;
+          var world = g.GetBoundingBox(true);
+          if (!world.IsValid) continue;
+          bb = WorldBBoxToPlaneBBox(world, c.Plane);
+          if (!bb.IsValid) continue;
         }
         else
         {
-          minX = Math.Min(minX, bb.Min.X); maxX = Math.Max(maxX, bb.Max.X);
-          minY = Math.Min(minY, bb.Min.Y); maxY = Math.Max(maxY, bb.Max.Y);
-          minZ = Math.Min(minZ, bb.Min.Z); maxZ = Math.Max(maxZ, bb.Max.Z);
+          var copy = g.Duplicate();
+          if (copy == null || !copy.Transform(toLocal)) continue;
+          bb = copy.GetBoundingBox(true);
+          if (!bb.IsValid) continue;
         }
       }
-      catch { }
+      catch { continue; }
+
+      Log.Write("vFitBox", $"  refine {g.GetType().Name}: localY=[{bb.Min.Y:F3},{bb.Max.Y:F3}] localX=[{bb.Min.X:F3},{bb.Max.X:F3}]");
+
+      if (first)
+      {
+        minX = bb.Min.X; maxX = bb.Max.X;
+        minY = bb.Min.Y; maxY = bb.Max.Y;
+        minZ = bb.Min.Z; maxZ = bb.Max.Z;
+        first = false;
+      }
+      else
+      {
+        minX = Math.Min(minX, bb.Min.X); maxX = Math.Max(maxX, bb.Max.X);
+        minY = Math.Min(minY, bb.Min.Y); maxY = Math.Max(maxY, bb.Max.Y);
+        minZ = Math.Min(minZ, bb.Min.Z); maxZ = Math.Max(maxZ, bb.Max.Z);
+      }
     }
 
     if (first) return;
