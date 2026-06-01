@@ -1662,7 +1662,7 @@ public sealed class vNotches : Rhino.Commands.Command
       // Layout
       Content = BuildLayout();
       MinimumSize = new Eto.Drawing.Size(280, 0);
-      Shown += (_, __) => MinimumSize = new Eto.Drawing.Size(280, ClientSize.Height);
+      Shown += (_, __) => MinimumSize = new Eto.Drawing.Size(280, Size.Height);
       ApplyDynamic();
 
       Closed += (_, __) =>
