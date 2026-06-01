@@ -1507,10 +1507,11 @@ public sealed class vNotches : Rhino.Commands.Command
     public NotchPanel(RhinoDoc doc, NotchSession s)
     {
       _s = s;
-      Title    = "Notches";
-      Padding  = new Eto.Drawing.Padding(8);
-      Resizable= true;
-      Topmost  = true;
+      Title     = "Notches";
+      Padding   = new Eto.Drawing.Padding(0);
+      Resizable = true;
+      Topmost   = true;
+      ClientSize= new Eto.Drawing.Size(280, -1);
 
       // Type
       _typeDropDown = new DropDown();
@@ -1673,59 +1674,82 @@ public sealed class vNotches : Rhino.Commands.Command
 
     Control BuildLayout()
     {
-      var root = new DynamicLayout { Spacing = new Eto.Drawing.Size(6, 6), Padding = new Eto.Drawing.Padding(4) };
+      // ── Notch group ──────────────────────────────────────────────────────
+      var notchTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
+      notchTable.Rows.Add(new TableRow(FL("Type"),   new TableCell(_typeDropDown,   true)));
+      notchTable.Rows.Add(new TableRow(FL("Layer"),  new TableCell(_notchLayerDrop, true)));
+      notchTable.Rows.Add(new TableRow(FL("Length"), new TableCell(_lengthBox,      true)));
+      notchTable.Rows.Add(new TableRow(FL("Width"),  new TableCell(_widthBox,       true)));
+      notchTable.Rows.Add(new TableRow(FL("Offset"), new TableCell(_offsetBox,      true)));
+      var notchGroup = new GroupBox { Text = "Notch", Content = notchTable };
 
-      // Notch group
-      var ng = new DynamicLayout { Spacing = new Eto.Drawing.Size(6, 4), Padding = new Eto.Drawing.Padding(6) };
-      ng.AddRow(new Label { Text = "Type" },   _typeDropDown, null);
-      ng.AddRow(new Label { Text = "Layer" },  _notchLayerDrop, null);
-      ng.AddRow(new Label { Text = "Length" }, _lengthBox, null);
-      ng.AddRow(new Label { Text = "Width" },  _widthBox, null);
-      ng.AddRow(new Label { Text = "Offset" }, _offsetBox, null);
-      var notchGroup = new GroupBox { Text = "Notch", Content = ng };
+      // ── Label group ──────────────────────────────────────────────────────
+      var labelHeader = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 4,
+        VerticalContentAlignment = VerticalAlignment.Center };
+      labelHeader.Items.Add(new StackLayoutItem(_labelCheck,    false));
+      labelHeader.Items.Add(new StackLayoutItem(_labelValueBox, true));
+      labelHeader.Items.Add(new StackLayoutItem(_autoAdvCheck,  false));
+      labelHeader.Items.Add(new StackLayoutItem(_sideFlipCheck, false));
 
-      // Label group
-      var lg = new DynamicLayout { Spacing = new Eto.Drawing.Size(6, 4), Padding = new Eto.Drawing.Padding(6) };
-      var labelRow = new DynamicLayout { Spacing = new Eto.Drawing.Size(4, 0) };
-      labelRow.AddRow(_labelCheck, _labelValueBox, _autoAdvCheck, _sideFlipCheck, null);
-      lg.AddRow(labelRow, null);
-      lg.AddRow(new Label { Text = "Layer" },    _labelLayerDrop, null);
-      var sizeRow = new DynamicLayout { Spacing = new Eto.Drawing.Size(4, 0) };
-      sizeRow.AddRow(_labelSizeBox, _labelSizeAutoCheck, _labelSizePctDrop, null);
-      lg.AddRow(new Label { Text = "Size" },     sizeRow, null);
-      lg.AddRow(new Label { Text = "Offset X" }, _labelOffsetBox, null);
-      lg.AddRow(new Label { Text = "Offset Y" }, _labelOffsetYBox, null);
-      var labelGroup = new GroupBox { Text = "Label", Content = lg };
+      var sizeStack = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 4,
+        VerticalContentAlignment = VerticalAlignment.Center };
+      sizeStack.Items.Add(new StackLayoutItem(_labelSizeBox,    true));
+      sizeStack.Items.Add(new StackLayoutItem(_labelSizeAutoCheck, false));
+      sizeStack.Items.Add(new StackLayoutItem(_labelSizePctDrop,   false));
 
-      root.AddRow(notchGroup);
-      root.AddRow(labelGroup);
+      var labelTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
+      labelTable.Rows.Add(new TableRow(new TableCell(labelHeader, true)));
+      labelTable.Rows.Add(new TableRow(FL("Layer"),    new TableCell(_labelLayerDrop, true)));
+      labelTable.Rows.Add(new TableRow(FL("Size"),     new TableCell(sizeStack,       true)));
+      labelTable.Rows.Add(new TableRow(FL("Offset X"), new TableCell(_labelOffsetBox, true)));
+      labelTable.Rows.Add(new TableRow(FL("Offset Y"), new TableCell(_labelOffsetYBox,true)));
+      var labelGroup = new GroupBox { Text = "Label", Content = labelTable };
 
-      // Percent + Group
-      var pgRow = new DynamicLayout { Spacing = new Eto.Drawing.Size(10, 0) };
-      pgRow.AddRow(_percentCheck, _groupCheck, null);
-      root.AddRow(pgRow);
+      // ── Percent / Group ──────────────────────────────────────────────────
+      var pgStack = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 10,
+        VerticalContentAlignment = VerticalAlignment.Center };
+      pgStack.Items.Add(new StackLayoutItem(_percentCheck, false));
+      pgStack.Items.Add(new StackLayoutItem(_groupCheck,   false));
 
-      // Side / Reverse / Enable rows
+      // ── Per-curve rows ───────────────────────────────────────────────────
+      var curveStack = new StackLayout { Orientation = Orientation.Vertical, Spacing = 2 };
       for (int i = 0; i < _s.Curves.Count; i++)
       {
-        var row = new DynamicLayout { Spacing = new Eto.Drawing.Size(8, 0) };
+        var row = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 6,
+          VerticalContentAlignment = VerticalAlignment.Center };
         if (_s.Curves.Count > 1 && _enableChecks[i] != null)
-          row.AddRow(_enableChecks[i], _sideChecks[i], _reverseButtons[i], null);
-        else
-          row.AddRow(_sideChecks[i], _reverseButtons[i], null);
-        root.AddRow(row);
+          row.Items.Add(new StackLayoutItem(_enableChecks[i], false));
+        row.Items.Add(new StackLayoutItem(_sideChecks[i],   false));
+        row.Items.Add(new StackLayoutItem(_reverseButtons[i],false));
+        curveStack.Items.Add(new StackLayoutItem(row));
       }
 
-      // Distance info
-      root.AddRow(new Label { Text = "From start" },    _fromStartLbl, null);
-      root.AddRow(new Label { Text = "From end" },      _fromEndLbl, null);
-      root.AddRow(new Label { Text = "From previous" }, _fromPrevLbl, null);
+      // ── Distance info ────────────────────────────────────────────────────
+      var distTable = new TableLayout { Spacing = new Eto.Drawing.Size(6, 2) };
+      distTable.Rows.Add(new TableRow(FL("From start"),    new TableCell(_fromStartLbl, true)));
+      distTable.Rows.Add(new TableRow(FL("From end"),      new TableCell(_fromEndLbl,   true)));
+      distTable.Rows.Add(new TableRow(FL("From previous"), new TableCell(_fromPrevLbl,  true)));
 
-      root.AddRow(_undoBtn);
-      root.AddRow(null);
+      // ── Root (vertical stack, no bottom spacer) ──────────────────────────
+      var root = new StackLayout
+      {
+        Orientation = Orientation.Vertical,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        Spacing = 6,
+        Padding = new Eto.Drawing.Padding(6),
+      };
+      root.Items.Add(new StackLayoutItem(notchGroup, true));
+      root.Items.Add(new StackLayoutItem(labelGroup, true));
+      root.Items.Add(new StackLayoutItem(pgStack,    false));
+      root.Items.Add(new StackLayoutItem(curveStack, false));
+      root.Items.Add(new StackLayoutItem(distTable,  true));
+      root.Items.Add(new StackLayoutItem(_undoBtn,   true));
 
       return root;
     }
+
+    static TableCell FL(string text) =>
+      new TableCell(new Label { Text = text, VerticalAlignment = VerticalAlignment.Center });
 
     void Redraw() => _s.Doc.Views.Redraw();
 
