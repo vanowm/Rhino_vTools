@@ -247,13 +247,38 @@ public sealed class vFacing : Command
     for (var _i = 0; _i < layerGroups.Count; _i++)
       Log.Write("vFacing", $"  group[{_i}] layer={layerGroups[_i][0].Layer} count={layerGroups[_i].Count}");
 
-    // FALLBACK: all curves on the same layer — treat each curve as its own group.
-    if (layerGroups.Count == 1 && input.Count >= 3)
+    // FALLBACK: all curves on the same layer.
+    if (layerGroups.Count == 1)
     {
-      Log.Write("vFacing", "All curves on same layer — treating each curve as separate group");
-      layerGroups = input
-        .Select(t => new List<(Curve Crv, int Layer)> { (t.Crv, t.Layer) })
-        .ToList();
+      if (input.Count == 3)
+      {
+        // Exactly 3 — split into individual groups and let topology detection work.
+        Log.Write("vFacing", "All curves on same layer (3 curves) — treating each as separate group");
+        layerGroups = input
+          .Select(t => new List<(Curve Crv, int Layer)> { (t.Crv, t.Layer) })
+          .ToList();
+      }
+      else if (input.Count > 3)
+      {
+        // More than 3 curves on the same layer — ask user to identify the 2 side curves.
+        Log.Write("vFacing", $"All curves on same layer ({input.Count} curves) — asking user to pick 2 sides");
+        if (!TryPickSideCurves(doc, input, out var sideIdxs))
+          return false;
+        var s1i = sideIdxs![0];
+        var s2i = sideIdxs![1];
+        var baseGroup = input
+          .Where((_, i) => i != s1i && i != s2i)
+          .Select(t => (t.Crv, t.Layer))
+          .ToList();
+        var s1Group = new List<(Curve Crv, int Layer)> { (input[s1i].Crv, input[s1i].Layer) };
+        var s2Group = new List<(Curve Crv, int Layer)> { (input[s2i].Crv, input[s2i].Layer) };
+        layerGroups = new List<List<(Curve Crv, int Layer)>> { baseGroup, s1Group, s2Group };
+      }
+      else
+      {
+        RhinoApp.WriteLine($"vFacing: need at least 3 curves, got {input.Count}.");
+        return false;
+      }
     }
 
     // 4 groups: one is likely a chamfer piece — merge the single-curve group that
@@ -351,6 +376,51 @@ public sealed class vFacing : Command
     baseParts  = OrderChain(layerGroups[baseIdx], bChain,  tol);
     side1Parts = OrderChain(layerGroups[s1Idx],   s1Chain, tol);
     side2Parts = OrderChain(layerGroups[s2Idx],   s2Chain, tol);
+    return true;
+  }
+
+  /// <summary>
+  /// Prompts the user to click 2 side curves from the already-selected set.
+  /// Returns the indices into <paramref name="input"/> of the two chosen curves.
+  /// </summary>
+  private static bool TryPickSideCurves(
+    RhinoDoc doc,
+    List<(Guid Id, Curve Crv, int Layer)> input,
+    out List<int>? sideIndices)
+  {
+    sideIndices = null;
+    var allowedIds = new HashSet<Guid>(input.Select(t => t.Id));
+
+    // Deselect all so the user starts from a clean state.
+    foreach (var (id, _, _) in input)
+      doc.Objects.FindId(id)?.Select(false);
+    doc.Views.Redraw();
+
+    var go = new GetObject();
+    go.SetCommandPrompt("Select 2 side curves connected to the base");
+    go.GeometryFilter = ObjectType.Curve;
+    go.SubObjectSelect = false;
+    go.SetCustomGeometryFilter((rhObj, geom, componentIndex) => allowedIds.Contains(rhObj.Id));
+
+    var res = go.GetMultiple(2, 2);
+
+    // Re-select original curves regardless of result.
+    foreach (var (id, _, _) in input)
+      doc.Objects.FindId(id)?.Select(true);
+    doc.Views.Redraw();
+
+    if (go.CommandResult() != Result.Success || go.ObjectCount != 2)
+      return false;
+
+    var picked = new List<int>();
+    for (var i = 0; i < 2; i++)
+    {
+      var idx = input.FindIndex(t => t.Id == go.Object(i).ObjectId);
+      if (idx < 0) return false;
+      picked.Add(idx);
+    }
+
+    sideIndices = picked;
     return true;
   }
 
