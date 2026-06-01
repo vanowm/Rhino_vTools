@@ -1219,7 +1219,7 @@ public sealed class vTextAligned : Command
         e.Display.DrawCurve(HoverCurve.Value.Curve, System.Drawing.Color.Orange, 3);
 
       // Overdraw hovered text in gold to override Rhino's layer-color pre-selection display.
-      if (HoverIntentIsText)
+      if (HoverIntentIsText && HoverText.HasValue)
       {
         var hoverObj = _doc.Objects.FindId(HoverText.Value.ObjectId);
         if (hoverObj?.Geometry is TextEntity hoverAnnotation)
