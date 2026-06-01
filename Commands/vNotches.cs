@@ -1684,23 +1684,25 @@ public sealed class vNotches : Rhino.Commands.Command
       var notchGroup = new GroupBox { Text = "Notch", Content = notchTable };
 
       // ── Label group ──────────────────────────────────────────────────────
-      var labelHeader = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 4,
-        VerticalContentAlignment = VerticalAlignment.Center };
-      labelHeader.Items.Add(new StackLayoutItem(_labelCheck,    false));
-      labelHeader.Items.Add(new StackLayoutItem(_labelValueBox, true));
-      labelHeader.Items.Add(new StackLayoutItem(_autoAdvCheck,  false));
-      labelHeader.Items.Add(new StackLayoutItem(_sideFlipCheck, false));
+      var labelHeader = new TableLayout { Spacing = new Eto.Drawing.Size(4, 0) };
+      labelHeader.Rows.Add(new TableRow { ScaleHeight = false, Cells = {
+        new TableCell(_labelCheck,    false),
+        new TableCell(_labelValueBox, true),
+        new TableCell(_autoAdvCheck,  false),
+        new TableCell(_sideFlipCheck, false),
+      } });
 
-      var sizeStack = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 4,
-        VerticalContentAlignment = VerticalAlignment.Center };
-      sizeStack.Items.Add(new StackLayoutItem(_labelSizeBox,    true));
-      sizeStack.Items.Add(new StackLayoutItem(_labelSizeAutoCheck, false));
-      sizeStack.Items.Add(new StackLayoutItem(_labelSizePctDrop,   false));
+      var sizeRow = new TableLayout { Spacing = new Eto.Drawing.Size(4, 0) };
+      sizeRow.Rows.Add(new TableRow { ScaleHeight = false, Cells = {
+        new TableCell(_labelSizeBox,      true),
+        new TableCell(_labelSizeAutoCheck, false),
+        new TableCell(_labelSizePctDrop,   false),
+      } });
 
       var labelTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
       labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { new TableCell(labelHeader, true) } });
       labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Layer"),    new TableCell(_labelLayerDrop, true) } });
-      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Size"),     new TableCell(sizeStack,       true) } });
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Size"),     new TableCell(sizeRow,         true) } });
       labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset X"), new TableCell(_labelOffsetBox, true) } });
       labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset Y"), new TableCell(_labelOffsetYBox,true) } });
       var labelGroup = new GroupBox { Text = "Label", Content = labelTable };
@@ -1768,7 +1770,7 @@ public sealed class vNotches : Rhino.Commands.Command
     }
 
     static TextBox MakeTextBox(string text) =>
-      new TextBox { Text = text, Width = 70, Height = 22 };
+      new TextBox { Text = text, Width = 50, Height = 22 };
 
     static void AttachNumericLostFocus(TextBox box, Action handler)
     {
