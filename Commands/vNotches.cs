@@ -1660,6 +1660,7 @@ public sealed class vNotches : Rhino.Commands.Command
 
       // Layout
       Content = BuildLayout();
+      MinimumSize = new Eto.Drawing.Size(280, 0);
       ApplyDynamic();
 
       Closed += (_, __) =>
@@ -1701,13 +1702,22 @@ public sealed class vNotches : Rhino.Commands.Command
         new TableCell(null,                true),   // filler
       } });
 
-      var labelTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
-      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { new TableCell(labelHeader, true) } });
-      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Layer"),    new TableCell(_labelLayerDrop, true) } });
-      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Size"),     new TableCell(sizeRow,         true) } });
-      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset X"), new TableCell(_labelOffsetBox, true) } });
-      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset Y"), new TableCell(_labelOffsetYBox,true) } });
-      var labelGroup = new GroupBox { Text = "Label", Content = labelTable };
+      // labelHeader spans full width above the 2-column sub-table
+      var labelSubTable = new TableLayout { Spacing = new Eto.Drawing.Size(6, 4) };
+      labelSubTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Layer"),    new TableCell(_labelLayerDrop, true) } });
+      labelSubTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Size"),     new TableCell(sizeRow,         true) } });
+      labelSubTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Offset X"), new TableCell(_labelOffsetBox, true) } });
+      labelSubTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Offset Y"), new TableCell(_labelOffsetYBox,true) } });
+      var labelContent = new StackLayout
+      {
+        Orientation = Orientation.Vertical,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        Spacing = 4,
+        Padding = new Eto.Drawing.Padding(6),
+      };
+      labelContent.Items.Add(new StackLayoutItem(labelHeader,   false));
+      labelContent.Items.Add(new StackLayoutItem(labelSubTable, false));
+      var labelGroup = new GroupBox { Text = "Label", Content = labelContent };
 
       // ── Percent / Group ──────────────────────────────────────────────────
       var pgStack = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 10,
@@ -1754,6 +1764,10 @@ public sealed class vNotches : Rhino.Commands.Command
 
     static TableCell FL(string text) =>
       new TableCell(new Label { Text = text, VerticalAlignment = VerticalAlignment.Center });
+
+    // Fixed-width label cell for the Label group (keeps label column stable on resize)
+    static TableCell FLW(string text) =>
+      new TableCell(new Label { Text = text, Width = 60, VerticalAlignment = VerticalAlignment.Center });
 
     void Redraw() => _s.Doc.Views.Redraw();
 
