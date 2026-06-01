@@ -1157,6 +1157,11 @@ public sealed class vFitBox : Command
     if (geometry == null || !plane.IsValid)
       return false;
 
+    // AnnotationBase (TextEntity, Leader, etc.) returns an unreliable bbox after
+    // plane transformation — the text-height/layout is recomputed in the new frame
+    // and inflates the box. Use the world bbox projection fallback for these types.
+    if (geometry is not AnnotationBase)
+    {
     // Transform a duplicate to plane-local space and measure accurately.
     // GetBoundingBox(Plane) uses control-point hulls for curves, which overshoots
     // and causes the solver to minimize a different objective than the real area.
@@ -1177,6 +1182,7 @@ public sealed class vFitBox : Command
     catch
     {
     }
+    } // end if (geometry is not AnnotationBase)
 
     try
     {
