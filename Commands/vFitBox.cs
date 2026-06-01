@@ -264,23 +264,17 @@ public sealed class vFitBox : Command
       }
     };
 
-    // SelectObjects: restart the debounce window — no expensive work here.
-    EventHandler<RhinoObjectSelectionEventArgs> onSelected = (_, _) =>
+    // SelectObjects / DeselectObjects: restart the debounce window — no expensive work here.
+    // Both use the same handler so group expand/collapse (which fires one event per object)
+    // coalesces into a single UpdatePreviewBox call after the burst settles.
+    EventHandler<RhinoObjectSelectionEventArgs> onSelectionChanged = (_, _) =>
     {
       debounceTimer.Stop();
       debounceTimer.Start();
     };
 
-    // DeselectObjects: cancel pending update; clear the box immediately.
-    EventHandler<RhinoObjectSelectionEventArgs> onDeselected = (_, _) =>
-    {
-      debounceTimer.Stop();
-      conduit.PreviewBox = Box.Unset;
-      doc.Views.Redraw();
-    };
-
-    RhinoDoc.SelectObjects   += onSelected;
-    RhinoDoc.DeselectObjects += onDeselected;
+    RhinoDoc.SelectObjects   += onSelectionChanged;
+    RhinoDoc.DeselectObjects += onSelectionChanged;
 
     try
     {
@@ -359,8 +353,8 @@ public sealed class vFitBox : Command
     }
     finally
     {
-      RhinoDoc.SelectObjects   -= onSelected;
-      RhinoDoc.DeselectObjects -= onDeselected;
+      RhinoDoc.SelectObjects   -= onSelectionChanged;
+      RhinoDoc.DeselectObjects -= onSelectionChanged;
       debounceTimer.Stop();
       debounceTimer.Dispose();
       conduit.Enabled = false;
