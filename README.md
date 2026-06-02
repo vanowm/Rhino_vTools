@@ -1,4 +1,4 @@
-# vTools  ·  v26.5.28.1247
+# vTools  ·  v26.6.1.1725
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -10,11 +10,13 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vChamfer](#vchamfer-flow) *(26.5.7.723)* — cuts a corner formed by two curves with a straight line perpendicular to the angle bisector at a specified cut length
   - [vCurveToSpline](#vcurvetospline-flow) *(26.4.24.934)* — converts selected curves to interpolated splines with join modes
   - [vDiamonds](#vdiamonds-flow) *(26.5.14.928)* — draws an argyle diamond pattern with optional bounding rectangle and size/count labels; supports BySize centering mode
+  - [vFacing](#vfacing-flow) *(26.5.29.1333)* — builds a four-piece closed facing boundary from a base curve and two side curves by offsetting the base inward by a specified size; collects inside objects and places the result with a DynamicDraw preview
   - [vFitBox](#vfitbox-flow) *(26.4.24.934)* — finds the minimum bounding box for selected objects by optimizing rotation angle
   - [vGroup](#vgroup-flow) *(26.5.27.1525)* — groups selected objects by closed-curve boundaries; each boundary is grouped with the objects inside it
   - [vLine](#vline-flow) *(26.4.27.2125)* — draws lines with chain modes, angle lock, length constraint, and perp/tangent endpoint solving
   - [vLineLength](#vlinelength-flow) *(26.4.27.2125)* — resizes an open curve to a target total, additive, or subtractive length
   - [vMiddleCurve](#vmiddlecurve-flow) *(26.4.27.2125)* — creates an interpolated curve equidistant between two selected curves
+  - [vNotches](#vnotches-flow) *(26.6.1.1725)* — places perpendicular notch marks along one or two selected curves at clicked positions; a floating panel controls notch type, dimensions, optional label, and per-curve side/reverse settings
   - [vOffset](#voffset-flow) *(26.4.27.2125)* — runs built-in Offset in a continuous loop, clearing selection after each run
   - [vOrient2pt](#vorient2pt-flow) *(26.4.24.934)* — orients objects from a source two-point frame to a target two-point frame
   - [vOrient3pt](#vorient3pt-flow) *(26.4.24.934)* — orients objects from a source three-point frame to a target three-point frame; intermediate points are optional (Enter at src2 = 1-point translate, Enter at src3 = 2-point orient)
@@ -78,7 +80,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vBiminiParts](#vbiminiparts-flow), [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFitBox](#vfitbox-flow), [vGroup](#vgroup-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSetPt](#vsetpt-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
+Native commands: [vBiminiParts](#vbiminiparts-flow), [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFacing](#vfacing-flow), [vFitBox](#vfitbox-flow), [vGroup](#vgroup-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMiddleCurve](#vmiddlecurve-flow), [vNotches](#vnotches-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSetPt](#vsetpt-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -137,6 +139,25 @@ Options:
 
 1. Current bounding box dimensions print to command history on every preview update.
 1. Pick the placement point to commit. All objects are grouped. Output layers: `PLOT` (diamond lines), `CUT1` (boundary rect), `Reference` (labels).
+
+### vFacing flow
+
+1. Select the facing curves (base + two sides). Multiple curves per role are supported. An optional chamfer piece may also be included.
+
+   Role assignment rules:
+   - Curves are grouped by layer; each layer group is treated as one role (base, side 1, side 2).
+   - If all curves share the same layer: exactly 3 curves — roles are auto-detected by topology; more than 3 — the command prompts you to click the two side curves.
+   - A single closed curve — the command splits it at corners (≥30°), highlights the pieces, and prompts you to click the base edge.
+   - Four layer groups — the group that shares an endpoint with only one other group is identified as the chamfer piece and merged into the adjacent side.
+
+1. Adjust the `Size` option (inward offset distance for the facing front) while selecting curves.
+1. The command builds the four-piece boundary: base, offset front (at `Size` distance inward), and two trimmed side segments. All visible objects inside the closed boundary are collected automatically.
+1. A DynamicDraw preview follows the cursor. Pick the placement point to commit.
+1. All output objects are placed as new geometry at the picked location and added to a single Rhino group. Originals are not deleted.
+
+Options:
+
+- `Size`: offset distance from the base curve to the inner facing edge. Persists to `vTools.config.json` under `vFacing`.
 
 ### vFitBox flow
 
@@ -221,6 +242,40 @@ Hidden keywords while editing:
 1. Select exactly 2 curves (preselect supported — press Enter to confirm).
 1. The command aligns curve directions and seams automatically, then creates an interpolated curve equidistant between the two inputs.
 1. Sample density is chosen adaptively and refined until the middle curve error is within tolerance.
+
+### vNotches flow
+
+1. Select one or two open or closed curves (preselect supported; press Enter to confirm).
+1. A floating **Notches** panel opens. Click positions along the curve(s) to place notches.
+1. **Notch** group options (panel and command line):
+
+    - `Type`: notch shape — `I` (single perpendicular line), `V`, or `U`.
+    - `Layer`: target layer for notch geometry.
+    - `Length`: notch arm length.
+    - `Width`: arm separation distance (disabled for `I` type).
+    - `Offset`: signed distance to shift the notch along the curve from the clicked point.
+
+1. **Label** group options:
+
+    - Checkbox to enable/disable label output.
+    - Value text box: the label string placed at the notch.
+    - `AutoAdv`: when enabled, increments a trailing numeric suffix after each placement.
+    - `FlipSide`: mirrors the label to the opposite side of the curve.
+    - `Layer`: target layer for label text.
+    - `Size`: manual label text height. `Auto` computes height proportionally from notch geometry; when `Auto` is off, the adjacent percentage dropdown scales the auto-computed height.
+    - `Offset X` / `Offset Y`: label position offset relative to the notch point (along-curve and across-curve).
+
+1. Other panel controls:
+
+    - `Percent`: display the click position as a percentage of total curve length in the distance readout.
+    - `Group`: group each notch geometry object with its label.
+    - Per-curve row — `Side N` checkbox: which side of the curve the notch and label are drawn on; `Reverse N` button: flip the curve's travel direction (affects side and offset behavior).
+    - Distance info: **From start**, **From end**, **From previous** show arc-length values for the last placed notch.
+    - **Undo** button: removes the most recently placed notch.
+
+1. Press Enter to finish and keep all placed notches. Press Esc to cancel and remove them.
+
+Options persist to `vTools.config.json` under the `vNotches` section.
 
 ### vOffset flow
 
