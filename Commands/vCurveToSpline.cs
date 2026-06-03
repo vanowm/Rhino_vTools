@@ -178,7 +178,8 @@ public sealed class vCurveToSpline : Command
 
         if (getResult == GetResult.Object)
         {
-          segments = SegmentsFromDocumentSelection(doc);
+          segments = SegmentsFromObjects(Enumerable.Range(0, go.ObjectCount).Select(i => go.Object(i).Object()));
+          preview.UpdateOrderedSegments(segments);
           preview.SetJoinMode(joinMode);
           doc.Views.Redraw();
 
@@ -197,7 +198,7 @@ public sealed class vCurveToSpline : Command
 
         if (getResult == GetResult.Nothing)
         {
-          segments = SegmentsFromDocumentSelection(doc);
+          segments = SegmentsFromObjects(Enumerable.Range(0, go.ObjectCount).Select(i => go.Object(i).Object()));
           return segments.Count > 0 ? Result.Success : Result.Cancel;
         }
 
@@ -236,13 +237,14 @@ public sealed class vCurveToSpline : Command
   }
 
   /// <summary>
-  /// Builds a Segment list from the current document selection (curves and points).
+  /// Builds a Segment list from an ordered sequence of RhinoObjects.
   /// </summary>
-  private static List<Segment> SegmentsFromDocumentSelection(RhinoDoc doc)
+  private static List<Segment> SegmentsFromObjects(IEnumerable<RhinoObject> objects)
   {
     var segments = new List<Segment>();
-    foreach (var obj in SelectedGeometryObjects(doc))
+    foreach (var obj in objects)
     {
+      if (obj == null) continue;
       if (obj.Geometry is Curve curve)
       {
         var nurbs = curve.ToNurbsCurve();
@@ -260,6 +262,12 @@ public sealed class vCurveToSpline : Command
     }
     return segments;
   }
+
+  /// <summary>
+  /// Builds a Segment list from the current document selection (unordered fallback).
+  /// </summary>
+  private static List<Segment> SegmentsFromDocumentSelection(RhinoDoc doc)
+    => SegmentsFromObjects(SelectedGeometryObjects(doc));
 
   /// <summary>
   /// Builds interpolated curves according to selected join mode.
@@ -502,6 +510,7 @@ public sealed class vCurveToSpline : Command
     private readonly Color _color = Color.OrangeRed;
     private string _joinMode;
     private string _selectionSignature = string.Empty;
+    private List<Segment> _orderedSegments = new();
     private List<Curve> _previewCurves = new();
 
     public InterpPreviewConduit(RhinoDoc doc, string joinMode, double tolerance)
@@ -517,6 +526,16 @@ public sealed class vCurveToSpline : Command
     public void SetJoinMode(string joinMode)
     {
       _joinMode = joinMode;
+      _selectionSignature = string.Empty;  // force redraw with new mode
+    }
+
+    /// <summary>
+    /// Stores an ordered segment list to use for preview rebuilds.
+    /// </summary>
+    public void UpdateOrderedSegments(List<Segment> segments)
+    {
+      _orderedSegments = segments;
+      _selectionSignature = string.Empty;  // force redraw
     }
 
     /// <summary>
@@ -531,26 +550,24 @@ public sealed class vCurveToSpline : Command
     }
 
     /// <summary>
-    /// Rebuilds preview only when selection signature or join mode changed.
+    /// Rebuilds preview only when selection or join mode changed.
     /// </summary>
     private void RefreshCacheIfNeeded()
     {
-      var selectedObjects = SelectedGeometryObjects(_doc);
-      var signature = BuildSignature(selectedObjects, _joinMode);
+      var signature = BuildSignature(_orderedSegments, _joinMode);
       if (string.Equals(signature, _selectionSignature, StringComparison.Ordinal))
         return;
 
       _selectionSignature = signature;
-      var segments = SegmentsFromDocumentSelection(_doc);
-      _previewCurves = BuildInterpCurves(segments, _joinMode, _tolerance);
+      _previewCurves = BuildInterpCurves(_orderedSegments, _joinMode, _tolerance);
     }
 
     /// <summary>
-    /// Builds a deterministic cache key from selected ids and current join mode.
+    /// Builds a deterministic cache key from ordered segment identity and current join mode.
     /// </summary>
-    private static string BuildSignature(IEnumerable<RhinoObject> curveObjects, string joinMode)
+    private static string BuildSignature(IEnumerable<Segment> segments, string joinMode)
     {
-      var ids = string.Join("|", curveObjects.Select(obj => obj.Id.ToString("N")));
+      var ids = string.Join("|", segments.Select(s => s.Start.ToString()));
       return joinMode + "::" + ids;
     }
   }
