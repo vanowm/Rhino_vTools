@@ -56,28 +56,28 @@ public sealed class vUzip : Command
   }
 
   private static UzipSettings LoadSettings() =>
-    vToolsOptionStore.Read<UzipSettings>(SettingsSection, section =>
+    ToolsOptionStore.Read<UzipSettings>(SettingsSection, section =>
     {
       var s = new UzipSettings();
-      if (vToolsOptionStore.TryGetDouble(section, "left",        out var l))   s.Left        = l;
-      if (vToolsOptionStore.TryGetDouble(section, "right",       out var r))   s.Right       = r;
-      if (vToolsOptionStore.TryGetDouble(section, "bottom",      out var b))   s.Bottom      = b;
-      if (vToolsOptionStore.TryGetDouble(section, "radius",      out var rad)) s.Radius      = rad;
-      if (vToolsOptionStore.TryGetBool  (section, "glass",       out var g))   s.Glass       = g;
-      if (vToolsOptionStore.TryGetDouble(section, "glassOffset", out var go))  s.GlassOffset = go;
-      if (vToolsOptionStore.TryGetString(section, "glassLayer",  out var gl))  s.GlassLayer  = gl;
-      if (vToolsOptionStore.TryGetBool  (section, "vis",         out var v))   s.Vis         = v;
-      if (vToolsOptionStore.TryGetDouble(section, "visOffset",   out var vo))  s.VisOffset   = vo;
-      if (vToolsOptionStore.TryGetString(section, "visLayer",    out var vl))  s.VisLayer    = vl;
-      if (vToolsOptionStore.TryGetString(section, "centerLayer", out var cl))  s.CenterLayer = cl;
-      if (vToolsOptionStore.TryGetBool  (section, "parts",       out var pt))  s.Parts       = pt;
-      if (vToolsOptionStore.TryGetString(section, "label",       out var lb))  s.Label       = lb;
-      if (vToolsOptionStore.TryGetDouble(section, "tail",        out var tl))  s.Tail        = tl;
+      if (ToolsOptionStore.TryGetDouble(section, "left",        out var l))   s.Left        = l;
+      if (ToolsOptionStore.TryGetDouble(section, "right",       out var r))   s.Right       = r;
+      if (ToolsOptionStore.TryGetDouble(section, "bottom",      out var b))   s.Bottom      = b;
+      if (ToolsOptionStore.TryGetDouble(section, "radius",      out var rad)) s.Radius      = rad;
+      if (ToolsOptionStore.TryGetBool  (section, "glass",       out var g))   s.Glass       = g;
+      if (ToolsOptionStore.TryGetDouble(section, "glassOffset", out var go))  s.GlassOffset = go;
+      if (ToolsOptionStore.TryGetString(section, "glassLayer",  out var gl))  s.GlassLayer  = gl;
+      if (ToolsOptionStore.TryGetBool  (section, "vis",         out var v))   s.Vis         = v;
+      if (ToolsOptionStore.TryGetDouble(section, "visOffset",   out var vo))  s.VisOffset   = vo;
+      if (ToolsOptionStore.TryGetString(section, "visLayer",    out var vl))  s.VisLayer    = vl;
+      if (ToolsOptionStore.TryGetString(section, "centerLayer", out var cl))  s.CenterLayer = cl;
+      if (ToolsOptionStore.TryGetBool  (section, "parts",       out var pt))  s.Parts       = pt;
+      if (ToolsOptionStore.TryGetString(section, "label",       out var lb))  s.Label       = lb;
+      if (ToolsOptionStore.TryGetDouble(section, "tail",        out var tl))  s.Tail        = tl;
       return s;
     });
 
   private static void SaveSettings(UzipSettings s) =>
-    vToolsOptionStore.Update(SettingsSection, section =>
+    ToolsOptionStore.Update(SettingsSection, section =>
     {
       section["left"]        = s.Left;
       section["right"]       = s.Right;

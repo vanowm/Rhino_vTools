@@ -9,7 +9,7 @@ namespace vTools.Commands;
 /// <summary>
 /// Shared persisted option storage backed by vTools.config.json.
 /// </summary>
-internal static class vToolsOptionStore
+internal static class ToolsOptionStore
 {
   private const string ToolsConfigFileName = "vTools.config.json";
   private static readonly object Sync = new();
@@ -211,7 +211,7 @@ internal static class vToolsOptionStore
   /// </summary>
   private static string GetToolsConfigPath()
   {
-    var pluginDir = Path.GetDirectoryName(typeof(vToolsOptionStore).Assembly.Location) ?? ".";
+    var pluginDir = Path.GetDirectoryName(typeof(ToolsOptionStore).Assembly.Location) ?? ".";
     Directory.CreateDirectory(pluginDir);
     return Path.Combine(pluginDir, ToolsConfigFileName);
   }

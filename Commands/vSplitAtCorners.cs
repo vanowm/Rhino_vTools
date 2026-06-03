@@ -262,16 +262,16 @@ public sealed class vSplitAtCorners : Command
 
   private static void LoadPersistedOptions()
   {
-    var values = vToolsOptionStore.Read(
+    var values = ToolsOptionStore.Read(
       OptionsSectionName,
       section =>
       {
         var angle = _angleDeg;
         var minLength = _minLength;
 
-        if (vToolsOptionStore.TryGetDouble(section, AngleKey, out var persistedAngle))
+        if (ToolsOptionStore.TryGetDouble(section, AngleKey, out var persistedAngle))
           angle = persistedAngle;
-        if (vToolsOptionStore.TryGetDouble(section, MinLengthKey, out var persistedMin))
+        if (ToolsOptionStore.TryGetDouble(section, MinLengthKey, out var persistedMin))
           minLength = persistedMin;
 
         return (angle, minLength);
@@ -283,7 +283,7 @@ public sealed class vSplitAtCorners : Command
 
   private static void SavePersistedOptions()
   {
-    _ = vToolsOptionStore.Update(
+    _ = ToolsOptionStore.Update(
       OptionsSectionName,
       section =>
       {

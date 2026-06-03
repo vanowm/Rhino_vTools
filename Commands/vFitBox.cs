@@ -125,7 +125,7 @@ public sealed class vFitBox : Command
   /// </summary>
   private static void LoadPersistedOptions()
   {
-    var options = vToolsOptionStore.Read(
+    var options = ToolsOptionStore.Read(
       OptionsSectionName,
       section =>
       {
@@ -133,13 +133,13 @@ public sealed class vFitBox : Command
         var rotate = _rotate;
         var fitMode = _fitMode;
 
-        if (vToolsOptionStore.TryGetDouble(section, AngleStepKey, out var persistedAngleStep))
+        if (ToolsOptionStore.TryGetDouble(section, AngleStepKey, out var persistedAngleStep))
           angleStep = Clamp(persistedAngleStep, MinAngleStepDeg, MaxAngleStepDeg);
 
-        if (vToolsOptionStore.TryGetBool(section, RotateKey, out var persistedRotate))
+        if (ToolsOptionStore.TryGetBool(section, RotateKey, out var persistedRotate))
           rotate = persistedRotate;
 
-        if (vToolsOptionStore.TryGetString(section, FitModeKey, out var persistedFitMode))
+        if (ToolsOptionStore.TryGetString(section, FitModeKey, out var persistedFitMode))
           fitMode = NormalizeFitMode(persistedFitMode);
 
         return (angleStep, rotate, fitMode);
@@ -155,7 +155,7 @@ public sealed class vFitBox : Command
   /// </summary>
   private static void SavePersistedOptions()
   {
-    _ = vToolsOptionStore.Update(
+    _ = ToolsOptionStore.Update(
       OptionsSectionName,
       section =>
       {

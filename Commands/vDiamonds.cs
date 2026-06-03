@@ -455,7 +455,7 @@ public sealed class vDiamonds : Command
 
   private static void LoadSettings()
   {
-    (_width, _height, _cw, _ch, _showBoundary, _showSize, _showCount, _bySizeW, _bySizeH, _layerPlot, _layerCut, _layerRef) = vToolsOptionStore.Read(SettingsSection, section =>
+    (_width, _height, _cw, _ch, _showBoundary, _showSize, _showCount, _bySizeW, _bySizeH, _layerPlot, _layerCut, _layerRef) = ToolsOptionStore.Read(SettingsSection, section =>
     {
       var w   = _width;
       var h   = _height;
@@ -470,25 +470,25 @@ public sealed class vDiamonds : Command
       var lc  = _layerCut;
       var lr  = _layerRef;
 
-      if (vToolsOptionStore.TryGetDouble(section, WidthKey,       out var pw)  && pw  > 0.0) w   = pw;
-      if (vToolsOptionStore.TryGetDouble(section, HeightKey,      out var ph)  && ph  > 0.0) h   = ph;
-      if (vToolsOptionStore.TryGetDouble(section, CountWidthKey,  out var pcw) && pcw >= 1.0) cw  = pcw;
-      if (vToolsOptionStore.TryGetDouble(section, CountHeightKey, out var pch) && pch >= 1.0) ch  = pch;
-      if (vToolsOptionStore.TryGetBool(section, ShowBoundaryKey, out var psb)) sb  = psb;
-      if (vToolsOptionStore.TryGetBool(section, ShowSizeKey,     out var pss)) ss  = pss;
-      if (vToolsOptionStore.TryGetBool(section, ShowCountKey,    out var psc)) sc  = psc;
-      if (vToolsOptionStore.TryGetDouble(section, BySizeWKey,    out var pbsW) && pbsW > 0.0) bsW = pbsW;
-      if (vToolsOptionStore.TryGetDouble(section, BySizeHKey,    out var pbsH) && pbsH > 0.0) bsH = pbsH;
-      if (vToolsOptionStore.TryGetString(section, LayerPlotKey,  out var plp) && !string.IsNullOrWhiteSpace(plp)) lp = plp;
-      if (vToolsOptionStore.TryGetString(section, LayerCutKey,   out var plc) && !string.IsNullOrWhiteSpace(plc)) lc = plc;
-      if (vToolsOptionStore.TryGetString(section, LayerRefKey,   out var plr) && !string.IsNullOrWhiteSpace(plr)) lr = plr;
+      if (ToolsOptionStore.TryGetDouble(section, WidthKey,       out var pw)  && pw  > 0.0) w   = pw;
+      if (ToolsOptionStore.TryGetDouble(section, HeightKey,      out var ph)  && ph  > 0.0) h   = ph;
+      if (ToolsOptionStore.TryGetDouble(section, CountWidthKey,  out var pcw) && pcw >= 1.0) cw  = pcw;
+      if (ToolsOptionStore.TryGetDouble(section, CountHeightKey, out var pch) && pch >= 1.0) ch  = pch;
+      if (ToolsOptionStore.TryGetBool(section, ShowBoundaryKey, out var psb)) sb  = psb;
+      if (ToolsOptionStore.TryGetBool(section, ShowSizeKey,     out var pss)) ss  = pss;
+      if (ToolsOptionStore.TryGetBool(section, ShowCountKey,    out var psc)) sc  = psc;
+      if (ToolsOptionStore.TryGetDouble(section, BySizeWKey,    out var pbsW) && pbsW > 0.0) bsW = pbsW;
+      if (ToolsOptionStore.TryGetDouble(section, BySizeHKey,    out var pbsH) && pbsH > 0.0) bsH = pbsH;
+      if (ToolsOptionStore.TryGetString(section, LayerPlotKey,  out var plp) && !string.IsNullOrWhiteSpace(plp)) lp = plp;
+      if (ToolsOptionStore.TryGetString(section, LayerCutKey,   out var plc) && !string.IsNullOrWhiteSpace(plc)) lc = plc;
+      if (ToolsOptionStore.TryGetString(section, LayerRefKey,   out var plr) && !string.IsNullOrWhiteSpace(plr)) lr = plr;
 
       return (w, h, cw, ch, sb, ss, sc, bsW, bsH, lp, lc, lr);
     });
   }
 
   private static void SaveSettings() =>
-    vToolsOptionStore.Update(SettingsSection, section =>
+    ToolsOptionStore.Update(SettingsSection, section =>
     {
       section[WidthKey]        = _width;
       section[HeightKey]       = _height;

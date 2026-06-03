@@ -29,9 +29,9 @@ internal static class OrientCommon
   /// </summary>
   internal static bool LoadCopyOption(bool fallback = false)
   {
-    return vToolsOptionStore.Read(
+    return ToolsOptionStore.Read(
       OrientOptionsSectionName,
-      section => vToolsOptionStore.TryGetBool(section, CopyOptionKey, out var copyMode) ? copyMode : fallback);
+      section => ToolsOptionStore.TryGetBool(section, CopyOptionKey, out var copyMode) ? copyMode : fallback);
   }
 
   /// <summary>
@@ -39,7 +39,7 @@ internal static class OrientCommon
   /// </summary>
   internal static void SaveCopyOption(bool copyMode)
   {
-    _ = vToolsOptionStore.Update(OrientOptionsSectionName, section => section[CopyOptionKey] = copyMode);
+    _ = ToolsOptionStore.Update(OrientOptionsSectionName, section => section[CopyOptionKey] = copyMode);
   }
 
   /// <summary>

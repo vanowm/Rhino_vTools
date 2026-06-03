@@ -402,7 +402,7 @@ public sealed class vTextAligned : Command
 
   private static void LoadPersistedOptions()
   {
-    var values = vToolsOptionStore.Read(
+    var values = ToolsOptionStore.Read(
       OptionsSectionName,
       section =>
       {
@@ -411,17 +411,17 @@ public sealed class vTextAligned : Command
         var offset = _offset;
         var rotate90 = _rotate90;
 
-        if (vToolsOptionStore.TryGetString(section, TextKey, out var persistedText) && !string.IsNullOrWhiteSpace(persistedText))
+        if (ToolsOptionStore.TryGetString(section, TextKey, out var persistedText) && !string.IsNullOrWhiteSpace(persistedText))
           text = persistedText;
-        if (vToolsOptionStore.TryGetDouble(section, HeightKey, out var persistedHeight) && persistedHeight > RhinoMath.ZeroTolerance)
+        if (ToolsOptionStore.TryGetDouble(section, HeightKey, out var persistedHeight) && persistedHeight > RhinoMath.ZeroTolerance)
           height = persistedHeight;
-        if (vToolsOptionStore.TryGetDouble(section, OffsetKey, out var persistedOffset))
+        if (ToolsOptionStore.TryGetDouble(section, OffsetKey, out var persistedOffset))
           offset = persistedOffset;
-        if (vToolsOptionStore.TryGetDouble(section, Rotate90Key, out var persistedRotate))
+        if (ToolsOptionStore.TryGetDouble(section, Rotate90Key, out var persistedRotate))
           rotate90 = NormalizeRotate((int)Math.Round(persistedRotate, MidpointRounding.AwayFromZero));
 
         var bothSides = _bothSides;
-        if (vToolsOptionStore.TryGetBool(section, BothSidesKey, out var persistedBothSides))
+        if (ToolsOptionStore.TryGetBool(section, BothSidesKey, out var persistedBothSides))
           bothSides = persistedBothSides;
 
         return (text, height, offset, rotate90, bothSides);
@@ -436,7 +436,7 @@ public sealed class vTextAligned : Command
 
   private static void SavePersistedOptions()
   {
-    _ = vToolsOptionStore.Update(
+    _ = ToolsOptionStore.Update(
       OptionsSectionName,
       section =>
       {

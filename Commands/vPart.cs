@@ -59,15 +59,15 @@ public sealed class vPart : Command
   private static string Short(Guid id) => id.ToString()[..8];
 
   private static void LoadOptions() =>
-    vToolsOptionStore.Read<int>(SectionName, section =>
+    ToolsOptionStore.Read<int>(SectionName, section =>
     {
-      if (vToolsOptionStore.TryGetBool(section, GroupKey,     out var g)) _group    = g;
-      if (vToolsOptionStore.TryGetBool(section, JoinPerimKey, out var j)) _joinPerim = j;
+      if (ToolsOptionStore.TryGetBool(section, GroupKey,     out var g)) _group    = g;
+      if (ToolsOptionStore.TryGetBool(section, JoinPerimKey, out var j)) _joinPerim = j;
       return 0;
     });
 
   private static void SaveOptions() =>
-    vToolsOptionStore.Update(SectionName, section =>
+    ToolsOptionStore.Update(SectionName, section =>
     {
       section[GroupKey]     = _group;
       section[JoinPerimKey] = _joinPerim;
