@@ -178,8 +178,7 @@ public sealed class vCurveToSpline : Command
 
         if (getResult == GetResult.Object)
         {
-          segments = SegmentsFromObjects(Enumerable.Range(0, go.ObjectCount).Select(i => go.Object(i).Object()));
-          preview.UpdateOrderedSegments(segments);
+          segments = SegmentsFromDocumentSelection(doc);
           preview.SetJoinMode(joinMode);
           doc.Views.Redraw();
 
@@ -198,7 +197,7 @@ public sealed class vCurveToSpline : Command
 
         if (getResult == GetResult.Nothing)
         {
-          segments = SegmentsFromObjects(Enumerable.Range(0, go.ObjectCount).Select(i => go.Object(i).Object()));
+          segments = SegmentsFromDocumentSelection(doc);
           return segments.Count > 0 ? Result.Success : Result.Cancel;
         }
 
@@ -510,7 +509,6 @@ public sealed class vCurveToSpline : Command
     private readonly Color _color = Color.OrangeRed;
     private string _joinMode;
     private string _selectionSignature = string.Empty;
-    private List<Segment> _orderedSegments = new();
     private List<Curve> _previewCurves = new();
 
     public InterpPreviewConduit(RhinoDoc doc, string joinMode, double tolerance)
@@ -526,16 +524,7 @@ public sealed class vCurveToSpline : Command
     public void SetJoinMode(string joinMode)
     {
       _joinMode = joinMode;
-      _selectionSignature = string.Empty;  // force redraw with new mode
-    }
-
-    /// <summary>
-    /// Stores an ordered segment list to use for preview rebuilds.
-    /// </summary>
-    public void UpdateOrderedSegments(List<Segment> segments)
-    {
-      _orderedSegments = segments;
-      _selectionSignature = string.Empty;  // force redraw
+      _selectionSignature = string.Empty;
     }
 
     /// <summary>
@@ -554,20 +543,18 @@ public sealed class vCurveToSpline : Command
     /// </summary>
     private void RefreshCacheIfNeeded()
     {
-      var signature = BuildSignature(_orderedSegments, _joinMode);
+      var selectedObjects = SelectedGeometryObjects(_doc);
+      var signature = BuildSignature(selectedObjects, _joinMode);
       if (string.Equals(signature, _selectionSignature, StringComparison.Ordinal))
         return;
 
       _selectionSignature = signature;
-      _previewCurves = BuildInterpCurves(_orderedSegments, _joinMode, _tolerance);
+      _previewCurves = BuildInterpCurves(SegmentsFromDocumentSelection(_doc), _joinMode, _tolerance);
     }
 
-    /// <summary>
-    /// Builds a deterministic cache key from ordered segment identity and current join mode.
-    /// </summary>
-    private static string BuildSignature(IEnumerable<Segment> segments, string joinMode)
+    private static string BuildSignature(IEnumerable<RhinoObject> objects, string joinMode)
     {
-      var ids = string.Join("|", segments.Select(s => s.Start.ToString()));
+      var ids = string.Join("|", objects.Select(obj => obj.Id.ToString("N")));
       return joinMode + "::" + ids;
     }
   }
