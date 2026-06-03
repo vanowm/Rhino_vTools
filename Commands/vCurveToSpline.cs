@@ -446,7 +446,74 @@ public sealed class vCurveToSpline : Command
       currentEnd = bestNext.Value.EndPoint;
     }
 
-    return ordered;
+    return Improve2Opt(segments, ordered);
+  }
+
+  /// <summary>
+  /// Removes crossing edges from the chain via repeated 2-opt swaps.
+  /// Reverses sub-chains [i+1..j] whenever doing so shortens total connection distance.
+  /// </summary>
+  private static List<(int SegmentIndex, bool Reverse)> Improve2Opt(
+    IReadOnlyList<Segment> segments,
+    List<(int SegmentIndex, bool Reverse)> chain)
+  {
+    if (chain.Count < 3)
+      return chain;
+
+    Point3d Entry(int idx)
+    {
+      var (si, rev) = chain[idx];
+      return rev ? segments[si].End : segments[si].Start;
+    }
+
+    Point3d Exit(int idx)
+    {
+      var (si, rev) = chain[idx];
+      return rev ? segments[si].Start : segments[si].End;
+    }
+
+    var improved = true;
+    while (improved)
+    {
+      improved = false;
+      for (var i = 0; i < chain.Count - 2; i++)
+      {
+        for (var j = i + 2; j < chain.Count; j++)
+        {
+          // Current: exit[i]→entry[i+1] and exit[j]→entry[j+1]
+          // After reversal of [i+1..j]: exit[i]→exit[j] and entry[i+1]→entry[j+1]
+          var currentCost = Exit(i).DistanceTo(Entry(i + 1));
+          if (j + 1 < chain.Count)
+            currentCost += Exit(j).DistanceTo(Entry(j + 1));
+
+          var newCost = Exit(i).DistanceTo(Exit(j));
+          if (j + 1 < chain.Count)
+            newCost += Entry(i + 1).DistanceTo(Entry(j + 1));
+
+          if (newCost < currentCost - 1e-10)
+          {
+            // Reverse sub-chain [i+1..j] and flip each Reverse flag
+            var lo = i + 1;
+            var hi = j;
+            while (lo < hi)
+            {
+              var tmp = (chain[lo].SegmentIndex, !chain[lo].Reverse);
+              chain[lo] = (chain[hi].SegmentIndex, !chain[hi].Reverse);
+              chain[hi] = tmp;
+              lo++;
+              hi--;
+            }
+            // Middle element (if odd-length sub-chain) also needs its flag flipped
+            if (lo == hi)
+              chain[lo] = (chain[lo].SegmentIndex, !chain[lo].Reverse);
+
+            improved = true;
+          }
+        }
+      }
+    }
+
+    return chain;
   }
 
   /// <summary>
