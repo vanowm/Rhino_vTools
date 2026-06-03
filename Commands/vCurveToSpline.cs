@@ -385,34 +385,31 @@ public sealed class vCurveToSpline : Command
     if (count == 1)
       return new List<(int, bool)> { (0, false) };
 
-    (int SegmentIndex, bool Reverse) bestStart = (0, false);
-    var bestStartScore = double.NegativeInfinity;
-
-    for (var segIndex = 0; segIndex < count; segIndex++)
+    // Collect all segment endpoints; for single-point segments Start==End so one entry.
+    var allEndpoints = new List<(Point3d Pt, int SegIdx, bool Reverse)>(count * 2);
+    for (var i = 0; i < count; i++)
     {
-      foreach (var reverse in new[] { false, true })
+      allEndpoints.Add((segments[i].Start, i, false));
+      if (!PointsMatch(segments[i].Start, segments[i].End, tolerance))
+        allEndpoints.Add((segments[i].End, i, true));
+    }
+
+    // Double-sweep: two O(N) passes always yield a true diameter endpoint,
+    // regardless of point spacing or distribution.
+    (int SegmentIndex, bool Reverse) bestStart = (0, false);
+    var pivot = allEndpoints[0].Pt;
+    for (var pass = 0; pass < 2; pass++)
+    {
+      var best = allEndpoints[0];
+      var bestDist = 0.0;
+      foreach (var ep in allEndpoints)
       {
-        var startPoint = reverse ? segments[segIndex].End : segments[segIndex].Start;
-        var maxDist = 0.0;
-
-        for (var otherIndex = 0; otherIndex < count; otherIndex++)
-        {
-          if (otherIndex == segIndex)
-            continue;
-
-          var d = Math.Max(
-            startPoint.DistanceTo(segments[otherIndex].Start),
-            startPoint.DistanceTo(segments[otherIndex].End));
-          if (d > maxDist)
-            maxDist = d;
-        }
-
-        if (maxDist > bestStartScore)
-        {
-          bestStartScore = maxDist;
-          bestStart = (segIndex, reverse);
-        }
+        var d = ep.Pt.DistanceTo(pivot);
+        if (d > bestDist) { bestDist = d; best = ep; }
       }
+      pivot = best.Pt;
+      if (pass == 1)
+        bestStart = (best.SegIdx, best.Reverse);
     }
 
     var ordered = new List<(int, bool)> { bestStart };
