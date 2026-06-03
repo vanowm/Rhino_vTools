@@ -306,7 +306,7 @@ public sealed class vRectangle : Command
 
   private static void LoadPersistedOptions()
   {
-    var values = vToolsOptionStore.Read(
+    var values = ToolsOptionStore.Read(
       OptionsSectionName,
       section =>
       {
@@ -315,19 +315,19 @@ public sealed class vRectangle : Command
         Point3d? lastBl = null;
         Point3d? lastBr = null;
 
-        if (vToolsOptionStore.TryGetDouble(section, WidthKey, out var w) && w > 0.0)
+        if (ToolsOptionStore.TryGetDouble(section, WidthKey, out var w) && w > 0.0)
           width = w;
-        if (vToolsOptionStore.TryGetDouble(section, HeightKey, out var h) && h > 0.0)
+        if (ToolsOptionStore.TryGetDouble(section, HeightKey, out var h) && h > 0.0)
           height = h;
 
-        if (vToolsOptionStore.TryGetDouble(section, LastBlXKey, out var blX) &&
-            vToolsOptionStore.TryGetDouble(section, LastBlYKey, out var blY) &&
-            vToolsOptionStore.TryGetDouble(section, LastBlZKey, out var blZ))
+        if (ToolsOptionStore.TryGetDouble(section, LastBlXKey, out var blX) &&
+            ToolsOptionStore.TryGetDouble(section, LastBlYKey, out var blY) &&
+            ToolsOptionStore.TryGetDouble(section, LastBlZKey, out var blZ))
           lastBl = new Point3d(blX, blY, blZ);
 
-        if (vToolsOptionStore.TryGetDouble(section, LastBrXKey, out var brX) &&
-            vToolsOptionStore.TryGetDouble(section, LastBrYKey, out var brY) &&
-            vToolsOptionStore.TryGetDouble(section, LastBrZKey, out var brZ))
+        if (ToolsOptionStore.TryGetDouble(section, LastBrXKey, out var brX) &&
+            ToolsOptionStore.TryGetDouble(section, LastBrYKey, out var brY) &&
+            ToolsOptionStore.TryGetDouble(section, LastBrZKey, out var brZ))
           lastBr = new Point3d(brX, brY, brZ);
 
         return (width, height, lastBl, lastBr);
@@ -341,7 +341,7 @@ public sealed class vRectangle : Command
 
   private static void SavePersistedOptions()
   {
-    _ = vToolsOptionStore.Update(
+    _ = ToolsOptionStore.Update(
       OptionsSectionName,
       section =>
       {

@@ -293,7 +293,7 @@ public sealed class vLine : Command
 
   private static void LoadPersistedOptions()
   {
-    var values = vToolsOptionStore.Read(
+    var values = ToolsOptionStore.Read(
       OptionsSectionName,
       section =>
       {
@@ -305,19 +305,19 @@ public sealed class vLine : Command
         var angle = _angle;
         var angleRelative = _angleRelative;
 
-        if (vToolsOptionStore.TryGetDouble(section, ChainModeKey, out var persistedChain))
+        if (ToolsOptionStore.TryGetDouble(section, ChainModeKey, out var persistedChain))
           chainMode = ClampIndex((int)Math.Round(persistedChain, MidpointRounding.AwayFromZero), ChainModeValues.Length);
-        if (vToolsOptionStore.TryGetDouble(section, PriorityKey, out var persistedPriority))
+        if (ToolsOptionStore.TryGetDouble(section, PriorityKey, out var persistedPriority))
           priority = ClampIndex((int)Math.Round(persistedPriority, MidpointRounding.AwayFromZero), PriorityValues.Length);
-        if (vToolsOptionStore.TryGetBool(section, PersistConstraintKey, out var persistedPersist))
+        if (ToolsOptionStore.TryGetBool(section, PersistConstraintKey, out var persistedPersist))
           persistConstraint = persistedPersist;
-        if (vToolsOptionStore.TryGetDouble(section, LengthKey, out var persistedLength))
+        if (ToolsOptionStore.TryGetDouble(section, LengthKey, out var persistedLength))
           length = persistedLength;
-        if (vToolsOptionStore.TryGetBool(section, AngleLockKey, out var persistedAngleLock))
+        if (ToolsOptionStore.TryGetBool(section, AngleLockKey, out var persistedAngleLock))
           angleLock = persistedAngleLock;
-        if (vToolsOptionStore.TryGetDouble(section, AngleKey, out var persistedAngle))
+        if (ToolsOptionStore.TryGetDouble(section, AngleKey, out var persistedAngle))
           angle = persistedAngle;
-        if (vToolsOptionStore.TryGetBool(section, AngleRelativeKey, out var persistedAngleRelative))
+        if (ToolsOptionStore.TryGetBool(section, AngleRelativeKey, out var persistedAngleRelative))
           angleRelative = persistedAngleRelative;
 
         return (chainMode, priority, persistConstraint, length, angleLock, angle, angleRelative);
@@ -334,7 +334,7 @@ public sealed class vLine : Command
 
   private static void SavePersistedOptions()
   {
-    _ = vToolsOptionStore.Update(
+    _ = ToolsOptionStore.Update(
       OptionsSectionName,
       section =>
       {

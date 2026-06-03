@@ -45,19 +45,19 @@ public sealed class vChamfer : Command
   // â”€â”€ Option persistence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private static void LoadOptions() =>
-    vToolsOptionStore.Read<int>(SectionName, section =>
+    ToolsOptionStore.Read<int>(SectionName, section =>
     {
-      if (vToolsOptionStore.TryGetDouble(section, LengthKey, out var l) && l > 0)
+      if (ToolsOptionStore.TryGetDouble(section, LengthKey, out var l) && l > 0)
         _length = l;
-      if (vToolsOptionStore.TryGetBool(section, TrimKey, out var t))
+      if (ToolsOptionStore.TryGetBool(section, TrimKey, out var t))
         _trim = t;
-      if (vToolsOptionStore.TryGetBool(section, JoinKey, out var j))
+      if (ToolsOptionStore.TryGetBool(section, JoinKey, out var j))
         _join = j;
       return 0;
     });
 
   private static void SaveOptions() =>
-    vToolsOptionStore.Update(SectionName, section =>
+    ToolsOptionStore.Update(SectionName, section =>
     {
       section[LengthKey] = _length;
       section[TrimKey]   = _trim;

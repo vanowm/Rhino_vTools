@@ -54,25 +54,25 @@ public sealed class vNotches : Rhino.Commands.Command
 
   static void LoadOptions(RhinoDoc doc)
   {
-    vToolsOptionStore.Read<int>(Section, s =>
+    ToolsOptionStore.Read<int>(Section, s =>
     {
-      if (vToolsOptionStore.TryGetDouble(s, "notch_length",    out var v)) _notchLength   = v;
-      if (vToolsOptionStore.TryGetDouble(s, "notch_offset",    out v))     _notchOffset   = v;
-      if (vToolsOptionStore.TryGetDouble(s, "notch_width",     out v))     _notchWidth    = v;
-      if (vToolsOptionStore.TryGetString(s, "notch_type",      out var t)) _notchType     = t;
-      if (vToolsOptionStore.TryGetBool  (s, "percent",         out var b)) _percent       = b;
-      if (vToolsOptionStore.TryGetBool  (s, "group",           out b))     _group         = b;
-      if (vToolsOptionStore.TryGetBool  (s, "label",           out b))     _label         = b;
-      if (vToolsOptionStore.TryGetString(s, "label_value",     out t))     _labelValue    = t;
-      if (vToolsOptionStore.TryGetDouble(s, "label_size",      out v))     _labelSize     = v;
-      if (vToolsOptionStore.TryGetBool  (s, "label_size_auto", out b))     _labelSizeAuto = b;
-      if (vToolsOptionStore.TryGetDouble(s, "label_size_pct",  out var pctv))_labelSizePct  = (int)pctv;
-      if (vToolsOptionStore.TryGetString(s, "notch_layer",     out t))     _notchLayer    = t;
-      if (vToolsOptionStore.TryGetString(s, "label_layer",     out t))     _labelLayer    = t;
-      if (vToolsOptionStore.TryGetDouble(s, "label_offset",    out v))     _labelOffset   = v;
-      if (vToolsOptionStore.TryGetDouble(s, "label_offset_y",  out v))     _labelOffsetY  = v;
-      if (vToolsOptionStore.TryGetBool  (s, "label_auto_adv",  out b))     _labelAutoAdv  = b;
-      if (vToolsOptionStore.TryGetBool  (s, "label_side_flip", out b))     _labelSideFlip = b;
+      if (ToolsOptionStore.TryGetDouble(s, "notch_length",    out var v)) _notchLength   = v;
+      if (ToolsOptionStore.TryGetDouble(s, "notch_offset",    out v))     _notchOffset   = v;
+      if (ToolsOptionStore.TryGetDouble(s, "notch_width",     out v))     _notchWidth    = v;
+      if (ToolsOptionStore.TryGetString(s, "notch_type",      out var t)) _notchType     = t;
+      if (ToolsOptionStore.TryGetBool  (s, "percent",         out var b)) _percent       = b;
+      if (ToolsOptionStore.TryGetBool  (s, "group",           out b))     _group         = b;
+      if (ToolsOptionStore.TryGetBool  (s, "label",           out b))     _label         = b;
+      if (ToolsOptionStore.TryGetString(s, "label_value",     out t))     _labelValue    = t;
+      if (ToolsOptionStore.TryGetDouble(s, "label_size",      out v))     _labelSize     = v;
+      if (ToolsOptionStore.TryGetBool  (s, "label_size_auto", out b))     _labelSizeAuto = b;
+      if (ToolsOptionStore.TryGetDouble(s, "label_size_pct",  out var pctv))_labelSizePct  = (int)pctv;
+      if (ToolsOptionStore.TryGetString(s, "notch_layer",     out t))     _notchLayer    = t;
+      if (ToolsOptionStore.TryGetString(s, "label_layer",     out t))     _labelLayer    = t;
+      if (ToolsOptionStore.TryGetDouble(s, "label_offset",    out v))     _labelOffset   = v;
+      if (ToolsOptionStore.TryGetDouble(s, "label_offset_y",  out v))     _labelOffsetY  = v;
+      if (ToolsOptionStore.TryGetBool  (s, "label_auto_adv",  out b))     _labelAutoAdv  = b;
+      if (ToolsOptionStore.TryGetBool  (s, "label_side_flip", out b))     _labelSideFlip = b;
       if (s?["curve_sides"] is System.Text.Json.Nodes.JsonArray arr)
       {
         var sides = new List<bool>();
@@ -88,7 +88,7 @@ public sealed class vNotches : Rhino.Commands.Command
 
   static void SaveOptions(NotchSession s)
   {
-    vToolsOptionStore.Update(Section, sec =>
+    ToolsOptionStore.Update(Section, sec =>
     {
       sec["notch_length"]    = s.NotchLengthOpt.CurrentValue;
       sec["notch_offset"]    = s.NotchOffsetOpt.CurrentValue;

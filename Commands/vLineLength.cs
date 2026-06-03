@@ -122,7 +122,7 @@ public sealed class vLineLength : Command
 
   private static void LoadPersistedOptions()
   {
-    var values = vToolsOptionStore.Read(
+    var values = ToolsOptionStore.Read(
       OptionsSectionName,
       section =>
       {
@@ -130,13 +130,13 @@ public sealed class vLineLength : Command
         var extendWithLine = _extendWithLine;
         var mode = _mode;
 
-        if (vToolsOptionStore.TryGetDouble(section, DesiredLengthKey, out var persistedLength) && persistedLength > RhinoMath.ZeroTolerance)
+        if (ToolsOptionStore.TryGetDouble(section, DesiredLengthKey, out var persistedLength) && persistedLength > RhinoMath.ZeroTolerance)
           desiredLength = persistedLength;
 
-        if (vToolsOptionStore.TryGetBool(section, ExtendWithLineKey, out var persistedExtend))
+        if (ToolsOptionStore.TryGetBool(section, ExtendWithLineKey, out var persistedExtend))
           extendWithLine = persistedExtend;
 
-        if (vToolsOptionStore.TryGetDouble(section, ModeKey, out var persistedMode))
+        if (ToolsOptionStore.TryGetDouble(section, ModeKey, out var persistedMode))
         {
           var index = (int)Math.Round(persistedMode, MidpointRounding.AwayFromZero);
           mode = ClampMode(index);
@@ -152,7 +152,7 @@ public sealed class vLineLength : Command
 
   private static void SavePersistedOptions()
   {
-    _ = vToolsOptionStore.Update(
+    _ = ToolsOptionStore.Update(
       OptionsSectionName,
       section =>
       {

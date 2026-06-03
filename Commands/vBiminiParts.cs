@@ -130,16 +130,16 @@ public sealed class vBiminiParts : Command
 
   private static void LoadOptions()
   {
-    vToolsOptionStore.Read<int>(SectionName, section =>
+    ToolsOptionStore.Read<int>(SectionName, section =>
     {
-      if (vToolsOptionStore.TryGetDouble(section, PipeSizeKey, out var ps))
+      if (ToolsOptionStore.TryGetDouble(section, PipeSizeKey, out var ps))
         _pipeSizeIdx = (int)Math.Round(ps);
       return 0;
     });
   }
 
   private static void SaveOptions() =>
-    vToolsOptionStore.Update(SectionName, section => { section[PipeSizeKey] = (double)_pipeSizeIdx; });
+    ToolsOptionStore.Update(SectionName, section => { section[PipeSizeKey] = (double)_pipeSizeIdx; });
 
   // ── Config file helpers ──────────────────────────────────────────────────────
 

@@ -239,17 +239,17 @@ public sealed class vTrim : Command
 
   private static void LoadPersistedOptions()
   {
-    var loaded = vToolsOptionStore.Read(
+    var loaded = ToolsOptionStore.Read(
       OptionsSectionName,
       section =>
       {
         var extendAsLine = _extendAsLine;
         var joinAfterTrim = _joinAfterTrim;
 
-        if (vToolsOptionStore.TryGetBool(section, ExtendAsLineKey, out var persistedExtendAsLine))
+        if (ToolsOptionStore.TryGetBool(section, ExtendAsLineKey, out var persistedExtendAsLine))
           extendAsLine = persistedExtendAsLine;
 
-        if (vToolsOptionStore.TryGetBool(section, JoinAfterTrimKey, out var persistedJoinAfterTrim))
+        if (ToolsOptionStore.TryGetBool(section, JoinAfterTrimKey, out var persistedJoinAfterTrim))
           joinAfterTrim = persistedJoinAfterTrim;
 
         return (extendAsLine, joinAfterTrim);
@@ -261,7 +261,7 @@ public sealed class vTrim : Command
 
   private static void SavePersistedOptions()
   {
-    _ = vToolsOptionStore.Update(
+    _ = ToolsOptionStore.Update(
       OptionsSectionName,
       section =>
       {

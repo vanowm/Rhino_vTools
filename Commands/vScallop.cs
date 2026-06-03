@@ -179,7 +179,7 @@ public sealed class vScallop : Command
 
   private static void LoadPersistedOptions()
   {
-    var values = vToolsOptionStore.Read(
+    var values = ToolsOptionStore.Read(
       OptionsSectionName,
       section =>
       {
@@ -189,15 +189,15 @@ public sealed class vScallop : Command
         var auto = _auto;
         var sizePercent = _sizePercent;
 
-        if (vToolsOptionStore.TryGetDouble(section, SizeKey, out var persistedSize) && persistedSize > RhinoMath.ZeroTolerance)
+        if (ToolsOptionStore.TryGetDouble(section, SizeKey, out var persistedSize) && persistedSize > RhinoMath.ZeroTolerance)
           size = persistedSize;
-        if (vToolsOptionStore.TryGetBool(section, DeleteOriginalKey, out var persistedDelete))
+        if (ToolsOptionStore.TryGetBool(section, DeleteOriginalKey, out var persistedDelete))
           deleteOriginal = persistedDelete;
-        if (vToolsOptionStore.TryGetBool(section, FreeKey, out var persistedFree))
+        if (ToolsOptionStore.TryGetBool(section, FreeKey, out var persistedFree))
           free = persistedFree;
-        if (vToolsOptionStore.TryGetBool(section, AutoKey, out var persistedAuto))
+        if (ToolsOptionStore.TryGetBool(section, AutoKey, out var persistedAuto))
           auto = persistedAuto;
-        if (vToolsOptionStore.TryGetDouble(section, SizePercentKey, out var persistedSizePercent) && persistedSizePercent > 0)
+        if (ToolsOptionStore.TryGetDouble(section, SizePercentKey, out var persistedSizePercent) && persistedSizePercent > 0)
           sizePercent = persistedSizePercent;
 
         return (size, deleteOriginal, free, auto, sizePercent);
@@ -212,7 +212,7 @@ public sealed class vScallop : Command
 
   private static void SavePersistedOptions()
   {
-    _ = vToolsOptionStore.Update(
+    _ = ToolsOptionStore.Update(
       OptionsSectionName,
       section =>
       {

@@ -29,14 +29,14 @@ public sealed class vFacing : Command
   public override string EnglishName => "vFacing";
 
   private static void LoadOptions() =>
-    vToolsOptionStore.Read<int>(SectionName, section =>
+    ToolsOptionStore.Read<int>(SectionName, section =>
     {
-      if (vToolsOptionStore.TryGetDouble(section, SizeKey, out var v)) _size = v;
+      if (ToolsOptionStore.TryGetDouble(section, SizeKey, out var v)) _size = v;
       return 0;
     });
 
   private static void SaveOptions() =>
-    vToolsOptionStore.Update(SectionName, section => { section[SizeKey] = _size; });
+    ToolsOptionStore.Update(SectionName, section => { section[SizeKey] = _size; });
 
   // ── Entry point ──────────────────────────────────────────────────────────
 

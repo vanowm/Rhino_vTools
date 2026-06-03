@@ -14,6 +14,7 @@ namespace vTools.Commands;
 
 /// <summary>
 /// Native curve-to-spline conversion command ported from Curve2Spline.py.
+/// Supports curves and points; points are treated as single anchor endpoints.
 /// </summary>
 public sealed class vCurveToSpline : Command
 {
@@ -21,6 +22,24 @@ public sealed class vCurveToSpline : Command
   private const string JoinModeKey = "joinMode";
   private static readonly string[] JoinModes = { "None", "Connected", "All" };
   private static int _joinModeIndex = 2;
+
+  /// <summary>Unified representation of a selected curve or point object.</summary>
+  private readonly struct Segment
+  {
+    /// <summary>Control points: one for a point object, N for a curve.</summary>
+    public IReadOnlyList<Point3d> Points { get; }
+    public Segment(IReadOnlyList<Point3d> points) => Points = points;
+    public Point3d Start => Points[0];
+    public Point3d End   => Points[^1];
+    /// <summary>Returns the control-point list, optionally reversed.</summary>
+    public IReadOnlyList<Point3d> OrientedPoints(bool reverse)
+    {
+      if (!reverse) return Points;
+      var pts = Points.ToList();
+      pts.Reverse();
+      return pts;
+    }
+  }
 
   /// <summary>
   /// Rhino command name.
@@ -34,7 +53,7 @@ public sealed class vCurveToSpline : Command
   {
     LoadPersistedOptions();
 
-    var pickResult = TryGetSelectedCurvesAndJoinMode(doc, out var selectedCurves, out var joinMode);
+    var pickResult = TryGetSelectedSegmentsAndJoinMode(doc, out var selectedSegments, out var joinMode);
     _joinModeIndex = Array.IndexOf(JoinModes, joinMode);
     if (_joinModeIndex < 0)
       _joinModeIndex = 2;
@@ -46,7 +65,7 @@ public sealed class vCurveToSpline : Command
     var tolerance = doc.ModelAbsoluteTolerance;
     var newCurveIds = new List<Guid>();
 
-    foreach (var interpCurve in BuildInterpCurves(selectedCurves, joinMode, tolerance))
+    foreach (var interpCurve in BuildInterpCurves(selectedSegments, joinMode, tolerance))
     {
       var id = doc.Objects.AddCurve(interpCurve);
       if (id != Guid.Empty)
@@ -73,18 +92,18 @@ public sealed class vCurveToSpline : Command
   /// </summary>
   private static void LoadPersistedOptions()
   {
-    var loadedIndex = vToolsOptionStore.Read(
+    var loadedIndex = ToolsOptionStore.Read(
       OptionsSectionName,
       section =>
       {
-        if (vToolsOptionStore.TryGetString(section, JoinModeKey, out var joinMode))
+        if (ToolsOptionStore.TryGetString(section, JoinModeKey, out var joinMode))
         {
           var index = Array.FindIndex(JoinModes, mode => string.Equals(mode, joinMode, StringComparison.OrdinalIgnoreCase));
           if (index >= 0)
             return index;
         }
 
-        if (vToolsOptionStore.TryGetDouble(section, JoinModeKey, out var numericIndex))
+        if (ToolsOptionStore.TryGetDouble(section, JoinModeKey, out var numericIndex))
         {
           var index = (int)Math.Round(numericIndex, MidpointRounding.AwayFromZero);
           if (index >= 0 && index < JoinModes.Length)
@@ -103,21 +122,21 @@ public sealed class vCurveToSpline : Command
   private static void SavePersistedOptions()
   {
     var modeName = JoinModes[Math.Max(0, Math.Min(_joinModeIndex, JoinModes.Length - 1))];
-    _ = vToolsOptionStore.Update(OptionsSectionName, section => section[JoinModeKey] = modeName);
+    _ = ToolsOptionStore.Update(OptionsSectionName, section => section[JoinModeKey] = modeName);
   }
 
   /// <summary>
-  /// Gets selected curves plus join mode, with dynamic preview while editing options.
+  /// Gets selected curves and/or points plus join mode, with dynamic preview while editing options.
   /// </summary>
-  private static Result TryGetSelectedCurvesAndJoinMode(RhinoDoc doc, out List<Curve> curves, out string joinMode)
+  private static Result TryGetSelectedSegmentsAndJoinMode(RhinoDoc doc, out List<Segment> segments, out string joinMode)
   {
-    curves = new List<Curve>();
+    segments = new List<Segment>();
     joinMode = JoinModes[Math.Max(0, Math.Min(_joinModeIndex, JoinModes.Length - 1))];
 
     var tolerance = doc.ModelAbsoluteTolerance;
     var go = new GetObject();
-    go.SetCommandPrompt("Select curves to convert to InterpCrv");
-    go.GeometryFilter = ObjectType.Curve;
+    go.SetCommandPrompt("Select curves and/or points to convert to InterpCrv");
+    go.GeometryFilter = ObjectType.Curve | ObjectType.Point;
     go.AcceptNothing(true);
     go.EnablePreSelect(true, true);
     go.EnableClearObjectsOnEntry(false);
@@ -159,7 +178,7 @@ public sealed class vCurveToSpline : Command
 
         if (getResult == GetResult.Object)
         {
-          curves = CurvesFromDocumentSelection(doc);
+          segments = SegmentsFromDocumentSelection(doc);
           preview.SetJoinMode(joinMode);
           doc.Views.Redraw();
 
@@ -170,7 +189,7 @@ public sealed class vCurveToSpline : Command
             continue;
           }
 
-          if (curves.Count > 0)
+          if (segments.Count > 0)
             return Result.Success;
 
           continue;
@@ -178,8 +197,8 @@ public sealed class vCurveToSpline : Command
 
         if (getResult == GetResult.Nothing)
         {
-          curves = CurvesFromDocumentSelection(doc);
-          return curves.Count > 0 ? Result.Success : Result.Cancel;
+          segments = SegmentsFromDocumentSelection(doc);
+          return segments.Count > 0 ? Result.Success : Result.Cancel;
         }
 
         if (getResult == GetResult.Cancel)
@@ -196,11 +215,11 @@ public sealed class vCurveToSpline : Command
   }
 
   /// <summary>
-  /// Returns selected curve objects from the document selection set.
+  /// Returns selected curve and point objects from the document selection set.
   /// </summary>
-  private static List<RhinoObject> SelectedCurveObjects(RhinoDoc doc)
+  private static List<RhinoObject> SelectedGeometryObjects(RhinoDoc doc)
   {
-    var selectedCurveObjects = new List<RhinoObject>();
+    var result = new List<RhinoObject>();
     var seenIds = new HashSet<Guid>();
 
     foreach (var rhinoObject in doc.Objects.GetSelectedObjects(false, false))
@@ -209,40 +228,52 @@ public sealed class vCurveToSpline : Command
         continue;
       if (!seenIds.Add(rhinoObject.Id))
         continue;
-      if (rhinoObject.Geometry is not Curve)
-        continue;
-
-      selectedCurveObjects.Add(rhinoObject);
+      if (rhinoObject.Geometry is Curve || rhinoObject.Geometry is Rhino.Geometry.Point)
+        result.Add(rhinoObject);
     }
 
-    return selectedCurveObjects;
+    return result;
   }
 
   /// <summary>
-  /// Duplicates selected document curves for safe command-side processing.
+  /// Builds a Segment list from the current document selection (curves and points).
   /// </summary>
-  private static List<Curve> CurvesFromDocumentSelection(RhinoDoc doc)
+  private static List<Segment> SegmentsFromDocumentSelection(RhinoDoc doc)
   {
-    return SelectedCurveObjects(doc)
-      .Select(obj => (obj.Geometry as Curve)?.DuplicateCurve())
-      .Where(curve => curve != null)
-      .Cast<Curve>()
-      .ToList();
+    var segments = new List<Segment>();
+    foreach (var obj in SelectedGeometryObjects(doc))
+    {
+      if (obj.Geometry is Curve curve)
+      {
+        var nurbs = curve.ToNurbsCurve();
+        if (nurbs == null) continue;
+        var pts = new List<Point3d>(nurbs.Points.Count);
+        for (var i = 0; i < nurbs.Points.Count; i++)
+          pts.Add(nurbs.Points[i].Location);
+        if (pts.Count >= 1)
+          segments.Add(new Segment(pts));
+      }
+      else if (obj.Geometry is Rhino.Geometry.Point point)
+      {
+        segments.Add(new Segment(new[] { point.Location }));
+      }
+    }
+    return segments;
   }
 
   /// <summary>
   /// Builds interpolated curves according to selected join mode.
   /// </summary>
-  private static List<Curve> BuildInterpCurves(IReadOnlyList<Curve> curves, string joinMode, double tolerance)
+  private static List<Curve> BuildInterpCurves(IReadOnlyList<Segment> segments, string joinMode, double tolerance)
   {
     var interpCurves = new List<Curve>();
 
-    foreach (var group in CurveGroupsForMode(curves, joinMode, tolerance))
+    foreach (var group in SegmentGroupsForMode(segments, joinMode, tolerance))
     {
       if (group.Count == 0)
         continue;
 
-      var orderedChain = OrderCurvesAsChain(group, tolerance);
+      var orderedChain = OrderSegmentsAsChain(group, tolerance);
       var interpPoints = BuildInterpPoints(group, orderedChain, tolerance);
       var interpCurve = CreateInterpCurve(interpPoints);
       if (interpCurve != null)
@@ -253,46 +284,41 @@ public sealed class vCurveToSpline : Command
   }
 
   /// <summary>
-  /// Splits selected curves into per-output groups based on join mode.
+  /// Splits segments into per-output groups based on join mode.
   /// </summary>
-  private static List<List<Curve>> CurveGroupsForMode(IReadOnlyList<Curve> curves, string joinMode, double tolerance)
+  private static List<List<Segment>> SegmentGroupsForMode(IReadOnlyList<Segment> segments, string joinMode, double tolerance)
   {
-    if (curves.Count == 0)
-      return new List<List<Curve>>();
+    if (segments.Count == 0)
+      return new List<List<Segment>>();
 
     if (string.Equals(joinMode, "None", StringComparison.OrdinalIgnoreCase))
-      return curves.Select(c => new List<Curve> { c }).ToList();
+      return segments.Select(s => new List<Segment> { s }).ToList();
 
     if (string.Equals(joinMode, "Connected", StringComparison.OrdinalIgnoreCase))
-      return GroupTouchingCurves(curves, tolerance);
+      return GroupTouchingSegments(segments, tolerance);
 
-    return new List<List<Curve>> { curves.ToList() };
+    return new List<List<Segment>> { segments.ToList() };
   }
 
   /// <summary>
-  /// Returns true when either endpoint pair is within tolerance.
+  /// Returns true when either endpoint pair of two segments is within tolerance.
   /// </summary>
-  private static bool CurvesTouch(Curve curveA, Curve curveB, double tolerance)
+  private static bool SegmentsTouch(Segment a, Segment b, double tolerance)
   {
-    var a0 = curveA.PointAtStart;
-    var a1 = curveA.PointAtEnd;
-    var b0 = curveB.PointAtStart;
-    var b1 = curveB.PointAtEnd;
-
-    return PointsMatch(a0, b0, tolerance) ||
-           PointsMatch(a0, b1, tolerance) ||
-           PointsMatch(a1, b0, tolerance) ||
-           PointsMatch(a1, b1, tolerance);
+    return PointsMatch(a.Start, b.Start, tolerance) ||
+           PointsMatch(a.Start, b.End,   tolerance) ||
+           PointsMatch(a.End,   b.Start, tolerance) ||
+           PointsMatch(a.End,   b.End,   tolerance);
   }
 
   /// <summary>
-  /// Groups curves into connected components by endpoint touching.
+  /// Groups segments into connected components by endpoint touching.
   /// </summary>
-  private static List<List<Curve>> GroupTouchingCurves(IReadOnlyList<Curve> curves, double tolerance)
+  private static List<List<Segment>> GroupTouchingSegments(IReadOnlyList<Segment> segments, double tolerance)
   {
-    var count = curves.Count;
+    var count = segments.Count;
     if (count <= 1)
-      return new List<List<Curve>> { curves.ToList() };
+      return new List<List<Segment>> { segments.ToList() };
 
     var adjacency = new List<int>[count];
     for (var i = 0; i < count; i++)
@@ -302,7 +328,7 @@ public sealed class vCurveToSpline : Command
     {
       for (var j = i + 1; j < count; j++)
       {
-        if (!CurvesTouch(curves[i], curves[j], tolerance))
+        if (!SegmentsTouch(segments[i], segments[j], tolerance))
           continue;
 
         adjacency[i].Add(j);
@@ -311,7 +337,7 @@ public sealed class vCurveToSpline : Command
     }
 
     var visited = new bool[count];
-    var groups = new List<List<Curve>>();
+    var groups = new List<List<Segment>>();
 
     for (var start = 0; start < count; start++)
     {
@@ -322,11 +348,11 @@ public sealed class vCurveToSpline : Command
       stack.Push(start);
       visited[start] = true;
 
-      var group = new List<Curve>();
+      var group = new List<Segment>();
       while (stack.Count > 0)
       {
         var index = stack.Pop();
-        group.Add(curves[index]);
+        group.Add(segments[index]);
 
         foreach (var neighbor in adjacency[index])
         {
@@ -344,60 +370,58 @@ public sealed class vCurveToSpline : Command
   }
 
   /// <summary>
-  /// Orders one curve group into a nearest-neighbor chain with endpoint flips.
+  /// Orders one segment group into a nearest-neighbor chain with optional endpoint flips.
   /// </summary>
-  private static List<(int CurveIndex, bool Reverse)> OrderCurvesAsChain(IReadOnlyList<Curve> curves, double tolerance)
+  private static List<(int SegmentIndex, bool Reverse)> OrderSegmentsAsChain(IReadOnlyList<Segment> segments, double tolerance)
   {
-    var count = curves.Count;
+    var count = segments.Count;
     if (count == 1)
       return new List<(int, bool)> { (0, false) };
 
-    (int CurveIndex, bool Reverse) bestStart = (0, false);
+    (int SegmentIndex, bool Reverse) bestStart = (0, false);
     var bestStartScore = double.NegativeInfinity;
 
-    for (var curveIndex = 0; curveIndex < count; curveIndex++)
+    for (var segIndex = 0; segIndex < count; segIndex++)
     {
       foreach (var reverse in new[] { false, true })
       {
-        var (startPoint, _) = OrientedEndpoints(curves[curveIndex], reverse);
+        var startPoint = reverse ? segments[segIndex].End : segments[segIndex].Start;
         double? nearest = null;
 
         for (var otherIndex = 0; otherIndex < count; otherIndex++)
         {
-          if (otherIndex == curveIndex)
+          if (otherIndex == segIndex)
             continue;
 
-          var otherStart = curves[otherIndex].PointAtStart;
-          var otherEnd = curves[otherIndex].PointAtEnd;
-
-          nearest = MinDistance(nearest, startPoint.DistanceTo(otherStart));
-          nearest = MinDistance(nearest, startPoint.DistanceTo(otherEnd));
+          nearest = MinDistance(nearest, startPoint.DistanceTo(segments[otherIndex].Start));
+          nearest = MinDistance(nearest, startPoint.DistanceTo(segments[otherIndex].End));
         }
 
         var score = nearest ?? 0.0;
         if (score > bestStartScore)
         {
           bestStartScore = score;
-          bestStart = (curveIndex, reverse);
+          bestStart = (segIndex, reverse);
         }
       }
     }
 
     var ordered = new List<(int, bool)> { bestStart };
     var remaining = new HashSet<int>(Enumerable.Range(0, count));
-    remaining.Remove(bestStart.CurveIndex);
+    remaining.Remove(bestStart.SegmentIndex);
 
-    var (_, currentEnd) = OrientedEndpoints(curves[bestStart.CurveIndex], bestStart.Reverse);
+    var currentEnd = bestStart.Reverse ? segments[bestStart.SegmentIndex].Start : segments[bestStart.SegmentIndex].End;
     while (remaining.Count > 0)
     {
-      (int CurveIndex, bool Reverse, Point3d EndPoint)? bestNext = null;
+      (int SegmentIndex, bool Reverse, Point3d EndPoint)? bestNext = null;
       double? bestDistance = null;
 
       foreach (var candidateIndex in remaining)
       {
         foreach (var reverse in new[] { false, true })
         {
-          var (candidateStart, candidateEnd) = OrientedEndpoints(curves[candidateIndex], reverse);
+          var candidateStart = reverse ? segments[candidateIndex].End   : segments[candidateIndex].Start;
+          var candidateEnd   = reverse ? segments[candidateIndex].Start : segments[candidateIndex].End;
           var distance = currentEnd.DistanceTo(candidateStart);
 
           if (bestDistance == null || distance < bestDistance.Value)
@@ -411,8 +435,8 @@ public sealed class vCurveToSpline : Command
       if (!bestNext.HasValue)
         break;
 
-      ordered.Add((bestNext.Value.CurveIndex, bestNext.Value.Reverse));
-      remaining.Remove(bestNext.Value.CurveIndex);
+      ordered.Add((bestNext.Value.SegmentIndex, bestNext.Value.Reverse));
+      remaining.Remove(bestNext.Value.SegmentIndex);
       currentEnd = bestNext.Value.EndPoint;
     }
 
@@ -420,25 +444,25 @@ public sealed class vCurveToSpline : Command
   }
 
   /// <summary>
-  /// Builds ordered interpolation points from oriented source curve control points.
+  /// Builds ordered interpolation points from the oriented segment chain.
   /// </summary>
   private static List<Point3d> BuildInterpPoints(
-    IReadOnlyList<Curve> curves,
-    IReadOnlyList<(int CurveIndex, bool Reverse)> orderedChain,
+    IReadOnlyList<Segment> segments,
+    IReadOnlyList<(int SegmentIndex, bool Reverse)> orderedChain,
     double tolerance)
   {
     var interpPoints = new List<Point3d>();
 
-    foreach (var (curveIndex, reverseCurve) in orderedChain)
+    foreach (var (segIndex, reverse) in orderedChain)
     {
-      var curvePoints = ControlPointsForCurve(curves[curveIndex], reverseCurve);
-      if (curvePoints.Count == 0)
+      var segPoints = segments[segIndex].OrientedPoints(reverse);
+      if (segPoints.Count == 0)
         continue;
 
-      if (interpPoints.Count > 0 && PointsMatch(interpPoints[^1], curvePoints[0], tolerance))
-        interpPoints.AddRange(curvePoints.Skip(1));
+      if (interpPoints.Count > 0 && PointsMatch(interpPoints[^1], segPoints[0], tolerance))
+        interpPoints.AddRange(segPoints.Skip(1));
       else
-        interpPoints.AddRange(curvePoints);
+        interpPoints.AddRange(segPoints);
     }
 
     if (interpPoints.Count > 2 && PointsMatch(interpPoints[0], interpPoints[^1], tolerance))
@@ -462,48 +486,11 @@ public sealed class vCurveToSpline : Command
     return Curve.CreateInterpolatedCurve(interpPoints, degree, CurveKnotStyle.Chord);
   }
 
-  /// <summary>
-  /// Returns oriented start/end endpoints for one curve orientation.
-  /// </summary>
-  private static (Point3d Start, Point3d End) OrientedEndpoints(Curve curve, bool reverse)
-  {
-    return reverse ? (curve.PointAtEnd, curve.PointAtStart) : (curve.PointAtStart, curve.PointAtEnd);
-  }
-
-  /// <summary>
-  /// Returns control-point locations from a curve, optionally reversed.
-  /// </summary>
-  private static List<Point3d> ControlPointsForCurve(Curve curve, bool reverse)
-  {
-    var nurbs = curve.ToNurbsCurve();
-    if (nurbs == null)
-      return new List<Point3d>();
-
-    var points = new List<Point3d>(nurbs.Points.Count);
-    for (var i = 0; i < nurbs.Points.Count; i++)
-      points.Add(nurbs.Points[i].Location);
-
-    if (reverse)
-      points.Reverse();
-
-    return points;
-  }
-
-  /// <summary>
-  /// Numeric helper for point equality with model tolerance.
-  /// </summary>
   private static bool PointsMatch(Point3d a, Point3d b, double tolerance)
-  {
-    return a.DistanceTo(b) <= tolerance;
-  }
+    => a.DistanceTo(b) <= tolerance;
 
-  /// <summary>
-  /// Numeric helper for nullable minimum selection.
-  /// </summary>
   private static double? MinDistance(double? current, double candidate)
-  {
-    return !current.HasValue || candidate < current.Value ? candidate : current;
-  }
+    => !current.HasValue || candidate < current.Value ? candidate : current;
 
   /// <summary>
   /// Lightweight viewport conduit that previews interpolated output from current selection.
@@ -548,19 +535,14 @@ public sealed class vCurveToSpline : Command
     /// </summary>
     private void RefreshCacheIfNeeded()
     {
-      var selectedCurveObjects = SelectedCurveObjects(_doc);
-      var signature = BuildSignature(selectedCurveObjects, _joinMode);
+      var selectedObjects = SelectedGeometryObjects(_doc);
+      var signature = BuildSignature(selectedObjects, _joinMode);
       if (string.Equals(signature, _selectionSignature, StringComparison.Ordinal))
         return;
 
       _selectionSignature = signature;
-      var selectedCurves = selectedCurveObjects
-        .Select(obj => (obj.Geometry as Curve)?.DuplicateCurve())
-        .Where(curve => curve != null)
-        .Cast<Curve>()
-        .ToList();
-
-      _previewCurves = BuildInterpCurves(selectedCurves, _joinMode, _tolerance);
+      var segments = SegmentsFromDocumentSelection(_doc);
+      _previewCurves = BuildInterpCurves(segments, _joinMode, _tolerance);
     }
 
     /// <summary>
