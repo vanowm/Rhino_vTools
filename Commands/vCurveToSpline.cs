@@ -393,21 +393,23 @@ public sealed class vCurveToSpline : Command
       foreach (var reverse in new[] { false, true })
       {
         var startPoint = reverse ? segments[segIndex].End : segments[segIndex].Start;
-        double? nearest = null;
+        var maxDist = 0.0;
 
         for (var otherIndex = 0; otherIndex < count; otherIndex++)
         {
           if (otherIndex == segIndex)
             continue;
 
-          nearest = MinDistance(nearest, startPoint.DistanceTo(segments[otherIndex].Start));
-          nearest = MinDistance(nearest, startPoint.DistanceTo(segments[otherIndex].End));
+          var d = Math.Max(
+            startPoint.DistanceTo(segments[otherIndex].Start),
+            startPoint.DistanceTo(segments[otherIndex].End));
+          if (d > maxDist)
+            maxDist = d;
         }
 
-        var score = nearest ?? 0.0;
-        if (score > bestStartScore)
+        if (maxDist > bestStartScore)
         {
-          bestStartScore = score;
+          bestStartScore = maxDist;
           bestStart = (segIndex, reverse);
         }
       }
@@ -495,9 +497,6 @@ public sealed class vCurveToSpline : Command
 
   private static bool PointsMatch(Point3d a, Point3d b, double tolerance)
     => a.DistanceTo(b) <= tolerance;
-
-  private static double? MinDistance(double? current, double candidate)
-    => !current.HasValue || candidate < current.Value ? candidate : current;
 
   /// <summary>
   /// Lightweight viewport conduit that previews interpolated output from current selection.
