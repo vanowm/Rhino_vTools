@@ -377,7 +377,9 @@ public sealed class vCurveToSpline : Command
   }
 
   /// <summary>
-  /// Orders one segment group into a nearest-neighbor chain with optional endpoint flips.
+  /// Orders one segment group into a path by: (1) greedy nearest-neighbour closed tour,
+  /// (2) 2-opt improvement on the tour, (3) cut the longest edge to open the path.
+  /// Cutting the longest edge always lands at the natural gap, giving the correct start/end.
   /// </summary>
   private static List<(int SegmentIndex, bool Reverse)> OrderSegmentsAsChain(IReadOnlyList<Segment> segments, double tolerance)
   {
@@ -385,90 +387,76 @@ public sealed class vCurveToSpline : Command
     if (count == 1)
       return new List<(int, bool)> { (0, false) };
 
-    // Collect all segment endpoints; for single-point segments Start==End so one entry.
-    var allEndpoints = new List<(Point3d Pt, int SegIdx, bool Reverse)>(count * 2);
-    for (var i = 0; i < count; i++)
-    {
-      allEndpoints.Add((segments[i].Start, i, false));
-      if (!PointsMatch(segments[i].Start, segments[i].End, tolerance))
-        allEndpoints.Add((segments[i].End, i, true));
-    }
-
-    // Double-sweep: two O(N) passes always yield a true diameter endpoint,
-    // regardless of point spacing or distribution.
-    (int SegmentIndex, bool Reverse) bestStart = (0, false);
-    var pivot = allEndpoints[0].Pt;
-    for (var pass = 0; pass < 2; pass++)
-    {
-      var best = allEndpoints[0];
-      var bestDist = 0.0;
-      foreach (var ep in allEndpoints)
-      {
-        var d = ep.Pt.DistanceTo(pivot);
-        if (d > bestDist) { bestDist = d; best = ep; }
-      }
-      pivot = best.Pt;
-      if (pass == 1)
-        bestStart = (best.SegIdx, best.Reverse);
-    }
-
-    var ordered = new List<(int, bool)> { bestStart };
+    // Step 1: greedy nearest-neighbour closed tour (start from 0 — arbitrary for a tour).
+    var tour = new List<(int SegmentIndex, bool Reverse)>(count);
     var remaining = new HashSet<int>(Enumerable.Range(0, count));
-    remaining.Remove(bestStart.SegmentIndex);
+    tour.Add((0, false));
+    remaining.Remove(0);
 
-    var currentEnd = bestStart.Reverse ? segments[bestStart.SegmentIndex].Start : segments[bestStart.SegmentIndex].End;
     while (remaining.Count > 0)
     {
-      (int SegmentIndex, bool Reverse, Point3d EndPoint)? bestNext = null;
-      double? bestDistance = null;
+      var (si, rev) = tour[tour.Count - 1];
+      var currentExit = rev ? segments[si].Start : segments[si].End;
 
-      foreach (var candidateIndex in remaining)
+      (int Si, bool Rev, Point3d Exit)? best = null;
+      double? bestDist = null;
+
+      foreach (var ci in remaining)
       {
-        foreach (var reverse in new[] { false, true })
+        foreach (var flip in new[] { false, true })
         {
-          var candidateStart = reverse ? segments[candidateIndex].End   : segments[candidateIndex].Start;
-          var candidateEnd   = reverse ? segments[candidateIndex].Start : segments[candidateIndex].End;
-          var distance = currentEnd.DistanceTo(candidateStart);
-
-          if (bestDistance == null || distance < bestDistance.Value)
-          {
-            bestDistance = distance;
-            bestNext = (candidateIndex, reverse, candidateEnd);
-          }
+          var entry = flip ? segments[ci].End   : segments[ci].Start;
+          var exit  = flip ? segments[ci].Start : segments[ci].End;
+          var d = currentExit.DistanceTo(entry);
+          if (bestDist == null || d < bestDist.Value)
+          { bestDist = d; best = (ci, flip, exit); }
         }
       }
 
-      if (!bestNext.HasValue)
-        break;
-
-      ordered.Add((bestNext.Value.SegmentIndex, bestNext.Value.Reverse));
-      remaining.Remove(bestNext.Value.SegmentIndex);
-      currentEnd = bestNext.Value.EndPoint;
+      if (!best.HasValue) break;
+      tour.Add((best.Value.Si, best.Value.Rev));
+      remaining.Remove(best.Value.Si);
     }
 
-    return Improve2Opt(segments, ordered);
+    // Step 2: 2-opt improvement on the closed tour.
+    Improve2OptTour(segments, tour);
+
+    // Step 3: cut the longest edge in the tour — that gap is the intended open-path endpoint pair.
+    var longestIdx = 0;
+    var longestDist = 0.0;
+    for (var i = 0; i < count; i++)
+    {
+      var next = (i + 1) % count;
+      var exitPt  = tour[i].Reverse  ? segments[tour[i].SegmentIndex].Start  : segments[tour[i].SegmentIndex].End;
+      var entryPt = tour[next].Reverse ? segments[tour[next].SegmentIndex].End : segments[tour[next].SegmentIndex].Start;
+      var d = exitPt.DistanceTo(entryPt);
+      if (d > longestDist) { longestDist = d; longestIdx = i; }
+    }
+
+    var path = new List<(int, bool)>(count);
+    for (var i = 0; i < count; i++)
+      path.Add(tour[(longestIdx + 1 + i) % count]);
+
+    return path;
   }
 
   /// <summary>
-  /// Removes crossing edges from the chain via repeated 2-opt swaps.
-  /// Reverses sub-chains [i+1..j] whenever doing so shortens total connection distance.
+  /// 2-opt improvement on a closed tour. Reverses sub-tour [i+1..j] when it shortens total length.
   /// </summary>
-  private static List<(int SegmentIndex, bool Reverse)> Improve2Opt(
-    IReadOnlyList<Segment> segments,
-    List<(int SegmentIndex, bool Reverse)> chain)
+  private static void Improve2OptTour(IReadOnlyList<Segment> segments, List<(int SegmentIndex, bool Reverse)> tour)
   {
-    if (chain.Count < 3)
-      return chain;
+    var count = tour.Count;
+    if (count < 4) return;
 
     Point3d Entry(int idx)
     {
-      var (si, rev) = chain[idx];
+      var (si, rev) = tour[idx];
       return rev ? segments[si].End : segments[si].Start;
     }
 
     Point3d Exit(int idx)
     {
-      var (si, rev) = chain[idx];
+      var (si, rev) = tour[idx];
       return rev ? segments[si].Start : segments[si].End;
     }
 
@@ -476,44 +464,37 @@ public sealed class vCurveToSpline : Command
     while (improved)
     {
       improved = false;
-      for (var i = 0; i < chain.Count - 2; i++)
+      for (var i = 0; i < count - 1; i++)
       {
-        for (var j = i + 2; j < chain.Count; j++)
+        for (var j = i + 2; j < count; j++)
         {
-          // Current: exit[i]→entry[i+1] and exit[j]→entry[j+1]
-          // After reversal of [i+1..j]: exit[i]→exit[j] and entry[i+1]→entry[j+1]
-          var currentCost = Exit(i).DistanceTo(Entry(i + 1));
-          if (j + 1 < chain.Count)
-            currentCost += Exit(j).DistanceTo(Entry(j + 1));
+          if (i == 0 && j == count - 1) continue; // same edge, skip
 
-          var newCost = Exit(i).DistanceTo(Exit(j));
-          if (j + 1 < chain.Count)
-            newCost += Entry(i + 1).DistanceTo(Entry(j + 1));
+          var ni = (i + 1) % count;
+          var nj = (j + 1) % count;
 
-          if (newCost < currentCost - 1e-10)
+          var before = Exit(i).DistanceTo(Entry(ni)) + Exit(j).DistanceTo(Entry(nj));
+          var after  = Exit(i).DistanceTo(Exit(j))   + Entry(ni).DistanceTo(Entry(nj));
+
+          if (after < before - 1e-10)
           {
-            // Reverse sub-chain [i+1..j] and flip each Reverse flag
-            var lo = i + 1;
+            var lo = ni;
             var hi = j;
             while (lo < hi)
             {
-              var tmp = (chain[lo].SegmentIndex, !chain[lo].Reverse);
-              chain[lo] = (chain[hi].SegmentIndex, !chain[hi].Reverse);
-              chain[hi] = tmp;
-              lo++;
-              hi--;
+              var tmp = (tour[lo].SegmentIndex, !tour[lo].Reverse);
+              tour[lo] = (tour[hi].SegmentIndex, !tour[hi].Reverse);
+              tour[hi] = tmp;
+              lo++; hi--;
             }
-            // Middle element (if odd-length sub-chain) also needs its flag flipped
             if (lo == hi)
-              chain[lo] = (chain[lo].SegmentIndex, !chain[lo].Reverse);
+              tour[lo] = (tour[lo].SegmentIndex, !tour[lo].Reverse);
 
             improved = true;
           }
         }
       }
     }
-
-    return chain;
   }
 
   /// <summary>
