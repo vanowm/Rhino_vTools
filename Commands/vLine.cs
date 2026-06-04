@@ -1641,6 +1641,56 @@ public sealed class vLine : Command
   }
 
   /// <summary>
+  /// Finds the point on <paramref name="curve"/> whose CPlane-XY shadow is
+  /// nearest to (curU, curV) — i.e., the true "project along CPlane Z" snap.
+  /// Uses sampling + golden-section refinement so it works for any curve type.
+  /// </summary>
+  private static Point3d? ProjectCurveOnCPlane(Curve curve, double curU, double curV, Plane cplane)
+  {
+    var domain = curve.Domain;
+    var domainLen = domain.T1 - domain.T0;
+    if (domainLen <= 0) return null;
+
+    // Number of samples: more for polylines with many segments.
+    var segCount = curve is PolyCurve pc ? pc.SegmentCount
+                 : curve is PolylineCurve pl ? Math.Max(1, pl.PointCount - 1)
+                 : 50;
+    var samples = Math.Min(500, Math.Max(50, segCount * 10));
+    var dt = domainLen / samples;
+
+    double bestT = domain.T0, bestD2 = double.MaxValue;
+    for (var i = 0; i <= samples; i++)
+    {
+      var t = domain.T0 + i * dt;
+      cplane.ClosestParameter(curve.PointAt(t), out var pu, out var pv);
+      var d2 = (pu - curU) * (pu - curU) + (pv - curV) * (pv - curV);
+      if (d2 < bestD2) { bestD2 = d2; bestT = t; }
+    }
+
+    // Golden-section refinement within ±2 sample widths of the best hit.
+    var a = Math.Max(domain.T0, bestT - dt * 2);
+    var b = Math.Min(domain.T1, bestT + dt * 2);
+    const double phi = 0.61803398875;
+    var c = b - (b - a) * phi;
+    var d = a + (b - a) * phi;
+
+    double Score(double t2)
+    {
+      cplane.ClosestParameter(curve.PointAt(t2), out var pu, out var pv);
+      return (pu - curU) * (pu - curU) + (pv - curV) * (pv - curV);
+    }
+
+    var fc = Score(c); var fd = Score(d);
+    for (var i = 0; i < 30; i++)
+    {
+      if (fc < fd) { b = d; d = c; fd = fc; c = b - (b - a) * phi; fc = Score(c); }
+      else         { a = c; c = d; fc = fd; d = a + (b - a) * phi; fd = Score(d); }
+    }
+
+    return curve.PointAt(0.5 * (a + b));
+  }
+
+  /// <summary>
   /// Projects <paramref name="point"/> onto <paramref name="geometry"/> along the CPlane Z axis.
   /// Fires a ray through the point in the ±Z direction and returns the nearest hit.
   /// Falls back to 3D closest point when no intersection is found.
@@ -1663,18 +1713,17 @@ public sealed class vLine : Command
 
     if (geometry is Curve curve)
     {
-      // For curves, use closest 3D point to the CPlane-projected cursor.
-      // CurveCurve ray-intersection is not useful: when Rhino snaps the cursor
-      // to the curve the ray trivially finds the curve at the cursor's own position.
-      // closest-to-flat gives the nearest point on the curve from the CPlane level,
-      // which is always different from the cursor when snapped elsewhere.
-      if (curve.ClosestPoint(flatPoint, out var t))
+      // Project cursor along CPlane Z onto the curve.
+      // Strategy: find the curve parameter whose CPlane-XY shadow is nearest to
+      // the cursor's CPlane-XY position (flatU, flatV).  This is different from
+      // 3D-closest when the curve is at a different elevation than the cursor.
+      var result = ProjectCurveOnCPlane(curve, flatU, flatV, activeCplane);
+      if (result.HasValue)
       {
-        var result = curve.PointAt(t);
-        Log.Write("vLine.ProjectTo", $"  Curve closest-to-flat result=({result.X:F3},{result.Y:F3},{result.Z:F3})");
+        Log.Write("vLine.ProjectTo", $"  Curve CPlane-shadow result=({result.Value.X:F3},{result.Value.Y:F3},{result.Value.Z:F3})");
         return result;
       }
-      Log.Write("vLine.ProjectTo", "  Curve closest-to-flat: no result");
+      Log.Write("vLine.ProjectTo", "  Curve CPlane-shadow: no result");
     }
     else if (geometry is Brep brep)
     {
