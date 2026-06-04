@@ -250,7 +250,15 @@ public sealed class vFacing : Command
     // FALLBACK: all curves on the same layer.
     if (layerGroups.Count == 1)
     {
-      if (input.Count == 3)
+      if (input.Count == 2)
+      {
+        // 2 curves same layer: split into 2 individual groups, fall through to 2-group handler.
+        Log.Write("vFacing", "All curves on same layer (2 curves) — treating as base + combined side");
+        layerGroups = input
+          .Select(t => new List<(Curve Crv, int Layer)> { (t.Crv, t.Layer) })
+          .ToList();
+      }
+      else if (input.Count == 3)
       {
         // Exactly 3 — split into individual groups and let topology detection work.
         Log.Write("vFacing", "All curves on same layer (3 curves) — treating each as separate group");
@@ -328,6 +336,50 @@ public sealed class vFacing : Command
       {
         Log.Write("vFacing", "  chamfer merge: no adjacent group found, proceeding with 4 groups");
       }
+    }
+
+    // 2 groups: base + combined side that wraps from base.End to base.Start.
+    // Split the combined side at its arc-length midpoint to produce s1 and s2.
+    if (layerGroups.Count == 2)
+    {
+      var chains2 = layerGroups.Select(g => JoinChain(g.Select(p => p.Crv).ToArray(), tol)).ToArray();
+      var baseGrpIdx = chains2[0].GetLength() <= chains2[1].GetLength() ? 0 : 1;
+      var sideGrpIdx = 1 - baseGrpIdx;
+
+      var bChain2 = chains2[baseGrpIdx];
+      var sChain2 = chains2[sideGrpIdx].DuplicateCurve();
+
+      // Orient combined side: Start ≈ bChain2.End, End ≈ bChain2.Start
+      var sStartNearBEnd = sChain2.PointAtStart.DistanceTo(bChain2.PointAtEnd)
+                         < sChain2.PointAtEnd.DistanceTo(bChain2.PointAtEnd);
+      if (!sStartNearBEnd)
+        sChain2.Reverse();
+
+      if (!sChain2.LengthParameter(sChain2.GetLength() / 2.0, out var midT))
+      {
+        RhinoApp.WriteLine("vFacing: could not find midpoint of combined side.");
+        return false;
+      }
+
+      var halves = sChain2.Split(midT);
+      if (halves == null || halves.Length != 2)
+      {
+        RhinoApp.WriteLine("vFacing: could not split combined side at midpoint.");
+        return false;
+      }
+
+      var s2Raw = halves[0].DuplicateCurve(); // starts at bChain2.End
+      var s1Raw = halves[1].DuplicateCurve(); s1Raw.Reverse(); // starts at bChain2.Start
+
+      Curve b2 = bChain2, s1c = s1Raw, s2c = s2Raw;
+      OrientSides(ref b2, ref s1c, ref s2c, tol);
+
+      Log.Write("vFacing", $"2-curve topology: base=group[{baseGrpIdx}] len={bChain2.GetLength():F3} combined-side=group[{sideGrpIdx}]");
+
+      baseParts  = new List<(Curve, int)> { (b2,  layerGroups[baseGrpIdx][0].Layer) };
+      side1Parts = new List<(Curve, int)> { (s1c, layerGroups[sideGrpIdx][0].Layer) };
+      side2Parts = new List<(Curve, int)> { (s2c, layerGroups[sideGrpIdx][0].Layer) };
+      return true;
     }
 
     if (layerGroups.Count != 3)
@@ -474,6 +526,26 @@ public sealed class vFacing : Command
     out Curve? baseCurve, out Curve? side1, out Curve? side2)
   {
     baseCurve = null; side1 = null; side2 = null;
+
+    // Move the seam to the midpoint of the longest segment so that any corner
+    // sitting at the natural seam position is not silently skipped by FindCornerParams
+    // (which cannot emit a split parameter at the domain boundary).
+    if (closed is PolyCurve pcSeam)
+    {
+      var bestMid = pcSeam.Domain.Mid;
+      var bestLen = 0.0;
+      for (var si = 0; si < pcSeam.SegmentCount; si++)
+      {
+        var len = pcSeam.SegmentCurve(si)?.GetLength() ?? 0.0;
+        if (len > bestLen) { bestLen = len; bestMid = pcSeam.SegmentDomain(si).Mid; }
+      }
+      var reseamed = closed.DuplicateCurve();
+      if (reseamed.ChangeClosedCurveSeam(bestMid))
+      {
+        Log.Write("vFacing", $"TryAnalyzeClosedCurve: moved seam to t={bestMid:G6} (mid of longest segment, len={bestLen:F3})");
+        closed = reseamed;
+      }
+    }
 
     var corners = FindCornerParams(closed, 30.0);
     if (corners.Count < 2)
