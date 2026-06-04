@@ -593,7 +593,7 @@ public sealed class vLine : Command
       }
 
       if (modeName == "project_to")
-        return projectToGeometry != null ? ProjectClosestPoint(projectToGeometry, cursorPoint) : null;
+        return projectToGeometry != null ? ProjectClosestPoint(projectToGeometry, cursorPoint, cplane) : null;
 
       // Perp (explicit selection): use locked direction or locked curve, no cache needed.
       if (modeName == "perp")
@@ -1641,31 +1641,63 @@ public sealed class vLine : Command
   }
 
   /// <summary>
-  /// Returns the closest point on <paramref name="geometry"/> to <paramref name="point"/>.
-  /// Supports Curve, Brep (surfaces/solids), Surface, and Mesh.
+  /// Projects <paramref name="point"/> onto <paramref name="geometry"/> along the CPlane Z axis.
+  /// Fires a ray through the point in the ±Z direction and returns the nearest hit.
+  /// Falls back to 3D closest point when no intersection is found.
+  /// Supports Curve, Brep, Surface, and Mesh.
   /// </summary>
-  private static Point3d? ProjectClosestPoint(GeometryBase geometry, Point3d point)
+  private static Point3d? ProjectClosestPoint(GeometryBase geometry, Point3d point, Plane cplane)
   {
+    var tol = RhinoDoc.ActiveDoc?.ModelAbsoluteTolerance ?? 0.001;
+    var dir = cplane.ZAxis;
+    const double rayLen = 1e6;
+
     if (geometry is Curve curve)
     {
-      if (curve.ClosestPoint(point, out var t))
-        return curve.PointAt(t);
+      // Ray-curve intersection along CPlane Z
+      var ray = new LineCurve(new Line(point - dir * rayLen, point + dir * rayLen));
+      var events = Rhino.Geometry.Intersect.Intersection.CurveCurve(ray, curve, tol * 10, tol);
+      if (events != null && events.Count > 0)
+      {
+        Point3d? best = null; var bestD = double.MaxValue;
+        foreach (var ev in events)
+        { var d = ev.PointB.DistanceTo(point); if (d < bestD) { bestD = d; best = ev.PointB; } }
+        return best;
+      }
+      // Fallback: 3D closest
+      if (curve.ClosestPoint(point, out var t)) return curve.PointAt(t);
     }
     else if (geometry is Brep brep)
     {
-      if (brep.ClosestPoint(point, out var cp, out _, out _, out _, double.MaxValue, out _))
-        return cp;
+      var pts = Rhino.Geometry.Intersect.Intersection.ProjectPointsToBreps(
+        new[] { brep }, new[] { point }, dir, tol);
+      if (pts != null && pts.Length > 0)
+      {
+        Point3d? best = null; var bestD = double.MaxValue;
+        foreach (var p in pts) { var d = p.DistanceTo(point); if (d < bestD) { bestD = d; best = p; } }
+        return best;
+      }
     }
     else if (geometry is Surface srf)
     {
-      if (srf.ClosestPoint(point, out var u, out var v))
-        return srf.PointAt(u, v);
+      var brepSrf = srf.ToBrep();
+      if (brepSrf != null)
+      {
+        var pts = Rhino.Geometry.Intersect.Intersection.ProjectPointsToBreps(
+          new[] { brepSrf }, new[] { point }, dir, tol);
+        if (pts != null && pts.Length > 0) return pts[0];
+      }
+      // Fallback: 3D closest
+      if (srf.ClosestPoint(point, out var u, out var v)) return srf.PointAt(u, v);
     }
     else if (geometry is Mesh mesh)
     {
+      var pts = Rhino.Geometry.Intersect.Intersection.ProjectPointsToMeshes(
+        new[] { mesh }, new[] { point }, dir, tol);
+      if (pts != null && pts.Length > 0) return pts[0];
+      // Fallback: 3D closest
       var cp = mesh.ClosestPoint(point);
-      if (cp.IsValid)
-        return cp;
+      if (cp.IsValid) return cp;
     }
     return null;
   }
