@@ -1658,30 +1658,23 @@ public sealed class vLine : Command
     // exactly on the CPlane, not at whatever height the 3D cursor is at.
     if (!activeCplane.ClosestParameter(point, out var flatU, out var flatV)) { flatU = 0; flatV = 0; }
     var flatPoint = activeCplane.PointAt(flatU, flatV);
-    const double rayLen = 1e6;
 
     Log.Write("vLine.ProjectTo", $"cursor=({point.X:F3},{point.Y:F3},{point.Z:F3}) flat=({flatPoint.X:F3},{flatPoint.Y:F3},{flatPoint.Z:F3}) dir=({dir.X:F3},{dir.Y:F3},{dir.Z:F3}) geom={geometry.GetType().Name}");
 
     if (geometry is Curve curve)
     {
-      var ray = new LineCurve(new Line(flatPoint - dir * rayLen, flatPoint + dir * rayLen));
-      var events = Rhino.Geometry.Intersect.Intersection.CurveCurve(ray, curve, tol * 10, tol);
-      Log.Write("vLine.ProjectTo", $"  CurveCurve hits={events?.Count ?? 0}");
-      if (events != null && events.Count > 0)
-      {
-        Point3d? best = null; var bestD = double.MaxValue;
-        foreach (var ev in events)
-        { var d = ev.PointB.DistanceTo(flatPoint); if (d < bestD) { bestD = d; best = ev.PointB; } }
-        Log.Write("vLine.ProjectTo", $"  result=({best!.Value.X:F3},{best.Value.Y:F3},{best.Value.Z:F3})");
-        return best;
-      }
-      // Fallback: 3D closest
+      // For curves, use closest 3D point to the CPlane-projected cursor.
+      // CurveCurve ray-intersection is not useful: when Rhino snaps the cursor
+      // to the curve the ray trivially finds the curve at the cursor's own position.
+      // closest-to-flat gives the nearest point on the curve from the CPlane level,
+      // which is always different from the cursor when snapped elsewhere.
       if (curve.ClosestPoint(flatPoint, out var t))
       {
-        var fb = curve.PointAt(t);
-        Log.Write("vLine.ProjectTo", $"  fallback closest=({fb.X:F3},{fb.Y:F3},{fb.Z:F3})");
-        return fb;
+        var result = curve.PointAt(t);
+        Log.Write("vLine.ProjectTo", $"  Curve closest-to-flat result=({result.X:F3},{result.Y:F3},{result.Z:F3})");
+        return result;
       }
+      Log.Write("vLine.ProjectTo", "  Curve closest-to-flat: no result");
     }
     else if (geometry is Brep brep)
     {
