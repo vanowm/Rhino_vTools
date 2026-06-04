@@ -459,6 +459,7 @@ public sealed class vLine : Command
     var idxTanNear = getPoint.AddOption("TanNear");
     var idxAuto = getPoint.AddOption("Auto");
     var idxParallel = getPoint.AddOption("Parallel");
+    var idxProjectTo = getPoint.AddOption("ProjectTo");
     var idxPriority = getPoint.AddOptionList("Priority", PriorityValues, priorityIndex);
     getPoint.AddOptionToggle("PersistConstraint", ref persistConstraint);
     var idxLength = getPoint.AddOptionDouble("Length", ref lengthOption);
@@ -474,6 +475,7 @@ public sealed class vLine : Command
     Vector3d? parallelDir = null;
     Curve? perpLockedCurve = null;
     Vector3d? perpLockedDir = null;
+    GeometryBase? projectToGeometry = null;
 
     var cacheState = new CurveCacheState(CollectCurveCache(doc), DateTime.UtcNow.AddMilliseconds(500));
     string? lastAutoChoice = null;
@@ -497,6 +499,8 @@ public sealed class vLine : Command
         getPoint.SetCommandPrompt("End point of line (Auto mode: priority chooses Perp/Tangent)");
       else if (mode == "parallel")
         getPoint.SetCommandPrompt("End point of line (Parallel)");
+      else if (mode == "project_to")
+        getPoint.SetCommandPrompt("End point of line (ProjectTo: endpoint snaps to nearest point on target geometry)");
       else
         getPoint.SetCommandPrompt("End point of line");
     }
@@ -587,6 +591,9 @@ public sealed class vLine : Command
         }
         return constrainedPt;
       }
+
+      if (modeName == "project_to")
+        return projectToGeometry != null ? ProjectClosestPoint(projectToGeometry, cursorPoint) : null;
 
       // Perp (explicit selection): use locked direction or locked curve, no cache needed.
       if (modeName == "perp")
@@ -782,6 +789,8 @@ public sealed class vLine : Command
       }
 
       e.Display.DrawPoint(ep, Rhino.Display.PointStyle.RoundSimple, 2, previewColor);
+      if (mode == "project_to")
+        e.Display.DrawPoint(ep, Rhino.Display.PointStyle.X, 6, Color.Cyan);
     };
 
     getPoint.DynamicDraw += drawPreview;
@@ -971,6 +980,22 @@ public sealed class vLine : Command
             dirVec.Unitize();
             parallelDir = dirVec;
             mode = "parallel";
+            ApplyModePrompt();
+            continue;
+          }
+
+          if (option.Index == idxProjectTo)
+          {
+            var goPrj = new GetObject();
+            goPrj.SetCommandPrompt("Select curve, surface, or mesh to project endpoint onto");
+            goPrj.GeometryFilter = ObjectType.Curve | ObjectType.Brep | ObjectType.Mesh;
+            goPrj.SubObjectSelect = false;
+            var goRes = goPrj.Get();
+            if (goRes != GetResult.Object || goPrj.ObjectCount == 0) continue;
+            var prjGeom = goPrj.Object(0).Geometry()?.Duplicate();
+            if (prjGeom == null) continue;
+            projectToGeometry = prjGeom;
+            mode = "project_to";
             ApplyModePrompt();
             continue;
           }
@@ -1613,6 +1638,36 @@ public sealed class vLine : Command
     }
 
     return best.HasValue && bestDistSq <= snapTolSq ? best : null;
+  }
+
+  /// <summary>
+  /// Returns the closest point on <paramref name="geometry"/> to <paramref name="point"/>.
+  /// Supports Curve, Brep (surfaces/solids), Surface, and Mesh.
+  /// </summary>
+  private static Point3d? ProjectClosestPoint(GeometryBase geometry, Point3d point)
+  {
+    if (geometry is Curve curve)
+    {
+      if (curve.ClosestPoint(point, out var t))
+        return curve.PointAt(t);
+    }
+    else if (geometry is Brep brep)
+    {
+      if (brep.ClosestPoint(point, out var cp, out _, out _, out _, double.MaxValue, out _))
+        return cp;
+    }
+    else if (geometry is Surface srf)
+    {
+      if (srf.ClosestPoint(point, out var u, out var v))
+        return srf.PointAt(u, v);
+    }
+    else if (geometry is Mesh mesh)
+    {
+      var cp = mesh.ClosestPoint(point);
+      if (cp.IsValid)
+        return cp;
+    }
+    return null;
   }
 
   private static void DebugLog(string msg)
