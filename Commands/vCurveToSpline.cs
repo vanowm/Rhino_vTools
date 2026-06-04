@@ -52,6 +52,7 @@ public sealed class vCurveToSpline : Command
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadPersistedOptions();
+    Log.Write("vCurveToSpline", $"BEGIN joinMode={JoinModes[_joinModeIndex]}");
 
     var pickResult = TryGetSelectedSegmentsAndJoinMode(doc, out var selectedSegments, out var joinMode);
     _joinModeIndex = Array.IndexOf(JoinModes, joinMode);
@@ -60,8 +61,12 @@ public sealed class vCurveToSpline : Command
     SavePersistedOptions();
 
     if (pickResult != Result.Success)
+    {
+      Log.Write("vCurveToSpline", $"END result={pickResult}");
       return pickResult;
+    }
 
+    Log.Write("vCurveToSpline", $"selected segments={selectedSegments.Count} joinMode={joinMode}");
     var tolerance = doc.ModelAbsoluteTolerance;
     var newCurveIds = new List<Guid>();
 
@@ -75,6 +80,7 @@ public sealed class vCurveToSpline : Command
     if (newCurveIds.Count == 0)
     {
       RhinoApp.WriteLine("vCurveToSpline: Failed to create InterpCrv.");
+      Log.Write("vCurveToSpline", "END result=Failure (no curves created)");
       return Result.Failure;
     }
 
@@ -84,6 +90,7 @@ public sealed class vCurveToSpline : Command
       doc.Objects.Select(id);
 
     doc.Views.Redraw();
+    Log.Write("vCurveToSpline", $"END result=Success created={newCurveIds.Count}");
     return Result.Success;
   }
 
@@ -169,6 +176,7 @@ public sealed class vCurveToSpline : Command
           {
             _joinModeIndex = option.CurrentListOptionIndex;
             joinMode = JoinModes[Math.Max(0, Math.Min(_joinModeIndex, JoinModes.Length - 1))];
+            Log.Write("vCurveToSpline", $"Join -> {joinMode}");
             preview.SetJoinMode(joinMode);
             doc.Views.Redraw();
             SavePersistedOptions();
@@ -179,6 +187,7 @@ public sealed class vCurveToSpline : Command
         if (getResult == GetResult.Object)
         {
           segments = SegmentsFromDocumentSelection(doc);
+          Log.Write("vCurveToSpline", $"Object: segments={segments.Count} preselected={go.ObjectsWerePreselected}");
           preview.SetJoinMode(joinMode);
           doc.Views.Redraw();
 
@@ -198,6 +207,7 @@ public sealed class vCurveToSpline : Command
         if (getResult == GetResult.Nothing)
         {
           segments = SegmentsFromDocumentSelection(doc);
+          Log.Write("vCurveToSpline", $"Nothing: segments={segments.Count}");
           return segments.Count > 0 ? Result.Success : Result.Cancel;
         }
 

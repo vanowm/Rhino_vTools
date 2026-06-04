@@ -49,8 +49,23 @@ public class vToolsPlugIn : PlugIn
     Log.Initialize();
     Log.Write("OnLoad", $"OK. Version={version}. Assembly={GetType().Assembly.Location}");
     Commands.vBiminiParts.InitLog();
+
+    // Always-on command diagnostics: log every command run and option change.
+    Rhino.Commands.Command.BeginCommand  += OnBeginCommand;
+    Rhino.Commands.Command.EndCommand    += OnEndCommand;
+
     RhinoApp.WriteLine($"vTools v{version} loaded. Commands registered ({commandNames.Count}): {string.Join(", ", commandNames)}");
     return LoadReturnCode.Success;
+  }
+
+  private static void OnBeginCommand(object? sender, Rhino.Commands.CommandEventArgs e)
+  {
+    Log.Write(e.CommandEnglishName, "BEGIN");
+  }
+
+  private static void OnEndCommand(object? sender, Rhino.Commands.CommandEventArgs e)
+  {
+    Log.Write(e.CommandEnglishName, $"END    result={e.CommandResult}");
   }
 
   /// <summary>
