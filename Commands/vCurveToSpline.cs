@@ -28,9 +28,19 @@ public sealed class vCurveToSpline : Command
   {
     /// <summary>Control points: one for a point object, N for a curve.</summary>
     public IReadOnlyList<Point3d> Points { get; }
-    public Segment(IReadOnlyList<Point3d> points) => Points = points;
-    public Point3d Start => Points[0];
-    public Point3d End   => Points[^1];
+    private readonly Point3d _start;
+    private readonly Point3d _end;
+
+    public Segment(IReadOnlyList<Point3d> points, Point3d start, Point3d end)
+    {
+      Points = points;
+      _start = start;
+      _end = end;
+    }
+
+    public Point3d Start => _start;
+    public Point3d End   => _end;
+
     /// <summary>Returns the control-point list, optionally reversed.</summary>
     public IReadOnlyList<Point3d> OrientedPoints(bool reverse)
     {
@@ -262,11 +272,11 @@ public sealed class vCurveToSpline : Command
         for (var i = 0; i < nurbs.Points.Count; i++)
           pts.Add(nurbs.Points[i].Location);
         if (pts.Count >= 1)
-          segments.Add(new Segment(pts));
+          segments.Add(new Segment(pts, curve.PointAtStart, curve.PointAtEnd));
       }
       else if (obj.Geometry is Rhino.Geometry.Point point)
       {
-        segments.Add(new Segment(new[] { point.Location }));
+        segments.Add(new Segment(new[] { point.Location }, point.Location, point.Location));
       }
     }
     return segments;
