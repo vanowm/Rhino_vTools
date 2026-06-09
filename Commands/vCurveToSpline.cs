@@ -397,9 +397,9 @@ public sealed class vCurveToSpline : Command
   }
 
   /// <summary>
-  /// Orders one segment group into a path by: (1) greedy nearest-neighbour closed tour,
-  /// (2) 2-opt improvement on the tour, (3) cut the longest edge to open the path.
-  /// Cutting the longest edge always lands at the natural gap, giving the correct start/end.
+  /// Orders one segment group into a path by using actual endpoint connectivity.
+  /// For open chains, it follows the endpoint graph so start/end are detected from geometry,
+  /// not from original curve direction. Closed loops fall back to the original tour logic.
   /// </summary>
   private static List<(int SegmentIndex, bool Reverse)> OrderSegmentsAsChain(IReadOnlyList<Segment> segments, double tolerance)
   {
@@ -407,7 +407,10 @@ public sealed class vCurveToSpline : Command
     if (count == 1)
       return new List<(int, bool)> { (0, false) };
 
-    // Step 1: greedy nearest-neighbour closed tour (start from 0 — arbitrary for a tour).
+    if (TryBuildOpenPath(segments, tolerance, out var openPath))
+      return openPath;
+
+    // Fallback: greedy nearest-neighbour closed tour (start from 0 — arbitrary for a tour).
     var tour = new List<(int SegmentIndex, bool Reverse)>(count);
     var remaining = new HashSet<int>(Enumerable.Range(0, count));
     tour.Add((0, false));
@@ -458,6 +461,93 @@ public sealed class vCurveToSpline : Command
       path.Add(tour[(longestIdx + 1 + i) % count]);
 
     return path;
+  }
+
+  private static bool TryBuildOpenPath(IReadOnlyList<Segment> segments, double tolerance, out List<(int SegmentIndex, bool Reverse)> path)
+  {
+    var count = segments.Count;
+    var nodes = new List<Point3d>();
+    var startNode = new int[count];
+    var endNode = new int[count];
+
+    for (var i = 0; i < count; i++)
+    {
+      startNode[i] = GetOrAddEquivalentNode(nodes, segments[i].Start, tolerance);
+      endNode[i] = GetOrAddEquivalentNode(nodes, segments[i].End, tolerance);
+    }
+
+    var adjacency = new List<List<int>>(nodes.Count);
+    for (var i = 0; i < nodes.Count; i++)
+      adjacency.Add(new List<int>());
+
+    for (var i = 0; i < count; i++)
+    {
+      adjacency[startNode[i]].Add(i);
+      if (endNode[i] != startNode[i])
+        adjacency[endNode[i]].Add(i);
+    }
+
+    var endpoints = new List<int>();
+    for (var i = 0; i < adjacency.Count; i++)
+    {
+      if (adjacency[i].Count == 1)
+        endpoints.Add(i);
+      else if (adjacency[i].Count > 2)
+      {
+        path = default!;
+        return false; // not a simple path
+      }
+    }
+
+    if (endpoints.Count != 2)
+    {
+      path = default!;
+      return false;
+    }
+
+    path = new List<(int SegmentIndex, bool Reverse)>(count);
+    var visited = new bool[count];
+    var currentNode = endpoints[0];
+
+    while (true)
+    {
+      var nextSegment = -1;
+      foreach (var si in adjacency[currentNode])
+      {
+        if (!visited[si])
+        {
+          nextSegment = si;
+          break;
+        }
+      }
+
+      if (nextSegment == -1)
+        break;
+
+      var reverse = startNode[nextSegment] != currentNode;
+      path.Add((nextSegment, reverse));
+      visited[nextSegment] = true;
+      currentNode = reverse ? startNode[nextSegment] : endNode[nextSegment];
+    }
+
+    if (path.Count != count)
+    {
+      path = default!;
+      return false;
+    }
+
+    return true;
+  }
+
+  private static int GetOrAddEquivalentNode(List<Point3d> nodes, Point3d point, double tolerance)
+  {
+    for (var i = 0; i < nodes.Count; i++)
+    {
+      if (PointsMatch(nodes[i], point, tolerance))
+        return i;
+    }
+    nodes.Add(point);
+    return nodes.Count - 1;
   }
 
   /// <summary>
