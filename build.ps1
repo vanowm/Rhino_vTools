@@ -1,8 +1,8 @@
 Set-Location d:\github\rhino\vTools
 
-# Bump CalVer in csproj and AssemblyInfo: YY.M.D.Hmm (per memory rules)
+# Bump CalVer in csproj and AssemblyInfo: YY.M.D.HHmm
 $cur = (Select-String -Path vTools.csproj -Pattern '<Version>([^<]+)').Matches[0].Groups[1].Value
-$v   = Get-Date -Format 'yy.M.d.Hmm'
+$v   = Get-Date -Format 'yy.M.d.HHmm'
 (Get-Content vTools.csproj)             -replace [regex]::Escape($cur), $v | Set-Content vTools.csproj
 (Get-Content Properties\AssemblyInfo.cs) -replace [regex]::Escape($cur), $v | Set-Content Properties\AssemblyInfo.cs
 
@@ -31,11 +31,11 @@ if (-not (Test-Path $pendingFile)) {
         }
     }
 
-    $cmdAdds = New-Object System.Collections.Generic.List[string]
-    $cmdMods = New-Object System.Collections.Generic.List[string]
+    $cmdAdds   = New-Object System.Collections.Generic.List[string]
+    $cmdMods   = New-Object System.Collections.Generic.List[string]
     $hasReadme = $false
     $hasBuildCfg = $false
-    $hasDll = $false
+    $hasDll    = $false
 
     foreach ($c in $changes) {
         $p = ($c.Path -replace '\\','/')
@@ -66,7 +66,7 @@ if (-not (Test-Path $pendingFile)) {
 
     $summary = ($parts -join '; ')
     Set-Content -Path $pendingFile -Value $summary -NoNewline -Encoding utf8
-    Write-Host "Created pending message file: $pendingFile" -ForegroundColor Green
+    Write-Host "Created pending message file: $pendingFile -> $summary" -ForegroundColor Green
 }
 
 # Build
