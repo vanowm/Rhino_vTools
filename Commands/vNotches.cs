@@ -1518,7 +1518,7 @@ public sealed class vNotches : Rhino.Commands.Command
       _typeDropDown.DataStore = s.NotchTypeValues;
       _typeDropDown.SelectedIndex = s.NotchTypeIndex;
       _typeDropDown.SelectedIndexChanged += (_, __) =>
-      { if (_suppress) return; s.NotchTypeIndex = _typeDropDown.SelectedIndex; Redraw(); };
+      { if (_suppress) return; s.NotchTypeIndex = _typeDropDown.SelectedIndex; Redraw(); Persist(); };
 
       // Numeric fields
       _lengthBox = MakeTextBox($"{s.NotchLengthOpt.CurrentValue:G}");
@@ -1526,11 +1526,11 @@ public sealed class vNotches : Rhino.Commands.Command
       _widthBox  = MakeTextBox($"{s.NotchWidthOpt.CurrentValue:G}");
 
       AttachNumericLostFocus(_lengthBox, () =>
-      { double v = ParseDouble(_lengthBox.Text, s.NotchLengthOpt.CurrentValue); s.NotchLengthOpt.CurrentValue = v; Redraw(); });
+      { double v = ParseDouble(_lengthBox.Text, s.NotchLengthOpt.CurrentValue); s.NotchLengthOpt.CurrentValue = v; Redraw(); Persist(); });
       AttachNumericLostFocus(_offsetBox, () =>
-      { double v = ParseDouble(_offsetBox.Text, s.NotchOffsetOpt.CurrentValue); s.NotchOffsetOpt.CurrentValue = v; Redraw(); });
+      { double v = ParseDouble(_offsetBox.Text, s.NotchOffsetOpt.CurrentValue); s.NotchOffsetOpt.CurrentValue = v; Redraw(); Persist(); });
       AttachNumericLostFocus(_widthBox, () =>
-      { double v = ParseDouble(_widthBox.Text, s.NotchWidthOpt.CurrentValue); s.NotchWidthOpt.CurrentValue = v; Redraw(); });
+      { double v = ParseDouble(_widthBox.Text, s.NotchWidthOpt.CurrentValue); s.NotchWidthOpt.CurrentValue = v; Redraw(); Persist(); });
 
       // Notch layer dropdown
       _notchLayerDrop = new DropDown();
@@ -1540,6 +1540,7 @@ public sealed class vNotches : Rhino.Commands.Command
         if (_suppress) return;
         s.NotchLayerName = GetDropDownLayerName(_notchLayerDrop, s.NotchLayerName);
         Redraw();
+        Persist();
       };
       _notchLayerDrop.DropDownOpening += (_, __) =>
       {
@@ -1551,10 +1552,10 @@ public sealed class vNotches : Rhino.Commands.Command
       // Percent / Group
       _percentCheck = new CheckBox { Text = "Percent", Checked = s.PercentToggle.CurrentValue };
       _percentCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.PercentToggle.CurrentValue = _percentCheck.Checked == true; };
+      { if (_suppress) return; s.PercentToggle.CurrentValue = _percentCheck.Checked == true; Persist(); };
       _groupCheck   = new CheckBox { Text = "Group",   Checked = s.GroupToggle.CurrentValue };
       _groupCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.GroupToggle.CurrentValue = _groupCheck.Checked == true; };
+      { if (_suppress) return; s.GroupToggle.CurrentValue = _groupCheck.Checked == true; Persist(); };
 
       // Label
       _labelCheck    = new CheckBox { Text = "", Checked = s.LabelToggle.CurrentValue, ToolTip = "Show label" };
@@ -1562,13 +1563,13 @@ public sealed class vNotches : Rhino.Commands.Command
       _autoAdvCheck  = new CheckBox { ToolTip = "Auto-advance label", Checked = s.LabelAutoAdv };
       _sideFlipCheck = new CheckBox { Text = "Flip side", Checked = s.LabelSideFlip };
       _labelCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.LabelToggle.CurrentValue = _labelCheck.Checked == true; ApplyDynamic(); };
+      { if (_suppress) return; s.LabelToggle.CurrentValue = _labelCheck.Checked == true; ApplyDynamic(); Persist(); };
       _labelValueBox.LostFocus += (_, __) =>
-      { s.LabelValueText = _labelValueBox.Text; };
+      { if (_suppress) return; s.LabelValueText = _labelValueBox.Text; Persist(); };
       _autoAdvCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.LabelAutoAdv = _autoAdvCheck.Checked == true; };
+      { if (_suppress) return; s.LabelAutoAdv = _autoAdvCheck.Checked == true; Persist(); };
       _sideFlipCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.LabelSideFlip = _sideFlipCheck.Checked == true; Redraw(); };
+      { if (_suppress) return; s.LabelSideFlip = _sideFlipCheck.Checked == true; Redraw(); Persist(); };
 
       _labelLayerDrop = new DropDown();
       PopulateLayerDropDown(_labelLayerDrop, doc, s.LabelLayerName, false);
@@ -1577,6 +1578,7 @@ public sealed class vNotches : Rhino.Commands.Command
         if (_suppress) return;
         s.LabelLayerName = GetDropDownLayerName(_labelLayerDrop, s.LabelLayerName);
         Redraw();
+        Persist();
       };
       _labelLayerDrop.DropDownOpening += (_, __) =>
       {
@@ -1588,24 +1590,24 @@ public sealed class vNotches : Rhino.Commands.Command
       _labelSizeBox = MakeTextBox($"{s.ManualLabelSize:G}");
       _labelSizeBox.Width = 50;
       AttachNumericLostFocus(_labelSizeBox, () =>
-      { s.ManualLabelSize = Math.Max(0, ParseDouble(_labelSizeBox.Text, s.ManualLabelSize)); Redraw(); });
+      { s.ManualLabelSize = Math.Max(0, ParseDouble(_labelSizeBox.Text, s.ManualLabelSize)); Redraw(); Persist(); });
 
       _labelSizeAutoCheck = new CheckBox { Text = "Auto", Checked = s.LabelSizeAutoToggle.CurrentValue };
       _labelSizeAutoCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.LabelSizeAutoToggle.CurrentValue = _labelSizeAutoCheck.Checked == true; ApplyDynamic(); Redraw(); };
+      { if (_suppress) return; s.LabelSizeAutoToggle.CurrentValue = _labelSizeAutoCheck.Checked == true; ApplyDynamic(); Redraw(); Persist(); };
 
       _labelSizePctDrop = new DropDown();
       _labelSizePctDrop.DataStore = s.LabelSizePctTexts;
       _labelSizePctDrop.SelectedIndex = Math.Max(0, s.LabelSizePctIndex);
       _labelSizePctDrop.SelectedIndexChanged += (_, __) =>
-      { if (_suppress) return; s.LabelSizePctIndex = _labelSizePctDrop.SelectedIndex; Redraw(); };
+      { if (_suppress) return; s.LabelSizePctIndex = _labelSizePctDrop.SelectedIndex; Redraw(); Persist(); };
 
       _labelOffsetBox  = MakeTextBox($"{s.LabelOffsetOpt.CurrentValue:G}");
       _labelOffsetYBox = MakeTextBox($"{s.LabelOffsetYOpt.CurrentValue:G}");
       AttachNumericLostFocus(_labelOffsetBox, () =>
-      { s.LabelOffsetOpt.CurrentValue = ParseDouble(_labelOffsetBox.Text, s.LabelOffsetOpt.CurrentValue); Redraw(); });
+      { s.LabelOffsetOpt.CurrentValue = ParseDouble(_labelOffsetBox.Text, s.LabelOffsetOpt.CurrentValue); Redraw(); Persist(); });
       AttachNumericLostFocus(_labelOffsetYBox, () =>
-      { s.LabelOffsetYOpt.CurrentValue = ParseDouble(_labelOffsetYBox.Text, s.LabelOffsetYOpt.CurrentValue); Redraw(); });
+      { s.LabelOffsetYOpt.CurrentValue = ParseDouble(_labelOffsetYBox.Text, s.LabelOffsetYOpt.CurrentValue); Redraw(); Persist(); });
 
       // Distance labels
       _fromStartLbl = new Label { Text = "-" };
@@ -1636,6 +1638,7 @@ public sealed class vNotches : Rhino.Commands.Command
           RebuildCurveNotches(doc, s, ci);
           SelectBothCurves(doc, s);
           Redraw();
+          Persist();
         };
         _reverseButtons[i] = new Button { Text = $"Reverse {i + 1}", Height = 26 };
         _reverseButtons[i].Click += (_, __) =>
@@ -1645,6 +1648,7 @@ public sealed class vNotches : Rhino.Commands.Command
           try { _sideChecks[ci].Checked = s.CurveSides[ci]; }
           finally { _suppress = false; }
           Redraw();
+          Persist();
         };
         if (s.Curves.Count > 1)
         {
@@ -1655,6 +1659,7 @@ public sealed class vNotches : Rhino.Commands.Command
             s.CurveEnabled[ci] = _enableChecks[ci].Checked == true;
             RebuildCurveNotches(doc, s, ci);
             Redraw();
+            Persist();
           };
         }
       }
@@ -1669,6 +1674,8 @@ public sealed class vNotches : Rhino.Commands.Command
       {
         if (!s.SuppressPanelCloseExit)
         {
+          CommitPendingValues();
+          SaveOptions(s);
           s.PanelClosedExit = true;
           try { RhinoApp.RunScript("_Cancel", false); } catch { }
         }
@@ -1861,6 +1868,34 @@ public sealed class vNotches : Rhino.Commands.Command
         UpdateUndoEnabled();
       }
       finally { _suppress = false; }
+    }
+
+    void CommitPendingValues()
+    {
+      if (_suppress) return;
+      _s.NotchTypeIndex = Math.Max(0, _typeDropDown.SelectedIndex);
+      _s.NotchLengthOpt.CurrentValue = ParseDouble(_lengthBox.Text, _s.NotchLengthOpt.CurrentValue);
+      _s.NotchOffsetOpt.CurrentValue = ParseDouble(_offsetBox.Text, _s.NotchOffsetOpt.CurrentValue);
+      _s.NotchWidthOpt.CurrentValue = ParseDouble(_widthBox.Text, _s.NotchWidthOpt.CurrentValue);
+      _s.NotchLayerName = GetDropDownLayerName(_notchLayerDrop, _s.NotchLayerName);
+      _s.PercentToggle.CurrentValue = _percentCheck.Checked == true;
+      _s.GroupToggle.CurrentValue = _groupCheck.Checked == true;
+      _s.LabelToggle.CurrentValue = _labelCheck.Checked == true;
+      _s.LabelValueText = _labelValueBox.Text;
+      _s.LabelAutoAdv = _autoAdvCheck.Checked == true;
+      _s.LabelSideFlip = _sideFlipCheck.Checked == true;
+      _s.LabelLayerName = GetDropDownLayerName(_labelLayerDrop, _s.LabelLayerName);
+      _s.ManualLabelSize = Math.Max(0, ParseDouble(_labelSizeBox.Text, _s.ManualLabelSize));
+      _s.LabelSizeAutoToggle.CurrentValue = _labelSizeAutoCheck.Checked == true;
+      _s.LabelSizePctIndex = Math.Max(0, _labelSizePctDrop.SelectedIndex);
+      _s.LabelOffsetOpt.CurrentValue = ParseDouble(_labelOffsetBox.Text, _s.LabelOffsetOpt.CurrentValue);
+      _s.LabelOffsetYOpt.CurrentValue = ParseDouble(_labelOffsetYBox.Text, _s.LabelOffsetYOpt.CurrentValue);
+    }
+
+    void Persist()
+    {
+      CommitPendingValues();
+      SaveOptions(_s);
     }
 
     public void UpdateDistanceLabels(double? current, double? prevDelta, double? otherEnd)
