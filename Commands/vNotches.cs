@@ -230,6 +230,27 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   static void RunLoop(RhinoDoc doc, NotchSession s)
   {
     var gp = new GetPoint();
+    gp.MouseMove += (_, e) =>
+    {
+      try
+      {
+        var vp = e.Viewport;
+        if (vp == null)
+          return;
+
+        if (!vp.GetFrustumLine(e.WindowPoint.X, e.WindowPoint.Y, out var line))
+          return;
+
+        var cplane = vp.ConstructionPlane();
+        var plane = new Plane(cplane.Origin, cplane.ZAxis);
+
+        if (Rhino.Geometry.Intersect.Intersection.LinePlane(line, plane, out var t))
+          s.LastCursorPoint = line.PointAt(t);
+      }
+      catch
+      {
+      }
+    };
     gp.SetCommandPrompt(s.Curves.Count == 1
       ? "Select a point on curve (notch location)"
       : "Select a point on any selected curve (notch location)");
@@ -281,7 +302,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         }
 
         // Point picked â€” place notch(es)
-        PlaceNotchAtPoint(doc, gp.Point(), s);
+        PlaceNotchFromPreview(doc, gp.Point(), s);
       }
     }
     finally
@@ -387,6 +408,37 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     if (refCurve == null) return;
 
     double lengthFromStart = LengthFromStart(refCurve, refT);
+
+    List<double> lengthsFromStart;
+
+    if (s.PercentToggle.CurrentValue)
+    {
+      double refLen = refCurve.GetLength();
+      if (refLen <= 0.0) return;
+
+      double pct = lengthFromStart / refLen;
+      lengthsFromStart = s.Curves.Select(c => c.GetLength() * pct).ToList();
+    }
+    else
+    {
+      lengthsFromStart = Enumerable.Repeat(lengthFromStart, s.Curves.Count).ToList();
+    }
+
+    PlaceNotchWithLengths(doc, s, lengthsFromStart, s.LastCursorPoint ?? point);
+  }
+  static void PlaceNotchFromPreview(RhinoDoc doc, Point3d clickedPoint, NotchSession s)
+  {
+    if (!s.PreviewValid || s.PreviewLengthsFromStart.Count != s.Curves.Count)
+    {
+      PlaceNotchAtPoint(doc, clickedPoint, s);
+      return;
+    }
+
+    PlaceNotchWithLengths(doc, s, s.PreviewLengthsFromStart, s.PreviewCursorPoint);
+  }
+
+  static void PlaceNotchWithLengths(RhinoDoc doc, NotchSession s, List<double> lengthsFromStart, Point3d cursorPoint)
+  {
     var sides       = s.CurveSidesAsStrings();
     double notchLen = s.NotchLengthOpt.CurrentValue;
     double notchOff = s.NotchOffsetOpt.CurrentValue;
@@ -404,32 +456,29 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     string labelText = s.LabelValueText.Trim();
     bool canLabel    = s.LabelToggle.CurrentValue && labelText.Length > 0;
     string nextLabel = labelText;
+
     var placementLabels = new List<string>();
     if (canLabel)
     {
-      foreach (var _ in s.Curves) placementLabels.Add(labelText);
+      foreach (var _ in s.Curves)
+        placementLabels.Add(labelText);
+
       if (s.LabelAutoAdv)
         nextLabel = IncrementLabelValue(labelText);
     }
 
-    List<double>? lengthsFromStart = null;
     double? percent = null;
-
-    if (s.PercentToggle.CurrentValue)
+    if (s.PercentToggle.CurrentValue && s.PreviewRefCurveIndex >= 0 && s.PreviewRefCurveIndex < s.Curves.Count)
     {
-      double refLen = refCurve.GetLength();
-      if (refLen <= 0.0) return;
-      double pct = lengthFromStart / refLen;
-      lengthsFromStart = s.Curves.Select(c => c.GetLength() * pct).ToList();
-      percent = pct;
-    }
-    else
-    {
-      lengthsFromStart = Enumerable.Repeat(lengthFromStart, s.Curves.Count).ToList();
+      var refCurve = s.Curves[s.PreviewRefCurveIndex];
+      var refLen = refCurve.GetLength();
+      if (refLen > 0.0 && s.PreviewRefCurveIndex < lengthsFromStart.Count)
+        percent = lengthsFromStart[s.PreviewRefCurveIndex] / refLen;
     }
 
     doc.UndoRecordingEnabled = true;
     var undoRec = doc.BeginUndoRecord("Notch");
+
     List<(Guid notch, Guid? label)>? newIds = null;
     try
     {
@@ -438,61 +487,60 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         canLabel, placementLabels, resolvedLabelSize,
         effectiveNotchLayer, effectiveLabelLayer,
         s.LabelOffsetOpt.CurrentValue, s.LabelOffsetYOpt.CurrentValue,
-        s.LabelSideFlip, point, s.CurveEnabled);
+        s.LabelSideFlip, cursorPoint, s.CurveEnabled);
     }
     finally
     {
-      if (undoRec >= 0) doc.EndUndoRecord(undoRec);
+      if (undoRec >= 0)
+        doc.EndUndoRecord(undoRec);
     }
 
-    if (newIds == null || !newIds.Any(n => n.notch != Guid.Empty)) return;
+    if (newIds == null || !newIds.Any(n => n.notch != Guid.Empty))
+      return;
 
-    // Record the placement for undo
     var record = new NotchRecord
     {
-      Mode            = s.PercentToggle.CurrentValue ? "percent" : "distance",
-      NotchLength     = notchLen,
-      NotchOffset     = notchOff,
-      NotchType       = notchTyp,
-      NotchWidth      = notchWid,
-      GroupEnabled    = s.GroupToggle.CurrentValue,
-      LabelEnabled    = canLabel,
-      LabelValues     = new List<string>(placementLabels),
-      LabelSize       = resolvedLabelSize,
-      NotchLayer      = s.NotchLayerName,
-      LabelLayer      = s.LabelLayerName,
-      LabelOffset     = s.LabelOffsetOpt.CurrentValue,
-      LabelOffsetY    = s.LabelOffsetYOpt.CurrentValue,
-      LengthsFromStart= new List<double>(lengthsFromStart),
-      CurveEnabled    = s.CurveEnabled.ToList(),
-      Percent         = percent,
+      Mode             = s.PercentToggle.CurrentValue ? "percent" : "distance",
+      NotchLength      = notchLen,
+      NotchOffset      = notchOff,
+      NotchType        = notchTyp,
+      NotchWidth       = notchWid,
+      GroupEnabled     = s.GroupToggle.CurrentValue,
+      LabelEnabled     = canLabel,
+      LabelValues      = new List<string>(placementLabels),
+      LabelSize        = resolvedLabelSize,
+      NotchLayer       = s.NotchLayerName,
+      LabelLayer       = s.LabelLayerName,
+      LabelOffset      = s.LabelOffsetOpt.CurrentValue,
+      LabelOffsetY     = s.LabelOffsetYOpt.CurrentValue,
+      LengthsFromStart = new List<double>(lengthsFromStart),
+      CurveEnabled     = s.CurveEnabled.ToList(),
+      Percent          = percent,
     };
+
     s.NotchRecords.Add(record);
 
-    // Track IDs per curve and for undo
     for (int i = 0; i < newIds.Count; i++)
     {
       if (i < s.NotchIdsByCurve.Count)
         s.NotchIdsByCurve[i].Add(newIds[i].notch);
+
       if (i < s.LabelIdsByCurve.Count)
         s.LabelIdsByCurve[i].Add(newIds[i].label);
     }
+
     s.PlacementIds.Add(new List<Guid>(newIds.Select(n => n.notch)));
     s.PlacementLabelIds.Add(new List<Guid?>(newIds.Select(n => n.label)));
 
-    // Advance label
     if (canLabel && s.LabelAutoAdv)
     {
       s.LabelValueText = nextLabel;
       SyncPanelFromOptions(s);
     }
 
-    // Update undo button state
     s.Panel?.UpdateUndoEnabled();
-
     doc.Views.Redraw();
   }
-
   // â”€â”€ Undo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void UndoLastNotch(RhinoDoc doc, NotchSession s)
@@ -547,10 +595,15 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
   static void DrawPreview(RhinoDoc doc, NotchSession s, GetPointDrawEventArgs e)
   {
-    var point = e.CurrentPoint;
-    s.LastPreviewPoint = point;
+    var snapPoint = e.CurrentPoint;
+    var cursorPoint = s.LastCursorPoint ?? snapPoint;
 
-    ClosestCurveHit(s, point, out int refIdx, out var refCurve, out double refT);
+    s.LastPreviewPoint = snapPoint;
+    s.PreviewValid = false;
+    s.PreviewSnapPoint = snapPoint;
+    s.PreviewCursorPoint = cursorPoint;
+
+    ClosestCurveHit(s, snapPoint, out int refIdx, out var refCurve, out double refT);
     if (refCurve == null) { UpdateDistanceLabels(s, null, null, null); return; }
 
     double lfs  = LengthFromStart(refCurve, refT);
@@ -577,7 +630,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     {
       lengths = Enumerable.Repeat(lfs, s.Curves.Count).ToList();
     }
-
+    s.PreviewValid = true;
+    s.PreviewRefCurveIndex = refIdx;
+    s.PreviewLengthsFromStart = new List<double>(lengths);
+    s.PreviewSnapPoint = snapPoint;
+    s.PreviewCursorPoint = cursorPoint;
     var sides    = s.CurveSidesAsStrings();
     double nl    = s.NotchLengthOpt.CurrentValue;
     double no    = s.NotchOffsetOpt.CurrentValue;
@@ -590,14 +647,14 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     for (int i = 0; i < s.Curves.Count; i++)
     {
       if (!s.CurveEnabled[i]) continue;
-      var geom = NotchGeometry(s.Curves[i], lengths[i], nl, no, sides[i], nt, nw, point, null);
+      var geom = NotchGeometry(s.Curves[i], lengths[i], nl, no, sides[i], nt, nw, cursorPoint, null);
       if (geom == null) continue;
       if (geom is LineCurve lc)           e.Display.DrawLine(lc.Line, System.Drawing.Color.Cyan, 2);
       else if (geom is PolylineCurve plc)  e.Display.DrawPolyline(plc.ToPolyline(), System.Drawing.Color.Cyan, 2);
 
       if (canLabel)
       {
-        GetCurveTangentAndDirection(s.Curves[i], lengths[i], sides[i], point, null,
+        GetCurveTangentAndDirection(s.Curves[i], lengths[i], sides[i], cursorPoint, null,
           out var tangent, out var direction);
         if (!tangent.IsValid || !direction.IsValid) continue;
 
@@ -750,17 +807,38 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     {
       try
       {
-        var kinkPt  = curve.PointAt(t);
+        var kinkPt   = curve.PointAt(t);
         var ptBefore = curve.PointAt(tBefore);
         var ptAfter  = curve.PointAt(tAfter);
-        var cursorVec  = new Vector3d(cursorPoint.Value.X - kinkPt.X, cursorPoint.Value.Y - kinkPt.Y, 0.0);
-        var dirBefore  = new Vector3d(ptBefore.X - kinkPt.X, ptBefore.Y - kinkPt.Y, 0.0);
-        var dirAfter   = new Vector3d(ptAfter.X  - kinkPt.X, ptAfter.Y  - kinkPt.Y, 0.0);
+
+        var cursorVec = new Vector3d(
+          cursorPoint.Value.X - kinkPt.X,
+          cursorPoint.Value.Y - kinkPt.Y,
+          0.0);
+
+        var tol = RhinoDoc.ActiveDoc?.ModelAbsoluteTolerance ?? 0.001;
+        if (!cursorVec.IsValid || cursorVec.Length <= tol * 2.0)
+        {
+          var middle = tanBefore + tanAfter;
+          middle.Z = 0.0;
+          if (middle.IsValid && !middle.IsTiny() && middle.Unitize())
+            return middle;
+
+          return defaultTangent;
+        }
+
+        var dirBefore = new Vector3d(ptBefore.X - kinkPt.X, ptBefore.Y - kinkPt.Y, 0.0);
+        var dirAfter  = new Vector3d(ptAfter.X  - kinkPt.X, ptAfter.Y  - kinkPt.Y, 0.0);
+
         double projB = Vector3d.Multiply(cursorVec, dirBefore);
         double projA = Vector3d.Multiply(cursorVec, dirAfter);
+
         return projA >= projB ? tanAfter : tanBefore;
       }
-      catch { return defaultTangent; }
+      catch
+      {
+        return defaultTangent;
+      }
     }
     if (tangentHint.HasValue)
     {
@@ -1404,7 +1482,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public string LabelLayerName;
     public bool   LabelAutoAdv;
     public bool   LabelSideFlip;
-
     public readonly string[] NotchTypeValues = ["I", "V", "U"];
     public int NotchTypeIndex;
 
@@ -1439,8 +1516,14 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public int LabelSizeAutoIndex, LabelSizePctIndex2;
 
     public Point3d? LastPreviewPoint;
+    public Point3d? LastCursorPoint;
     public NotchPanel? Panel;
 
+    public bool PreviewValid;
+    public Point3d PreviewSnapPoint;
+    public Point3d PreviewCursorPoint;
+    public int PreviewRefCurveIndex;
+    public List<double> PreviewLengthsFromStart = [];
     public NotchSession(RhinoDoc doc, List<Curve> curves, List<Guid> curveIds, bool[] sides,
       double notchLength, double notchOffset, double notchWidth, string notchType,
       bool percent, bool group, bool label, string labelValue,
