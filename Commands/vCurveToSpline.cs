@@ -300,7 +300,9 @@ public sealed class vCurveToSpline : Command
       if (group.Count == 0)
         continue;
 
-      var orderedChain = OrderSegmentsAsChain(group, tolerance);
+      var orderedChain = string.Equals(joinMode, "All", StringComparison.OrdinalIgnoreCase)
+        ? OrderSegmentsByClosestEndpointPairs(group, tolerance)
+        : OrderSegmentsAsChain(group, tolerance);
       var interpPoints = BuildInterpPoints(group, orderedChain, tolerance);
       var interpCurve = CreateInterpCurve(interpPoints);
       if (interpCurve != null)
@@ -463,6 +465,239 @@ public sealed class vCurveToSpline : Command
     return path;
   }
 
+private readonly struct SegmentEndpoint
+{
+  public int SegmentIndex { get; }
+  public bool IsStart { get; }
+
+  public SegmentEndpoint(int segmentIndex, bool isStart)
+  {
+    SegmentIndex = segmentIndex;
+    IsStart = isStart;
+  }
+
+  public Point3d Point(IReadOnlyList<Segment> segments) =>
+    IsStart ? segments[SegmentIndex].Start : segments[SegmentIndex].End;
+}
+
+private readonly struct EndpointPair
+{
+  public SegmentEndpoint A { get; }
+  public SegmentEndpoint B { get; }
+  public double Distance { get; }
+
+  public EndpointPair(SegmentEndpoint a, SegmentEndpoint b, double distance)
+  {
+    A = a;
+    B = b;
+    Distance = distance;
+  }
+}
+
+private sealed class DisjointSet
+{
+  private readonly int[] _parent;
+
+  public DisjointSet(int count)
+  {
+    _parent = Enumerable.Range(0, count).ToArray();
+  }
+
+  public int Find(int value)
+  {
+    while (_parent[value] != value)
+    {
+      _parent[value] = _parent[_parent[value]];
+      value = _parent[value];
+    }
+
+    return value;
+  }
+
+  public void Union(int a, int b)
+  {
+    var rootA = Find(a);
+    var rootB = Find(b);
+    if (rootA != rootB)
+      _parent[rootB] = rootA;
+  }
+}
+
+private static List<(int SegmentIndex, bool Reverse)> OrderSegmentsByClosestEndpointPairs(
+  IReadOnlyList<Segment> segments,
+  double tolerance)
+{
+  var count = segments.Count;
+  if (count <= 1)
+    return new List<(int, bool)> { (0, false) };
+
+  // Build all possible endpoint-to-endpoint connections between different curves.
+  var candidates = new List<EndpointPair>();
+
+  for (var i = 0; i < count; i++)
+  {
+    var iStart = new SegmentEndpoint(i, true);
+    var iEnd   = new SegmentEndpoint(i, false);
+
+    for (var j = i + 1; j < count; j++)
+    {
+      var jStart = new SegmentEndpoint(j, true);
+      var jEnd   = new SegmentEndpoint(j, false);
+
+      candidates.Add(new EndpointPair(iStart, jStart, iStart.Point(segments).DistanceTo(jStart.Point(segments))));
+      candidates.Add(new EndpointPair(iStart, jEnd,   iStart.Point(segments).DistanceTo(jEnd.Point(segments))));
+      candidates.Add(new EndpointPair(iEnd,   jStart, iEnd.Point(segments).DistanceTo(jStart.Point(segments))));
+      candidates.Add(new EndpointPair(iEnd,   jEnd,   iEnd.Point(segments).DistanceTo(jEnd.Point(segments))));
+    }
+  }
+
+  candidates.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+
+  // Pick N-1 closest endpoint pairs while preventing:
+  // - one endpoint being used twice
+  // - one curve having more than two neighbors
+  // - cycles
+  var endpointUsed = new bool[count, 2]; // 0=start, 1=end
+  var segmentDegree = new int[count];
+  var dsu = new DisjointSet(count);
+  var connectors = new List<EndpointPair>();
+
+  foreach (var candidate in candidates)
+  {
+    var a = candidate.A;
+    var b = candidate.B;
+
+    var aSlot = a.IsStart ? 0 : 1;
+    var bSlot = b.IsStart ? 0 : 1;
+
+    if (endpointUsed[a.SegmentIndex, aSlot])
+      continue;
+
+    if (endpointUsed[b.SegmentIndex, bSlot])
+      continue;
+
+    if (segmentDegree[a.SegmentIndex] >= 2)
+      continue;
+
+    if (segmentDegree[b.SegmentIndex] >= 2)
+      continue;
+
+    if (dsu.Find(a.SegmentIndex) == dsu.Find(b.SegmentIndex))
+      continue;
+
+    connectors.Add(candidate);
+
+    endpointUsed[a.SegmentIndex, aSlot] = true;
+    endpointUsed[b.SegmentIndex, bSlot] = true;
+
+    segmentDegree[a.SegmentIndex]++;
+    segmentDegree[b.SegmentIndex]++;
+
+    dsu.Union(a.SegmentIndex, b.SegmentIndex);
+
+    if (connectors.Count == count - 1)
+      break;
+  }
+
+  if (connectors.Count != count - 1)
+    return OrderSegmentsAsChain(segments, tolerance);
+
+  // Build adjacency from selected endpoint pairs.
+  var bySegment = new List<EndpointPair>[count];
+  for (var i = 0; i < count; i++)
+    bySegment[i] = new List<EndpointPair>();
+
+  foreach (var connector in connectors)
+  {
+    bySegment[connector.A.SegmentIndex].Add(connector);
+    bySegment[connector.B.SegmentIndex].Add(connector);
+  }
+
+  // The spline endpoints are the two curves with only one paired endpoint.
+  var startSegment = -1;
+  for (var i = 0; i < count; i++)
+  {
+    if (bySegment[i].Count == 1)
+    {
+      startSegment = i;
+      break;
+    }
+  }
+
+  if (startSegment < 0)
+    return OrderSegmentsAsChain(segments, tolerance);
+
+  var result = new List<(int SegmentIndex, bool Reverse)>(count);
+  var visited = new bool[count];
+
+  var currentSegment = startSegment;
+  var currentConnector = bySegment[currentSegment][0];
+  var connectedEndpoint = EndpointForSegment(currentConnector, currentSegment);
+
+  // Start at the unpaired outside end, exit through the paired closest end.
+  var reverse = connectedEndpoint.IsStart;
+  result.Add((currentSegment, reverse));
+  visited[currentSegment] = true;
+
+  var exitIsStart = reverse;
+
+  while (result.Count < count)
+  {
+    EndpointPair? nextConnector = null;
+
+    foreach (var connector in bySegment[currentSegment])
+    {
+      var endpoint = EndpointForSegment(connector, currentSegment);
+      if (endpoint.IsStart == exitIsStart)
+      {
+        nextConnector = connector;
+        break;
+      }
+    }
+
+    if (!nextConnector.HasValue)
+      break;
+
+    var nextEndpoint = OtherEndpoint(nextConnector.Value, currentSegment);
+    var nextSegment = nextEndpoint.SegmentIndex;
+
+    if (visited[nextSegment])
+      break;
+
+    // Enter the next curve through the endpoint paired to the previous curve.
+    // If entry is the curve end, reverse it so the oriented points start there.
+    var nextReverse = !nextEndpoint.IsStart;
+
+    result.Add((nextSegment, nextReverse));
+    visited[nextSegment] = true;
+
+    currentSegment = nextSegment;
+
+    // Continue from the opposite end of the current curve.
+    exitIsStart = nextReverse;
+  }
+
+  if (result.Count != count)
+    return OrderSegmentsAsChain(segments, tolerance);
+
+  return result;
+}
+
+private static SegmentEndpoint EndpointForSegment(EndpointPair pair, int segmentIndex)
+{
+  if (pair.A.SegmentIndex == segmentIndex)
+    return pair.A;
+
+  return pair.B;
+}
+
+private static SegmentEndpoint OtherEndpoint(EndpointPair pair, int segmentIndex)
+{
+  if (pair.A.SegmentIndex == segmentIndex)
+    return pair.B;
+
+  return pair.A;
+}
   private static bool TryBuildOpenPath(IReadOnlyList<Segment> segments, double tolerance, out List<(int SegmentIndex, bool Reverse)> path)
   {
     var count = segments.Count;

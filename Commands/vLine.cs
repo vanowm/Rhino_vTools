@@ -1292,9 +1292,13 @@ public sealed class vLine : Command
     if (CurveIsLinear(curve, out var line))
     {
       var t = line.ClosestParameter(startPoint);
-      return line.PointAt(t);
-    }
+      var point = line.PointAt(t);
 
+      // Only accept the projected perpendicular if it lies on the finite line segment.
+      // Otherwise let the general solver/fallback handle it.
+      if (t >= -RhinoMath.SqrtEpsilon && t <= 1.0 + RhinoMath.SqrtEpsilon)
+        return point;
+    }
     var cplane = RhinoDoc.ActiveDoc?.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
 
     var domain = curve.Domain;
@@ -1344,10 +1348,29 @@ public sealed class vLine : Command
       candidates.Add((parameters[bestIndex], values[bestIndex]));
     }
 
-    candidates.Sort((x, y) => x.Error.CompareTo(y.Error));
+    candidates.Sort((x, y) =>
+    {
+      var px = curve.PointAt(x.T);
+      var py = curve.PointAt(y.T);
+
+      var dx = px.DistanceToSquared(hintPoint).CompareTo(py.DistanceToSquared(hintPoint));
+      if (dx != 0)
+        return dx;
+
+      var de = x.Error.CompareTo(y.Error);
+      if (de != 0)
+        return de;
+
+      return Math.Abs(x.T - hintT).CompareTo(Math.Abs(y.T - hintT));
+    });
 
     var refined = new List<(double T, double Error, Point3d Point)>();
-    for (var i = 0; i < candidates.Count && i < 16; i++)
+
+    // Refine nearest-to-cursor perpendicular candidates, not first/best-error candidates.
+    // More than 16 is still cheap enough here and avoids wrong picks on curves with many perpendiculars.
+    var maxCandidatesToRefine = Math.Min(candidates.Count, 64);
+
+    for (var i = 0; i < maxCandidatesToRefine; i++)
     {
       var seedT = candidates[i].T;
       var window = Math.Max(dt * 4.0, (b - a) * 0.01);
@@ -1356,7 +1379,6 @@ public sealed class vLine : Command
       var refinedResult = RefinePerpParameter(curve, startPoint, cplane, t0, t1, refineIterations);
       refined.Add((refinedResult.Parameter, refinedResult.Error, curve.PointAt(refinedResult.Parameter)));
     }
-
     if (refined.Count == 0)
       return null;
 
