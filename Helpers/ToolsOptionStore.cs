@@ -217,11 +217,12 @@ internal static bool Update(string sectionName, Action<JsonObject> updater)
       File.Delete(tmp);
       return true;
     }
-    catch
+    catch (Exception ex)
     {
+      LastError = ex.Message;
       return false;
     }
-  }
+}
 
   /// <summary>
   /// Resolves config path in plug-in deployment directory.
