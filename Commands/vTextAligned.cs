@@ -618,42 +618,27 @@ public sealed class vTextAligned : Command
     try
     {
       var plane = textEntity.Plane;
-
-      // Probe: duplicate and reset to WorldXY so the bbox reflects actual
-      // offsets from plane.Origin regardless of text justification.
-      try
-      {
-        var probe = textEntity.Duplicate() as TextEntity;
-        if (probe != null)
-        {
-          probe.Plane = Plane.WorldXY;
-          var wb = probe.GetBoundingBox(Plane.WorldXY);
-          if (wb.IsValid)
-          {
-            var ww = wb.Max.X - wb.Min.X;
-            var hh = wb.Max.Y - wb.Min.Y;
-            if (ww > RhinoMath.ZeroTolerance && hh > RhinoMath.ZeroTolerance)
-              return (plane, wb.Min.X, wb.Max.X, wb.Min.Y, wb.Max.Y);
-          }
-        }
-      }
-      catch
-      {
-      }
-
-      // Fallback: GetBoundingBox in the text's own plane (may be inaccurate for
-      // rotated text, but better than nothing).
-      var lb = textEntity.GetBoundingBox(plane);
-      if (!lb.IsValid)
+      if (!plane.IsValid)
         return null;
 
-      var w = lb.Max.X - lb.Min.X;
-      var h = lb.Max.Y - lb.Min.Y;
+      // Use the annotation's own plane directly.
+      // This keeps the pick box in the same coordinate system as the real text object.
+      var bbox = textEntity.GetBoundingBox(plane);
+      if (!bbox.IsValid)
+        return null;
+
+      var minx = bbox.Min.X;
+      var maxx = bbox.Max.X;
+      var miny = bbox.Min.Y;
+      var maxy = bbox.Max.Y;
+
+      var w = maxx - minx;
+      var h = maxy - miny;
 
       if (w <= RhinoMath.ZeroTolerance || h <= RhinoMath.ZeroTolerance)
         return null;
 
-      return (plane, lb.Min.X, lb.Max.X, lb.Min.Y, lb.Max.Y);
+      return (plane, minx, maxx, miny, maxy);
     }
     catch
     {
@@ -927,10 +912,11 @@ public sealed class vTextAligned : Command
 
     if (action.Kind == TextActionKind.Move && action.Before != null)
     {
-      var ok = doc.Objects.Replace(action.ObjectId, action.Before.Duplicate() as TextEntity);
-      if (ok)
-        _ = ForceTextObjectHeight(doc, action.ObjectId, currentHeight);
-      return ok;
+      var before = action.Before.Duplicate() as TextEntity;
+      if (before == null)
+        return false;
+
+      return doc.Objects.Replace(action.ObjectId, before);
     }
 
     return false;
@@ -940,21 +926,25 @@ public sealed class vTextAligned : Command
   {
     if (action.Kind == TextActionKind.Add && action.Geo != null)
     {
-      var newId = doc.Objects.AddText(action.Geo.Duplicate() as TextEntity);
+      var geo = action.Geo.Duplicate() as TextEntity;
+      if (geo == null)
+        return false;
+
+      var newId = doc.Objects.AddText(geo);
       if (newId == Guid.Empty)
         return false;
 
       action.ObjectId = newId;
-      _ = ForceTextObjectHeight(doc, newId, currentHeight);
       return true;
     }
 
     if (action.Kind == TextActionKind.Move && action.After != null)
     {
-      var ok = doc.Objects.Replace(action.ObjectId, action.After.Duplicate() as TextEntity);
-      if (ok)
-        _ = ForceTextObjectHeight(doc, action.ObjectId, currentHeight);
-      return ok;
+      var after = action.After.Duplicate() as TextEntity;
+      if (after == null)
+        return false;
+
+      return doc.Objects.Replace(action.ObjectId, after);
     }
 
     return false;
