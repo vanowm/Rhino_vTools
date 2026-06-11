@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 
 namespace vTools.Commands;
 
@@ -16,7 +17,8 @@ internal static class ToolsOptionStore
 
   private static readonly JsonSerializerOptions JsonOptions = new()
   {
-    WriteIndented = true
+    WriteIndented = true,
+    TypeInfoResolver = new DefaultJsonTypeInfoResolver()
   };
 
   /// <summary>

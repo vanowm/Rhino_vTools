@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -20,14 +20,14 @@ namespace vTools.Commands;
 /// </summary>
 public sealed class vNotches : Rhino.Commands.Command
 {
-  // ── Constants ────────────────────────────────────────────────────────────
+  // â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const string Section            = "vNotches";
   const string SpecialLayerCurrent = "*[Current]*";
   const double LabelWidthMult     = 0.9;
   const double DefaultLabelOffIn  = 0.1; // inches
 
-  // ── Persisted defaults ───────────────────────────────────────────────────
+  // â”€â”€ Persisted defaults â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static double _notchLength    = 0.18;
   static double _notchOffset    = 0.5;
@@ -50,7 +50,7 @@ public sealed class vNotches : Rhino.Commands.Command
 
   public override string EnglishName => "vNotches";
 
-  // ── Settings ─────────────────────────────────────────────────────────────
+  // â”€â”€ Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void LoadOptions(RhinoDoc doc)
   {
@@ -115,8 +115,6 @@ public sealed class vNotches : Rhino.Commands.Command
     sec["curve_sides"] = arr;
   });
 
-  RhinoApp.WriteLine(
-    $"vNotches saving: type={s.NotchTypeValues[s.NotchTypeIndex]}, len={s.NotchLengthOpt.CurrentValue}, offset={s.NotchOffsetOpt.CurrentValue}, label={s.LabelToggle.CurrentValue}, text={s.LabelValueText}");
   if (!ok)
     RhinoApp.WriteLine($"vNotches: failed to save options: {ToolsOptionStore.LastError}");
 }
@@ -146,7 +144,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   _labelSideFlip = s.LabelSideFlip;
   _curveSides    = s.CurveSides.ToArray();
 }
-  // ── Entry point ───────────────────────────────────────────────────────────
+  // â”€â”€ Entry point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
@@ -175,7 +173,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       }
     }
 
-    // Build initial curve sides — reuse stored per-curve values if count matches
+    // Build initial curve sides â€” reuse stored per-curve values if count matches
     var initialSides = new bool[curves.Count];
     for (int i = 0; i < curves.Count; i++)
     {
@@ -202,7 +200,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return Result.Success;
   }
 
-  // ── Curve selection ───────────────────────────────────────────────────────
+  // â”€â”€ Curve selection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static bool TrySelectCurves(RhinoDoc doc, out List<Curve> curves, out List<Guid> curveIds)
   {
@@ -227,7 +225,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return curves.Count > 0;
   }
 
-  // ── Main interactive loop ─────────────────────────────────────────────────
+  // â”€â”€ Main interactive loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void RunLoop(RhinoDoc doc, NotchSession s)
   {
@@ -264,7 +262,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         {
           if (s.PanelNumericPending) { s.PanelNumericPending = false; continue; }
           if (s.IgnoreNextNothing)   { s.IgnoreNextNothing   = false; continue; }
-          // Enter pressed on command line — done
+          // Enter pressed on command line â€” done
           FinalizeBlocks(doc, s);
           return;
         }
@@ -282,7 +280,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
           return;
         }
 
-        // Point picked — place notch(es)
+        // Point picked â€” place notch(es)
         PlaceNotchAtPoint(doc, gp.Point(), s);
       }
     }
@@ -298,7 +296,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
   }
 
-  // ── Command options ───────────────────────────────────────────────────────
+  // â”€â”€ Command options â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void RefreshCommandOptions(GetPoint gp, NotchSession s)
   {
@@ -381,7 +379,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
   }
 
-  // ── Place notch at clicked point ──────────────────────────────────────────
+  // â”€â”€ Place notch at clicked point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void PlaceNotchAtPoint(RhinoDoc doc, Point3d point, NotchSession s)
   {
@@ -494,7 +492,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     doc.Views.Redraw();
   }
 
-  // ── Undo ──────────────────────────────────────────────────────────────────
+  // â”€â”€ Undo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void UndoLastNotch(RhinoDoc doc, NotchSession s)
   {
@@ -534,17 +532,17 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     doc.Views.Redraw();
   }
 
-  // ── Finalize ──────────────────────────────────────────────────────────────
+  // â”€â”€ Finalize â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void FinalizeBlocks(RhinoDoc doc, NotchSession s)
   {
     if (s.Finalized) return;
     s.Finalized = true;
-    // No block/iDef system — just redraw
+    // No block/iDef system â€” just redraw
     doc.Views.Redraw();
   }
 
-  // ── Dynamic draw preview ──────────────────────────────────────────────────
+  // â”€â”€ Dynamic draw preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void DrawPreview(RhinoDoc doc, NotchSession s, GetPointDrawEventArgs e)
   {
@@ -645,7 +643,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
   }
 
-  // ── Notch geometry ────────────────────────────────────────────────────────
+  // â”€â”€ Notch geometry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static GeometryBase? NotchGeometry(Curve curve, double lengthFromStart,
     double notchLength, double notchOffset, string side,
@@ -725,7 +723,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return new LineCurve(center, center + direction * notchLength);
   }
 
-  // ── Kink-aware tangent ────────────────────────────────────────────────────
+  // â”€â”€ Kink-aware tangent â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static Vector3d KinkAwareTangent(Curve curve, double t, Vector3d defaultTangent,
     Point3d? cursorPoint, Vector3d? tangentHint)
@@ -773,7 +771,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return defaultTangent;
   }
 
-  // ── Tangent + direction ───────────────────────────────────────────────────
+  // â”€â”€ Tangent + direction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void GetCurveTangentAndDirection(Curve curve, double lengthFromStart, string side,
     Point3d? cursorPoint, Vector3d? tangentHint,
@@ -801,7 +799,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     if (side == "Right") direction = -direction;
   }
 
-  // ── Point at curve arc-length ─────────────────────────────────────────────
+  // â”€â”€ Point at curve arc-length â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static (Point3d pt, double? t) PointAtCurveLength(Curve curve, double lengthFromStart)
   {
@@ -820,7 +818,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return curve.GetLength(interval);
   }
 
-  // ── Label placement ───────────────────────────────────────────────────────
+  // â”€â”€ Label placement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static Plane BuildReadableTextPlane(RhinoDoc doc, Point3d anchor,
     Vector3d tangent, Vector3d direction, Point3d? curvePoint)
@@ -1006,7 +1004,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return (shifted, sideFlipped, effectiveBbox);
   }
 
-  // ── Add notch to doc ──────────────────────────────────────────────────────
+  // â”€â”€ Add notch to doc â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static (Guid notch, Guid? label) AddNotch(RhinoDoc doc,
     Curve curve, double lengthFromStart,
@@ -1108,7 +1106,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return ids;
   }
 
-  // ── Rebuild curve notches (after side/reverse change) ─────────────────────
+  // â”€â”€ Rebuild curve notches (after side/reverse change) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void RebuildCurveNotches(RhinoDoc doc, NotchSession s, int curveIndex)
   {
@@ -1187,7 +1185,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
   }
 
-  // ── Side / reverse ────────────────────────────────────────────────────────
+  // â”€â”€ Side / reverse â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void ToggleCurveSide(RhinoDoc doc, NotchSession s, int idx)
   {
@@ -1221,7 +1219,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     doc.Views.Redraw();
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static int ClosestCurveIndex(NotchSession s, Point3d point)
   {
@@ -1355,7 +1353,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return "A" + new string(chars);
   }
 
-  // ── Panel sync ────────────────────────────────────────────────────────────
+  // â”€â”€ Panel sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   static void SyncPanelFromOptions(NotchSession s)
   {
@@ -1367,7 +1365,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     s.Panel?.UpdateDistanceLabels(current, prevDelta, otherEnd);
   }
 
-  // ── Session state ─────────────────────────────────────────────────────────
+  // â”€â”€ Session state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   sealed class NotchSession
   {
@@ -1474,7 +1472,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         LabelSizePctIndex = Array.FindIndex(LabelSizePctValues,
           v => v == LabelSizePctValues.OrderBy(x => Math.Abs(x - labelSizePct)).First());
 
-      // Group indices for session — only when group=On
+      // Group indices for session â€” only when group=On
       SessionGroupIndices     = Enumerable.Repeat(-1, curves.Count).ToArray();
       CurveContextGroupIndices= new int[curves.Count];
       for (int i = 0; i < curves.Count; i++)
@@ -1492,7 +1490,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       CurveSides.Select(b => b ? "Left" : "Right").ToList();
   }
 
-  // ── Notch record ──────────────────────────────────────────────────────────
+  // â”€â”€ Notch record â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   sealed class NotchRecord
   {
@@ -1513,7 +1511,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public double?        Percent;
   }
 
-  // ── Eto panel ─────────────────────────────────────────────────────────────
+  // â”€â”€ Eto panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   sealed class NotchPanel : Eto.Forms.Form
   {
@@ -1552,19 +1550,28 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _typeDropDown.DataStore = s.NotchTypeValues;
       _typeDropDown.SelectedIndex = s.NotchTypeIndex;
       _typeDropDown.SelectedIndexChanged += (_, __) =>
-      { if (_suppress) return; s.NotchTypeIndex = _typeDropDown.SelectedIndex; Redraw(); Persist(); };
+      {
+        if (_suppress) return;
+        s.NotchTypeIndex = Math.Max(0, _typeDropDown.SelectedIndex);
+        ApplyDynamic();
+        Redraw();
+        Persist();
+      };
 
       // Numeric fields
       _lengthBox = MakeTextBox($"{s.NotchLengthOpt.CurrentValue:G}");
       _offsetBox = MakeTextBox($"{s.NotchOffsetOpt.CurrentValue:G}");
       _widthBox  = MakeTextBox($"{s.NotchWidthOpt.CurrentValue:G}");
 
-      AttachNumericLostFocus(_lengthBox, () =>
-      { double v = ParseDouble(_lengthBox.Text, s.NotchLengthOpt.CurrentValue); s.NotchLengthOpt.CurrentValue = v; Redraw(); Persist(); });
-      AttachNumericLostFocus(_offsetBox, () =>
-      { double v = ParseDouble(_offsetBox.Text, s.NotchOffsetOpt.CurrentValue); s.NotchOffsetOpt.CurrentValue = v; Redraw(); Persist(); });
-      AttachNumericLostFocus(_widthBox, () =>
-      { double v = ParseDouble(_widthBox.Text, s.NotchWidthOpt.CurrentValue); s.NotchWidthOpt.CurrentValue = v; Redraw(); Persist(); });
+      AttachNumericLive(_lengthBox,
+        () => s.NotchLengthOpt.CurrentValue,
+        v => s.NotchLengthOpt.CurrentValue = v);
+      AttachNumericLive(_offsetBox,
+        () => s.NotchOffsetOpt.CurrentValue,
+        v => s.NotchOffsetOpt.CurrentValue = v);
+      AttachNumericLive(_widthBox,
+        () => s.NotchWidthOpt.CurrentValue,
+        v => s.NotchWidthOpt.CurrentValue = v);
 
       // Notch layer dropdown
       _notchLayerDrop = new DropDown();
@@ -1586,10 +1593,10 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       // Percent / Group
       _percentCheck = new CheckBox { Text = "Percent", Checked = s.PercentToggle.CurrentValue };
       _percentCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.PercentToggle.CurrentValue = _percentCheck.Checked == true; Persist(); };
+      { if (_suppress) return; s.PercentToggle.CurrentValue = _percentCheck.Checked == true; Redraw(); Persist(); };
       _groupCheck   = new CheckBox { Text = "Group",   Checked = s.GroupToggle.CurrentValue };
       _groupCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.GroupToggle.CurrentValue = _groupCheck.Checked == true; Persist(); };
+      { if (_suppress) return; s.GroupToggle.CurrentValue = _groupCheck.Checked == true; Redraw(); Persist(); };
 
       // Label
       _labelCheck    = new CheckBox { Text = "", Checked = s.LabelToggle.CurrentValue, ToolTip = "Show label" };
@@ -1597,11 +1604,10 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _autoAdvCheck  = new CheckBox { ToolTip = "Auto-advance label", Checked = s.LabelAutoAdv };
       _sideFlipCheck = new CheckBox { Text = "Flip side", Checked = s.LabelSideFlip };
       _labelCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.LabelToggle.CurrentValue = _labelCheck.Checked == true; ApplyDynamic(); Persist(); };
-      _labelValueBox.LostFocus += (_, __) =>
-      { if (_suppress) return; s.LabelValueText = _labelValueBox.Text; Persist(); };
+      { if (_suppress) return; s.LabelToggle.CurrentValue = _labelCheck.Checked == true; ApplyDynamic(); Redraw(); Persist(); };
+      AttachTextLive(_labelValueBox, text => s.LabelValueText = text);
       _autoAdvCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.LabelAutoAdv = _autoAdvCheck.Checked == true; Persist(); };
+      { if (_suppress) return; s.LabelAutoAdv = _autoAdvCheck.Checked == true; Redraw(); Persist(); };
       _sideFlipCheck.CheckedChanged += (_, __) =>
       { if (_suppress) return; s.LabelSideFlip = _sideFlipCheck.Checked == true; Redraw(); Persist(); };
 
@@ -1623,8 +1629,9 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
       _labelSizeBox = MakeTextBox($"{s.ManualLabelSize:G}");
       _labelSizeBox.Width = 50;
-      AttachNumericLostFocus(_labelSizeBox, () =>
-      { s.ManualLabelSize = Math.Max(0, ParseDouble(_labelSizeBox.Text, s.ManualLabelSize)); Redraw(); Persist(); });
+      AttachNumericLive(_labelSizeBox,
+        () => s.ManualLabelSize,
+        v => s.ManualLabelSize = Math.Max(0, v));
 
       _labelSizeAutoCheck = new CheckBox { Text = "Auto", Checked = s.LabelSizeAutoToggle.CurrentValue };
       _labelSizeAutoCheck.CheckedChanged += (_, __) =>
@@ -1638,10 +1645,12 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
       _labelOffsetBox  = MakeTextBox($"{s.LabelOffsetOpt.CurrentValue:G}");
       _labelOffsetYBox = MakeTextBox($"{s.LabelOffsetYOpt.CurrentValue:G}");
-      AttachNumericLostFocus(_labelOffsetBox, () =>
-      { s.LabelOffsetOpt.CurrentValue = ParseDouble(_labelOffsetBox.Text, s.LabelOffsetOpt.CurrentValue); Redraw(); Persist(); });
-      AttachNumericLostFocus(_labelOffsetYBox, () =>
-      { s.LabelOffsetYOpt.CurrentValue = ParseDouble(_labelOffsetYBox.Text, s.LabelOffsetYOpt.CurrentValue); Redraw(); Persist(); });
+      AttachNumericLive(_labelOffsetBox,
+        () => s.LabelOffsetOpt.CurrentValue,
+        v => s.LabelOffsetOpt.CurrentValue = v);
+      AttachNumericLive(_labelOffsetYBox,
+        () => s.LabelOffsetYOpt.CurrentValue,
+        v => s.LabelOffsetYOpt.CurrentValue = v);
 
       // Distance labels
       _fromStartLbl = new Label { Text = "-" };
@@ -1718,7 +1727,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     Control BuildLayout()
     {
-      // ── Notch group ──────────────────────────────────────────────────────
+      // â”€â”€ Notch group â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       var notchTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
       notchTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Type"),   new TableCell(_typeDropDown,   true) } });
       notchTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Layer"),  new TableCell(_notchLayerDrop, true) } });
@@ -1727,14 +1736,14 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       notchTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset"), new TableCell(_offsetBox,      true) } });
       var notchGroup = new GroupBox { Text = "Notch", Content = notchTable };
 
-      // ── Label group ──────────────────────────────────────────────────────
+      // â”€â”€ Label group â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       var labelHeader = new TableLayout { Spacing = new Eto.Drawing.Size(4, 0) };
       labelHeader.Rows.Add(new TableRow { ScaleHeight = false, Cells = {
         new TableCell(_labelCheck,    false),
         new TableCell(_labelValueBox, false),
         new TableCell(_autoAdvCheck,  false),
         new TableCell(_sideFlipCheck, false),
-        new TableCell(null,           true),   // filler — absorbs extra width
+        new TableCell(null,           true),   // filler â€” absorbs extra width
       } });
 
       var sizeRow = new TableLayout { Spacing = new Eto.Drawing.Size(4, 0) };
@@ -1762,13 +1771,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       labelContent.Items.Add(new StackLayoutItem(labelSubTable, false));
       var labelGroup = new GroupBox { Text = "Label", Content = labelContent };
 
-      // ── Percent / Group ──────────────────────────────────────────────────
+      // â”€â”€ Percent / Group â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       var pgStack = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 10,
         VerticalContentAlignment = VerticalAlignment.Center };
       pgStack.Items.Add(new StackLayoutItem(_percentCheck, false));
       pgStack.Items.Add(new StackLayoutItem(_groupCheck,   false));
 
-      // ── Per-curve rows ───────────────────────────────────────────────────
+      // â”€â”€ Per-curve rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       var curveStack = new StackLayout { Orientation = Orientation.Vertical, Spacing = 2 };
       for (int i = 0; i < _s.Curves.Count; i++)
       {
@@ -1781,13 +1790,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         curveStack.Items.Add(new StackLayoutItem(row));
       }
 
-      // ── Distance info ────────────────────────────────────────────────────
+      // â”€â”€ Distance info â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       var distTable = new TableLayout { Spacing = new Eto.Drawing.Size(6, 2) };
       distTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("From start"),    new TableCell(_fromStartLbl, true) } });
       distTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("From end"),      new TableCell(_fromEndLbl,   true) } });
       distTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("From previous"), new TableCell(_fromPrevLbl,  true) } });
 
-      // ── Root (vertical stack, no bottom spacer) ──────────────────────────
+      // â”€â”€ Root (vertical stack, no bottom spacer) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       var root = new StackLayout
       {
         Orientation = Orientation.Vertical,
@@ -1831,13 +1840,75 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     static TextBox MakeTextBox(string text) =>
       new TextBox { Text = text, Width = 70, Height = 22 };
 
-    static void AttachNumericLostFocus(TextBox box, Action handler)
+    void AttachNumericLive(TextBox box, Func<double> current, Action<double> apply)
     {
-      box.LostFocus += (_, __) => handler();
-      box.KeyDown   += (_, e) =>
+      void ApplyPreview()
       {
-        bool isEnter = e.Key == Keys.Enter;
-        if (isEnter) { handler(); e.Handled = true; }
+        if (_suppress) return;
+
+        if (double.TryParse(box.Text,
+            System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out double v))
+        {
+          apply(v);
+          Redraw();
+        }
+      }
+
+      void ApplyCommit()
+      {
+        if (_suppress) return;
+
+        double v = ParseDouble(box.Text, current());
+        apply(v);
+
+        _suppress = true;
+        try { box.Text = $"{v:G}"; }
+        finally { _suppress = false; }
+
+        Redraw();
+        Persist();
+      }
+
+      box.TextChanged += (_, __) => ApplyPreview();
+      box.LostFocus   += (_, __) => ApplyCommit();
+      box.KeyDown     += (_, e) =>
+      {
+        if (e.Key == Keys.Enter)
+        {
+          ApplyCommit();
+          e.Handled = true;
+        }
+      };
+    }
+
+    void AttachTextLive(TextBox box, Action<string> apply)
+    {
+      void ApplyPreview()
+      {
+        if (_suppress) return;
+        apply(box.Text);
+        Redraw();
+      }
+
+      void ApplyCommit()
+      {
+        if (_suppress) return;
+        apply(box.Text);
+        Redraw();
+        Persist();
+      }
+
+      box.TextChanged += (_, __) => ApplyPreview();
+      box.LostFocus   += (_, __) => ApplyCommit();
+      box.KeyDown     += (_, e) =>
+      {
+        if (e.Key == Keys.Enter)
+        {
+          ApplyCommit();
+          e.Handled = true;
+        }
       };
     }
 
@@ -1943,3 +2014,4 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _undoBtn.Enabled = _s.PlacementIds.Count > 0;
   }
 }
+

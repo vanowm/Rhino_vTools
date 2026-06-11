@@ -10,10 +10,11 @@
     <RootNamespace>vTools</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
-      <Version>26.6.9.1826</Version>
-      <InformationalVersion>26.6.9.1826</InformationalVersion>
-      <AssemblyVersion>26.6.9.1826</AssemblyVersion>
-      <FileVersion>26.6.9.1826</FileVersion>
+    <BuildVersion>$([System.DateTime]::Now.ToString('yy.M.d.HHmm'))</BuildVersion>
+    <Version>$(BuildVersion)</Version>
+    <InformationalVersion>$(BuildVersion)</InformationalVersion>
+    <AssemblyVersion>$(BuildVersion)</AssemblyVersion>
+    <FileVersion>$(BuildVersion)</FileVersion>
       <!-- Fail fast when output files are locked (no retry loop). -->
     <CopyRetryCount>0</CopyRetryCount>
     <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>
@@ -44,7 +45,30 @@
     </Content>
   </ItemGroup>
 
-  <!-- Create a timestamped snapshot of build outputs after every successful Release build. -->
+  <Target Name="GenerateBuildVersionInfo" BeforeTargets="CoreCompile">
+  <PropertyGroup>
+    <GeneratedVersionInfoFile>$(IntermediateOutputPath)vTools.GeneratedVersionInfo.cs</GeneratedVersionInfoFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <GeneratedVersionInfoLines Include="[assembly: System.Reflection.AssemblyVersion(&quot;$(AssemblyVersion)&quot;)]" />
+    <GeneratedVersionInfoLines Include="[assembly: System.Reflection.AssemblyFileVersion(&quot;$(FileVersion)&quot;)]" />
+    <GeneratedVersionInfoLines Include="[assembly: System.Reflection.AssemblyInformationalVersion(&quot;$(InformationalVersion)&quot;)]" />
+  </ItemGroup>
+
+  <WriteLinesToFile
+    File="$(GeneratedVersionInfoFile)"
+    Lines="@(GeneratedVersionInfoLines)"
+    Overwrite="true"
+    Encoding="UTF-8" />
+
+  <ItemGroup>
+    <Compile Include="$(GeneratedVersionInfoFile)" />
+  </ItemGroup>
+
+  <Message Importance="high" Text="vTools build version: $(BuildVersion)" />
+</Target>
+<!-- Create a timestamped snapshot of build outputs after every successful Release build. -->
   <Target Name="CreateReleaseBackup" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
       <BackupTimestamp>$([System.DateTime]::Now.ToString('yy.MM.dd.HHmmss'))</BackupTimestamp>
