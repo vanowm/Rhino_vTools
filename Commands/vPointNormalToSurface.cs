@@ -50,13 +50,13 @@ internal static class PointNormalToSurfaceWorkflow
 
   internal static Result Run(RhinoDoc doc)
   {
-    if (!TryPickSurfaceLike(doc, out var surface) || surface == null)
+    if (!TryPickSurfaceLike(doc, out var targetBrep) || targetBrep == null)
       return Result.Cancel;
 
-    return PickPointsLoop(doc, surface);
+    return PickPointsLoop(doc, targetBrep);
   }
 
-  private static Result PickPointsLoop(RhinoDoc doc, Surface surface)
+  private static Result PickPointsLoop(RhinoDoc doc, Brep targetBrep)
   {
     var previewLineColor = Color.FromArgb(110, 180, 180, 180);
     var previewPointColor = Color.FromArgb(210, 225, 235, 245);
@@ -73,7 +73,7 @@ internal static class PointNormalToSurfaceWorkflow
 
       EventHandler<GetPointDrawEventArgs> drawPreview = (_, drawEvent) =>
       {
-        if (!TrySurfacePointAndNormal(surface, drawEvent.CurrentPoint, out var onSurface, out var previewNormal))
+        if (!TryBrepPointAndNormal(targetBrep, drawEvent.CurrentPoint, out var onSurface, out var previewNormal))
           return;
 
         _ = previewNormal;
@@ -152,7 +152,7 @@ internal static class PointNormalToSurfaceWorkflow
       if (result != GetResult.Point)
         return Result.Success;
 
-      if (!TrySurfacePointAndNormal(surface, gp.Point(), out var onSurface, out var normal))
+      if (!TryBrepPointAndNormal(targetBrep, gp.Point(), out var onSurface, out var normal))
       {
         RhinoApp.WriteLine("Could not evaluate surface normal at picked location.");
         continue;
@@ -173,9 +173,9 @@ internal static class PointNormalToSurfaceWorkflow
     }
   }
 
-  private static bool TryPickSurfaceLike(RhinoDoc doc, out Surface? surface)
+  private static bool TryPickSurfaceLike(RhinoDoc doc, out Brep? targetBrep)
   {
-    surface = null;
+    targetBrep = null;
 
     var go = new GetObject();
     go.SetCommandPrompt("Select target surface or polysurface face");
@@ -194,35 +194,35 @@ internal static class PointNormalToSurfaceWorkflow
     var face = objRef.Face();
     if (face != null)
     {
-      surface = face;
-      return true;
+      targetBrep = face.DuplicateFace(false);
+      return targetBrep != null;
+    }
+
+    var brep = objRef.Brep();
+    if (brep != null)
+    {
+      var pickPoint = objRef.SelectionPoint();
+      var hasPickPoint = pickPoint.IsValid;
+      var closestFace = FindClosestFaceOnBrep(brep, hasPickPoint ? pickPoint : Point3d.Unset, hasPickPoint);
+
+      if (closestFace != null)
+      {
+        targetBrep = closestFace.DuplicateFace(false);
+        return targetBrep != null;
+      }
+
+      targetBrep = brep.DuplicateBrep();
+      return targetBrep != null;
     }
 
     var pickedSurface = objRef.Surface();
     if (pickedSurface != null)
     {
-      surface = pickedSurface;
-      return true;
+      targetBrep = pickedSurface.ToBrep();
+      return targetBrep != null;
     }
 
-    if (objRef.Geometry() is Surface geometrySurface)
-    {
-      surface = geometrySurface;
-      return true;
-    }
-
-    var brep = objRef.Brep();
-    if (brep == null)
-      return false;
-
-    var pickPoint = objRef.SelectionPoint();
-    var hasPickPoint = pickPoint.IsValid;
-    var closestFace = FindClosestFaceOnBrep(brep, hasPickPoint ? pickPoint : Point3d.Unset, hasPickPoint);
-    if (closestFace == null)
-      return false;
-
-    surface = closestFace;
-    return true;
+    return false;
   }
 
   private static BrepFace? FindClosestFaceOnBrep(Brep brep, Point3d pickPoint, bool hasPickPoint)
@@ -269,26 +269,46 @@ internal static class PointNormalToSurfaceWorkflow
     }
   }
 
-  private static bool TrySurfacePointAndNormal(Surface surface, Point3d samplePoint, out Point3d onSurface, out Vector3d normal)
+  private static bool TryBrepPointAndNormal(Brep brep, Point3d samplePoint, out Point3d onSurface, out Vector3d normal)
   {
     onSurface = Point3d.Unset;
     normal = Vector3d.Zero;
 
     try
     {
-      if (!surface.ClosestPoint(samplePoint, out var u, out var v))
+      if (!brep.ClosestPoint(
+          samplePoint,
+          out onSurface,
+          out var componentIndex,
+          out var u,
+          out var v,
+          double.MaxValue,
+          out normal))
+      {
         return false;
+      }
 
-      onSurface = surface.PointAt(u, v);
-      normal = new Vector3d(surface.NormalAt(u, v));
+      if ((!normal.IsValid || normal.IsTiny()) &&
+          componentIndex.ComponentIndexType == ComponentIndexType.BrepFace &&
+          componentIndex.Index >= 0 &&
+          componentIndex.Index < brep.Faces.Count)
+      {
+        normal = brep.Faces[componentIndex.Index].NormalAt(u, v);
+      }
     }
     catch
     {
       return false;
     }
 
-    if (!onSurface.IsValid || !normal.IsValid || normal.IsTiny())
+    if (!onSurface.IsValid)
       return false;
+
+    if (!normal.IsValid || normal.IsTiny())
+      normal = samplePoint - onSurface;
+
+    if (!normal.IsValid || normal.IsTiny())
+      normal = Vector3d.ZAxis;
 
     normal.Unitize();
     return true;
