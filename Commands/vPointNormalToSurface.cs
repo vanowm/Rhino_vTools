@@ -178,9 +178,12 @@ internal static class PointNormalToSurfaceWorkflow
     targetBrep = null;
 
     var go = new GetObject();
-    go.SetCommandPrompt("Select target surface or polysurface face");
+    go.SetCommandPrompt("Select target surface or polysurface");
     go.GeometryFilter = ObjectType.Surface | ObjectType.PolysrfFilter;
-    go.SubObjectSelect = true;
+
+    // Important: whole polysurface, not picked sub-face.
+    go.SubObjectSelect = false;
+
     go.EnablePreSelect(true, true);
 
     var result = go.Get();
@@ -191,34 +194,19 @@ internal static class PointNormalToSurfaceWorkflow
     if (objRef == null)
       return false;
 
-    var face = objRef.Face();
-    if (face != null)
-    {
-      targetBrep = face.DuplicateFace(false);
-      return targetBrep != null;
-    }
-
+    // Whole polysurface / Brep.
     var brep = objRef.Brep();
     if (brep != null)
     {
-      var pickPoint = objRef.SelectionPoint();
-      var hasPickPoint = pickPoint.IsValid;
-      var closestFace = FindClosestFaceOnBrep(brep, hasPickPoint ? pickPoint : Point3d.Unset, hasPickPoint);
-
-      if (closestFace != null)
-      {
-        targetBrep = closestFace.DuplicateFace(false);
-        return targetBrep != null;
-      }
-
       targetBrep = brep.DuplicateBrep();
       return targetBrep != null;
     }
 
-    var pickedSurface = objRef.Surface();
-    if (pickedSurface != null)
+    // Single surface object.
+    var surface = objRef.Surface();
+    if (surface != null)
     {
-      targetBrep = pickedSurface.ToBrep();
+      targetBrep = surface.ToBrep();
       return targetBrep != null;
     }
 
@@ -274,43 +262,71 @@ internal static class PointNormalToSurfaceWorkflow
     onSurface = Point3d.Unset;
     normal = Vector3d.Zero;
 
-    try
-    {
-      if (!brep.ClosestPoint(
-          samplePoint,
-          out onSurface,
-          out var componentIndex,
-          out var u,
-          out var v,
-          double.MaxValue,
-          out normal))
-      {
-        return false;
-      }
-
-      if ((!normal.IsValid || normal.IsTiny()) &&
-          componentIndex.ComponentIndexType == ComponentIndexType.BrepFace &&
-          componentIndex.Index >= 0 &&
-          componentIndex.Index < brep.Faces.Count)
-      {
-        normal = brep.Faces[componentIndex.Index].NormalAt(u, v);
-      }
-    }
-    catch
-    {
-      return false;
-    }
-
-    if (!onSurface.IsValid)
+    if (brep == null || brep.Faces.Count == 0)
       return false;
 
-    if (!normal.IsValid || normal.IsTiny())
-      normal = samplePoint - onSurface;
+    var cplane = RhinoDoc.ActiveDoc?.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
+    if (!cplane.ClosestParameter(samplePoint, out var sampleU, out var sampleV))
+      return false;
 
-    if (!normal.IsValid || normal.IsTiny())
-      normal = Vector3d.ZAxis;
+    var bestScreenD2 = double.MaxValue;
+    var best3dD2 = double.MaxValue;
+    Point3d bestPoint = Point3d.Unset;
+    Vector3d bestNormal = Vector3d.Zero;
 
-    normal.Unitize();
+    foreach (var face in brep.Faces)
+    {
+      try
+      {
+        if (!face.ClosestPoint(samplePoint, out var u, out var v))
+          continue;
+
+        var relation = face.IsPointOnFace(u, v);
+        if (relation == PointFaceRelation.Exterior)
+          continue;
+
+        var point = face.PointAt(u, v);
+        if (!point.IsValid)
+          continue;
+
+        if (!cplane.ClosestParameter(point, out var pointU, out var pointV))
+          continue;
+
+        var du = pointU - sampleU;
+        var dv = pointV - sampleV;
+        var screenD2 = du * du + dv * dv;
+        var d3 = point.DistanceToSquared(samplePoint);
+
+        if (screenD2 > bestScreenD2)
+          continue;
+
+        if (Math.Abs(screenD2 - bestScreenD2) <= RhinoMath.SqrtEpsilon && d3 >= best3dD2)
+          continue;
+
+        var n = face.NormalAt(u, v);
+        if (!n.IsValid || n.IsTiny())
+          n = samplePoint - point;
+
+        if (!n.IsValid || n.IsTiny())
+          n = Vector3d.ZAxis;
+
+        n.Unitize();
+
+        bestScreenD2 = screenD2;
+        best3dD2 = d3;
+        bestPoint = point;
+        bestNormal = n;
+      }
+      catch
+      {
+      }
+    }
+
+    if (!bestPoint.IsValid)
+      return false;
+
+    onSurface = bestPoint;
+    normal = bestNormal;
     return true;
   }
 
