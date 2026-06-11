@@ -464,6 +464,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       LabelOffset     = s.LabelOffsetOpt.CurrentValue,
       LabelOffsetY    = s.LabelOffsetYOpt.CurrentValue,
       LengthsFromStart= new List<double>(lengthsFromStart),
+      CurveEnabled    = s.CurveEnabled.ToList(),
       Percent         = percent,
     };
     s.NotchRecords.Add(record);
@@ -1126,14 +1127,14 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       if (id.HasValue && id.Value != Guid.Empty) doc.Objects.Delete(id.Value, true);
     }
 
-    if (!s.CurveEnabled[curveIndex])
-    {
-      s.NotchIdsByCurve[curveIndex].AddRange(Enumerable.Repeat(Guid.Empty, s.NotchRecords.Count));
-      s.LabelIdsByCurve[curveIndex].AddRange(Enumerable.Repeat<Guid?>(null, s.NotchRecords.Count));
-      // Rebuild placement IDs
-      RebuildPlacementIds(s);
-      return;
-    }
+    // if (!s.CurveEnabled[curveIndex])
+    // {
+    //   s.NotchIdsByCurve[curveIndex].AddRange(Enumerable.Repeat(Guid.Empty, s.NotchRecords.Count));
+    //   s.LabelIdsByCurve[curveIndex].AddRange(Enumerable.Repeat<Guid?>(null, s.NotchRecords.Count));
+    //   // Rebuild placement IDs
+    //   RebuildPlacementIds(s);
+    //   return;
+    // }
 
     var newIds      = new List<Guid>();
     var newLabelIds = new List<Guid?>();
@@ -1143,6 +1144,17 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     foreach (var rec in s.NotchRecords)
     {
+      bool recordHadCurveEnabled =
+      rec.CurveEnabled == null ||
+      rec.CurveEnabled.Count == 0 ||
+      (curveIndex < rec.CurveEnabled.Count && rec.CurveEnabled[curveIndex]);
+
+      if (!recordHadCurveEnabled)
+      {
+        newIds.Add(Guid.Empty);
+        newLabelIds.Add(null);
+        continue;
+      }
       double d = LengthFromRecord(s.Curves[curveIndex], rec, curveIndex);
       bool lbl = rec.LabelEnabled;
       string lv = (rec.LabelValues != null && curveIndex < rec.LabelValues.Count)
@@ -1508,6 +1520,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public double         LabelOffset;
     public double         LabelOffsetY;
     public List<double>   LengthsFromStart = [];
+    public List<bool>     CurveEnabled = [];
     public double?        Percent;
   }
 
@@ -1700,7 +1713,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
           {
             if (_suppress) return;
             s.CurveEnabled[ci] = _enableChecks[ci].Checked == true;
-            RebuildCurveNotches(doc, s, ci);
+            // RebuildCurveNotches(doc, s, ci);
             Redraw();
             Persist();
           };
