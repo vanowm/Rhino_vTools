@@ -811,13 +811,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         var ptBefore = curve.PointAt(tBefore);
         var ptAfter  = curve.PointAt(tAfter);
 
-        var cursorVec = new Vector3d(
+        var cursorDir = new Vector3d(
           cursorPoint.Value.X - kinkPt.X,
           cursorPoint.Value.Y - kinkPt.Y,
           0.0);
 
         var tol = RhinoDoc.ActiveDoc?.ModelAbsoluteTolerance ?? 0.001;
-        if (!cursorVec.IsValid || cursorVec.Length <= tol * 2.0)
+        if (!cursorDir.IsValid || cursorDir.Length <= tol * 2.0)
         {
           var middle = tanBefore + tanAfter;
           middle.Z = 0.0;
@@ -827,13 +827,42 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
           return defaultTangent;
         }
 
+        if (!cursorDir.Unitize())
+          return defaultTangent;
+
         var dirBefore = new Vector3d(ptBefore.X - kinkPt.X, ptBefore.Y - kinkPt.Y, 0.0);
         var dirAfter  = new Vector3d(ptAfter.X  - kinkPt.X, ptAfter.Y  - kinkPt.Y, 0.0);
 
-        double projB = Vector3d.Multiply(cursorVec, dirBefore);
-        double projA = Vector3d.Multiply(cursorVec, dirAfter);
+        if (!dirBefore.Unitize() || !dirAfter.Unitize())
+          return defaultTangent;
 
-        return projA >= projB ? tanAfter : tanBefore;
+        var dirMiddle = dirBefore + dirAfter;
+        dirMiddle.Z = 0.0;
+
+        if (!dirMiddle.IsValid || dirMiddle.IsTiny() || !dirMiddle.Unitize())
+        {
+          double beforeScoreFallback = Vector3d.Multiply(cursorDir, dirBefore);
+          double afterScoreFallback  = Vector3d.Multiply(cursorDir, dirAfter);
+          return afterScoreFallback >= beforeScoreFallback ? tanAfter : tanBefore;
+        }
+
+        var tanMiddle = tanBefore + tanAfter;
+        tanMiddle.Z = 0.0;
+
+        if (!tanMiddle.IsValid || tanMiddle.IsTiny() || !tanMiddle.Unitize())
+          tanMiddle = defaultTangent;
+
+        double beforeScore = Vector3d.Multiply(cursorDir, dirBefore);
+        double middleScore = Vector3d.Multiply(cursorDir, dirMiddle);
+        double afterScore  = Vector3d.Multiply(cursorDir, dirAfter);
+
+        const double middleBias = 0.03;
+        middleScore += middleBias;
+
+        if (middleScore >= beforeScore && middleScore >= afterScore)
+          return tanMiddle;
+
+        return afterScore >= beforeScore ? tanAfter : tanBefore;
       }
       catch
       {
