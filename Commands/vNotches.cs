@@ -88,7 +88,7 @@ public sealed class vNotches : Rhino.Commands.Command
 
   static void SaveOptions(NotchSession s)
   {
-    ToolsOptionStore.Update(Section, sec =>
+    bool ok = ToolsOptionStore.Update(Section, sec =>
     {
       sec["notch_length"]    = s.NotchLengthOpt.CurrentValue;
       sec["notch_offset"]    = s.NotchOffsetOpt.CurrentValue;
@@ -111,6 +111,8 @@ public sealed class vNotches : Rhino.Commands.Command
       foreach (var b in s.CurveSides) arr.Add(b);
       sec["curve_sides"] = arr;
     });
+    if (!ok)
+      RhinoApp.WriteLine("vNotches: failed to save options to vTools.config.json");
   }
 
   // ── Entry point ───────────────────────────────────────────────────────────
@@ -258,6 +260,7 @@ public sealed class vNotches : Rhino.Commands.Command
       FinalizeBlocks(doc, s);
       if (panel != null)
       {
+        try { panel.CommitPendingValues(); } catch { }
         s.SuppressPanelCloseExit = true;
         try { panel.Close(); } catch { }
       }
@@ -1870,7 +1873,7 @@ public sealed class vNotches : Rhino.Commands.Command
       finally { _suppress = false; }
     }
 
-    void CommitPendingValues()
+    public void CommitPendingValues()
     {
       if (_suppress) return;
       _s.NotchTypeIndex = Math.Max(0, _typeDropDown.SelectedIndex);

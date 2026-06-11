@@ -90,7 +90,7 @@
     <!-- If a pending message was written by Copilot before this build, use it directly. -->
     <PropertyGroup Condition="'$(VersionCommitDiffExitCode)' != '0'">
       <PendingMessageFile>$(MSBuildProjectDirectory)\.git\vtools-pending-message.txt</PendingMessageFile>
-      <HasPendingMessage Condition="Exists('$(PendingMessageFile)')">true</HasPendingMessage>
+      <!-- <HasPendingMessage Condition="Exists('$(PendingMessageFile)')">true</HasPendingMessage> -->
     </PropertyGroup>
 
     <Error
@@ -173,4 +173,3 @@
   </Target>
 
 </Project>
-
