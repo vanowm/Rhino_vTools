@@ -32,21 +32,38 @@ internal static class ToolsOptionStore
     }
   }
 
+internal static string LastError { get; private set; } = "";
+
   /// <summary>
   /// Updates one command section and saves the shared config.
   /// </summary>
-  internal static bool Update(string sectionName, Action<JsonObject> updater)
+internal static bool Update(string sectionName, Action<JsonObject> updater)
+{
+  lock (Sync)
   {
-    lock (Sync)
+    try
     {
+      LastError = "";
+
       var root = LoadRoot();
-      var section = root[sectionName] as JsonObject ?? new JsonObject();
+
+      var section = root[sectionName] as JsonObject;
+      if (section == null)
+      {
+        section = new JsonObject();
+        root[sectionName] = section;
+      }
+
       updater(section);
-      root[sectionName] = section;
       return SaveRoot(root);
     }
+    catch (Exception ex)
+    {
+      LastError = ex.Message;
+      return false;
+    }
   }
-
+}
   /// <summary>
   /// Attempts to read a string key from a command section.
   /// </summary>

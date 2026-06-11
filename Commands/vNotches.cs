@@ -112,7 +112,7 @@ public sealed class vNotches : Rhino.Commands.Command
       sec["curve_sides"] = arr;
     });
     if (!ok)
-      RhinoApp.WriteLine("vNotches: failed to save options to vTools.config.json");
+      RhinoApp.WriteLine($"vNotches: failed to save options: {ToolsOptionStore.LastError}");
   }
 
   // ── Entry point ───────────────────────────────────────────────────────────
