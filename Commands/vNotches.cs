@@ -87,34 +87,65 @@ public sealed class vNotches : Rhino.Commands.Command
   }
 
   static void SaveOptions(NotchSession s)
-  {
-    bool ok = ToolsOptionStore.Update(Section, sec =>
-    {
-      sec["notch_length"]    = s.NotchLengthOpt.CurrentValue;
-      sec["notch_offset"]    = s.NotchOffsetOpt.CurrentValue;
-      sec["notch_width"]     = s.NotchWidthOpt.CurrentValue;
-      sec["notch_type"]      = s.NotchTypeValues[s.NotchTypeIndex];
-      sec["percent"]         = s.PercentToggle.CurrentValue;
-      sec["group"]           = s.GroupToggle.CurrentValue;
-      sec["label"]           = s.LabelToggle.CurrentValue;
-      sec["label_value"]     = s.LabelValueText;
-      sec["label_size"]      = s.ManualLabelSize;
-      sec["label_size_auto"] = s.LabelSizeAutoToggle.CurrentValue;
-      sec["label_size_pct"]  = s.LabelSizePctValues[s.LabelSizePctIndex];
-      sec["notch_layer"]     = s.NotchLayerName;
-      sec["label_layer"]     = s.LabelLayerName;
-      sec["label_offset"]    = s.LabelOffsetOpt.CurrentValue;
-      sec["label_offset_y"]  = s.LabelOffsetYOpt.CurrentValue;
-      sec["label_auto_adv"]  = s.LabelAutoAdv;
-      sec["label_side_flip"] = s.LabelSideFlip;
-      var arr = new System.Text.Json.Nodes.JsonArray();
-      foreach (var b in s.CurveSides) arr.Add(b);
-      sec["curve_sides"] = arr;
-    });
-    if (!ok)
-      RhinoApp.WriteLine($"vNotches: failed to save options: {ToolsOptionStore.LastError}");
-  }
+{
+  UpdateStaticDefaultsFromSession(s);
 
+  bool ok = ToolsOptionStore.Update(Section, sec =>
+  {
+    sec["notch_length"]    = _notchLength;
+    sec["notch_offset"]    = _notchOffset;
+    sec["notch_width"]     = _notchWidth;
+    sec["notch_type"]      = _notchType;
+    sec["percent"]         = _percent;
+    sec["group"]           = _group;
+    sec["label"]           = _label;
+    sec["label_value"]     = _labelValue;
+    sec["label_size"]      = _labelSize;
+    sec["label_size_auto"] = _labelSizeAuto;
+    sec["label_size_pct"]  = _labelSizePct;
+    sec["notch_layer"]     = _notchLayer;
+    sec["label_layer"]     = _labelLayer;
+    sec["label_offset"]    = _labelOffset;
+    sec["label_offset_y"]  = _labelOffsetY;
+    sec["label_auto_adv"]  = _labelAutoAdv;
+    sec["label_side_flip"] = _labelSideFlip;
+
+    var arr = new System.Text.Json.Nodes.JsonArray();
+    foreach (var b in _curveSides) arr.Add(b);
+    sec["curve_sides"] = arr;
+  });
+
+  RhinoApp.WriteLine(
+    $"vNotches saving: type={s.NotchTypeValues[s.NotchTypeIndex]}, len={s.NotchLengthOpt.CurrentValue}, offset={s.NotchOffsetOpt.CurrentValue}, label={s.LabelToggle.CurrentValue}, text={s.LabelValueText}");
+  if (!ok)
+    RhinoApp.WriteLine($"vNotches: failed to save options: {ToolsOptionStore.LastError}");
+}
+
+static void UpdateStaticDefaultsFromSession(NotchSession s)
+{
+  _notchLength   = s.NotchLengthOpt.CurrentValue;
+  _notchOffset   = s.NotchOffsetOpt.CurrentValue;
+  _notchWidth    = s.NotchWidthOpt.CurrentValue;
+  _notchType     = s.NotchTypeValues[s.NotchTypeIndex];
+
+  _percent       = s.PercentToggle.CurrentValue;
+  _group         = s.GroupToggle.CurrentValue;
+  _label         = s.LabelToggle.CurrentValue;
+  _labelValue    = s.LabelValueText;
+
+  _labelSize     = s.ManualLabelSize;
+  _labelSizeAuto = s.LabelSizeAutoToggle.CurrentValue;
+  _labelSizePct  = s.LabelSizePctValues[s.LabelSizePctIndex];
+
+  _notchLayer    = s.NotchLayerName;
+  _labelLayer    = s.LabelLayerName;
+  _labelOffset   = s.LabelOffsetOpt.CurrentValue;
+  _labelOffsetY  = s.LabelOffsetYOpt.CurrentValue;
+
+  _labelAutoAdv  = s.LabelAutoAdv;
+  _labelSideFlip = s.LabelSideFlip;
+  _curveSides    = s.CurveSides.ToArray();
+}
   // ── Entry point ───────────────────────────────────────────────────────────
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
