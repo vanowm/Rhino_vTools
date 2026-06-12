@@ -22,6 +22,9 @@ logs/
 
 # Backup artifacts
 backups/
+*.bak
+*.bak.*
+*.tmp
 
 # OS files
 Thumbs.db

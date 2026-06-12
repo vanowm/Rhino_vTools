@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -413,7 +413,8 @@ public sealed class vBiminiParts : Command
     // Add broken fin/seam segments as temporary objects for per-segment picking feedback
     // and interior collection. They are deleted after all generated parts are built.
     var finTempIds  = new List<Guid>();
-    var seamTempIds = new List<Guid>();    foreach (var s in finSegs)
+    var seamTempIds = new List<Guid>();
+    foreach (var s in finSegs)
     {
       var id = doc.Objects.AddCurve(s, plotAttr);
       finTempIds.Add(id);
@@ -435,7 +436,8 @@ public sealed class vBiminiParts : Command
         seamDocIds.Add(Guid.Empty);
       }
     }
-    // Do not delete or modify selected/existing boundary curves.    doc.Views.Redraw();  // show seam/fin segments before stage-2 prompt
+    // Do not delete or modify selected/existing boundary curves.
+    doc.Views.Redraw();  // show seam/fin segments before stage-2 prompt
 
     // Exclude original selected curves, existing boundary pieces, and temp seam picker segments.
     // Do NOT exclude finIds: finished temp pieces inside the facing area must be collected into the facings.
@@ -477,7 +479,8 @@ public sealed class vBiminiParts : Command
     }
     L($"mainCandidates (seam+fin top/bottom): {mainCandidates.Count}");
 
-    var mainPicks = PickPocketCurves("Select center of main pocket curve", 2, doc, mainCandidates, mainCandidateIds, mainSideIds);
+    if (!PickPocketCurves("Select center of main pocket curve", 2, doc, mainCandidates, mainCandidateIds, out var mainPicks, mainSideIds))
+      return CancelWithTempCleanup(doc, finTempIds, seamTempIds);
 
     // ── Stage 3: Secondary pocket curve selection ────────────────────────────
 
@@ -509,8 +512,9 @@ public sealed class vBiminiParts : Command
     else
     {
       var maxSec = mainPicks.Count == 0 ? 2 : 1;
-      secPicks = PickPocketCurves("Select center of secondary pocket curve", maxSec, doc, mainCandidates,
-                                  mainCandidateIds, mainSideIds, clearFirst: false, initialPickedIdxs: mainConsumedIdxs);
+      if (!PickPocketCurves("Select center of secondary pocket curve", maxSec, doc, mainCandidates,
+                            mainCandidateIds, out secPicks, mainSideIds, clearFirst: false, initialPickedIdxs: mainConsumedIdxs))
+        return CancelWithTempCleanup(doc, finTempIds, seamTempIds);
     }
 
     L($"mainPicks={mainPicks.Count}  secPicks={secPicks.Count}");
@@ -611,18 +615,35 @@ public sealed class vBiminiParts : Command
     _log = null;
     return Result.Success;
   }
+  private static Result CancelWithTempCleanup(RhinoDoc doc, IEnumerable<Guid> finTempIds, IEnumerable<Guid> seamTempIds)
+  {
+    foreach (var id in finTempIds)
+      if (id != Guid.Empty)
+        doc.Objects.Delete(id, false);
+
+    foreach (var id in seamTempIds)
+      if (id != Guid.Empty)
+        doc.Objects.Delete(id, false);
+
+    _log?.Dispose();
+    _log = null;
+    doc.Views.Redraw();
+    RhinoApp.WriteLine("vBiminiParts: canceled.");
+    return Result.Cancel;
+  }
 
   // ── Pocket curve picker ─────────────────────────────────────────────────────
 
   // snapTol: how close a GetPoint click must be to a candidate seam to count as "on" it.
   private const double PickSnapTol = 1.0;
 
-  private static List<(Curve Curve, Point3d Center)> PickPocketCurves(
+    private static bool PickPocketCurves(
     string prompt, int maxCount, RhinoDoc doc,
     List<Curve> candidates, List<Guid> candidateIds,
+    out List<(Curve Curve, Point3d Center)> picks,
     List<int>? sideIds = null, bool clearFirst = true, HashSet<int>? initialPickedIdxs = null)
   {
-    var list       = new List<(Curve, Point3d)>();
+    picks = new List<(Curve, Point3d)>();
     var pickedIdxs = initialPickedIdxs != null ? new HashSet<int>(initialPickedIdxs) : new HashSet<int>();
 
     L($"PickPocketCurves: prompt=\"{prompt}\"  maxCount={maxCount}  candidates={candidates.Count}  preExcluded={pickedIdxs.Count}");
@@ -639,12 +660,26 @@ public sealed class vBiminiParts : Command
       while (true)
       {
         var gp = new GetPoint();
-        gp.SetCommandPrompt($"{prompt} ({i + 1}/{maxCount}). Press Enter to finish.");
+        gp.SetCommandPrompt($"{prompt} ({i + 1}/{maxCount}). Press Enter to finish, Esc to cancel.");
         gp.AcceptNothing(true);
 
         var res = gp.Get();
         L($"  pick {i}: result={res}");
-        if (res != GetResult.Point) break;
+
+        if (res == GetResult.Cancel)
+        {
+          L($"  pick {i}: canceled");
+          return false;
+        }
+
+        if (res == GetResult.Nothing)
+          break;
+
+        if (res != GetResult.Point)
+        {
+          L($"  pick {i}: unexpected result {res}; canceling");
+          return false;
+        }
 
         var pt      = gp.Point();
         var bestIdx = -1;
@@ -675,7 +710,7 @@ public sealed class vBiminiParts : Command
         {
           pickedIdxs.Add(bestIdx);
         }
-        list.Add((candidates[bestIdx].DuplicateCurve(), pt));
+        picks.Add((candidates[bestIdx].DuplicateCurve(), pt));
         L($"  pick {i}: confirmed idx={bestIdx}  pt={pt}");
 
         // Highlight the confirmed curve
@@ -687,10 +722,10 @@ public sealed class vBiminiParts : Command
       }
       if (!confirmed) break;  // user pressed Enter; stop asking for more picks
     }
-    return list;
+    return true;
   }
 
-  // ── Stage 4: Facing parts ───────────────────────────────────────────────────
+  // -- Stage 4: Facing parts ───────────────────────────────────────────────────
 
   private static void BuildFacingParts(RhinoDoc doc, Parts seam,
                                         Point3d centroid, int cut1Idx,
