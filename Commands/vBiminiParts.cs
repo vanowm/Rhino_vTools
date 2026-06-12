@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -853,19 +853,101 @@ public sealed class vBiminiParts : Command
                                          Curve innerEdge, Curve seamSide,
                                          Curve topBot, double tol)
   {
-    var tInner = NearestEndpointParam(innerEdge, topBot, tol);
-    if (!tInner.HasValue) return;
-
+    // Use actual curve intersections for caps. Endpoint-only trimming can miss
+    // bulged top/bottom curves or pick the wrong side of the bulge.
     var tSide = NearestEndpointParam(seamSide, topBot, tol);
-    if (!tSide.HasValue) return;
+    if (!tSide.HasValue)
+      return;
 
-    var lo = Math.Min(tInner.Value, tSide.Value);
-    var hi = Math.Max(tInner.Value, tSide.Value);
-    if (hi - lo < RhinoMath.ZeroTolerance) return;
+    var candidates = CurveIntersectionParamsOnSecondCurve(innerEdge, topBot, tol);
+
+    var tEndpoint = NearestEndpointParam(innerEdge, topBot, tol);
+    if (tEndpoint.HasValue)
+      candidates.Add(tEndpoint.Value);
+
+    candidates = candidates
+      .Where(t => Math.Abs(t - tSide.Value) > RhinoMath.ZeroTolerance)
+      .Distinct(new DoubleTolComparer(Math.Max(tol, RhinoMath.ZeroTolerance) * 10.0))
+      .ToList();
+
+    if (candidates.Count == 0)
+      return;
+
+    var bestT = candidates
+      .OrderBy(t => CurveLengthBetween(topBot, tSide.Value, t))
+      .First();
+
+    var lo = Math.Min(tSide.Value, bestT);
+    var hi = Math.Max(tSide.Value, bestT);
+    if (hi - lo < RhinoMath.ZeroTolerance)
+      return;
 
     var trimmed = topBot.Trim(lo, hi);
-    if (trimmed != null) result.Add(trimmed);
+    if (trimmed != null && trimmed.GetLength() > tol)
+      result.Add(trimmed);
   }
+
+  private static List<double> CurveIntersectionParamsOnSecondCurve(Curve first, Curve second, double tol)
+  {
+    var list = new List<double>();
+    var events = Intersection.CurveCurve(first, second, tol, tol);
+    if (events == null)
+      return list;
+
+    foreach (var ev in events)
+    {
+      if (ev.IsOverlap)
+      {
+        list.Add(ev.OverlapB.T0);
+        list.Add(ev.OverlapB.T1);
+      }
+      else
+      {
+        list.Add(ev.ParameterB);
+      }
+    }
+
+    return list;
+  }
+
+  private static double CurveLengthBetween(Curve curve, double t0, double t1)
+  {
+    var lo = Math.Min(t0, t1);
+    var hi = Math.Max(t0, t1);
+    if (hi - lo < RhinoMath.ZeroTolerance)
+      return 0.0;
+
+    try
+    {
+      return curve.GetLength(new Interval(lo, hi));
+    }
+    catch
+    {
+      return hi - lo;
+    }
+  }
+
+  private sealed class DoubleTolComparer : IEqualityComparer<double>
+  {
+    private readonly double _tol;
+
+    public DoubleTolComparer(double tol)
+    {
+      _tol = Math.Max(tol, RhinoMath.ZeroTolerance);
+    }
+
+    public bool Equals(double x, double y)
+    {
+      return Math.Abs(x - y) <= _tol;
+    }
+
+    public int GetHashCode(double obj)
+    {
+      return Math.Round(obj / _tol).GetHashCode();
+    }
+  }
+
+
 
   /// <summary>
   /// Returns the parameter on <paramref name="onCurve"/> of the endpoint of
