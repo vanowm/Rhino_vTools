@@ -766,10 +766,39 @@ public sealed class vBiminiParts : Command
 
     // 3. Trim seamTop and seamBot to only the facing portion
     //    (between where seamSide endpoint meets them and where innerEdge meets them)
-    var connTol      = Math.Max(tol * 200, 0.1);
+    var connTol = Math.Max(tol * 200, 0.1);
+
+    // Trim the inward offset edge to the same cap contact points used by the
+    // top/bottom cap curves. This prevents the offset edge from extending past
+    // an inward-bulging cap.
+    var innerTrimParams = new List<double>();
+
+    if (seamTop != null &&
+        TryGetCapContactParams(innerEdge, seamSide, seamTop, connTol,
+                               out var tInnerTop, out _, out _))
+      innerTrimParams.Add(tInnerTop);
+
+    if (seamBot != null &&
+        TryGetCapContactParams(innerEdge, seamSide, seamBot, connTol,
+                               out var tInnerBot, out _, out _))
+      innerTrimParams.Add(tInnerBot);
+
+    if (innerTrimParams.Count >= 2)
+    {
+      var loInner = innerTrimParams.Min();
+      var hiInner = innerTrimParams.Max();
+      if (hiInner - loInner > RhinoMath.ZeroTolerance)
+      {
+        var trimmedInner = innerEdge.Trim(loInner, hiInner);
+        if (trimmedInner != null && trimmedInner.GetLength() > tol)
+          innerEdge = trimmedInner;
+      }
+    }
+
     var facingCurves = new List<Curve> { innerEdge, seamSide.DuplicateCurve() };
     if (seamTop != null) TryAddTrimmedSeam(facingCurves, innerEdge, seamSide, seamTop, connTol);
     if (seamBot != null) TryAddTrimmedSeam(facingCurves, innerEdge, seamSide, seamBot, connTol);
+
 
     // 4. Collect objects inside the facing boundary (before move)
     var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
@@ -853,32 +882,12 @@ public sealed class vBiminiParts : Command
                                          Curve innerEdge, Curve seamSide,
                                          Curve topBot, double tol)
   {
-    // Use actual curve intersections for caps. Endpoint-only trimming can miss
-    // bulged top/bottom curves or pick the wrong side of the bulge.
-    var tSide = NearestEndpointParam(seamSide, topBot, tol);
-    if (!tSide.HasValue)
+    if (!TryGetCapContactParams(innerEdge, seamSide, topBot, tol,
+                                out _, out var tSide, out var tCap))
       return;
 
-    var candidates = CurveIntersectionParamsOnSecondCurve(innerEdge, topBot, tol);
-
-    var tEndpoint = NearestEndpointParam(innerEdge, topBot, tol);
-    if (tEndpoint.HasValue)
-      candidates.Add(tEndpoint.Value);
-
-    candidates = candidates
-      .Where(t => Math.Abs(t - tSide.Value) > RhinoMath.ZeroTolerance)
-      .Distinct(new DoubleTolComparer(Math.Max(tol, RhinoMath.ZeroTolerance) * 10.0))
-      .ToList();
-
-    if (candidates.Count == 0)
-      return;
-
-    var bestT = candidates
-      .OrderBy(t => CurveLengthBetween(topBot, tSide.Value, t))
-      .First();
-
-    var lo = Math.Min(tSide.Value, bestT);
-    var hi = Math.Max(tSide.Value, bestT);
+    var lo = Math.Min(tCap, tSide);
+    var hi = Math.Max(tCap, tSide);
     if (hi - lo < RhinoMath.ZeroTolerance)
       return;
 
@@ -887,30 +896,76 @@ public sealed class vBiminiParts : Command
       result.Add(trimmed);
   }
 
-  private static List<double> CurveIntersectionParamsOnSecondCurve(Curve first, Curve second, double tol)
+  private static bool TryGetCapContactParams(Curve innerEdge, Curve seamSide, Curve topBot, double tol,
+                                             out double tInnerEdge, out double tTopBotSide, out double tTopBotCap)
   {
-    var list = new List<double>();
-    var events = Intersection.CurveCurve(first, second, tol, tol);
-    if (events == null)
-      return list;
+    tInnerEdge = 0.0;
+    tTopBotSide = 0.0;
+    tTopBotCap = 0.0;
 
-    foreach (var ev in events)
+    var tSide = NearestEndpointParam(seamSide, topBot, tol);
+    if (!tSide.HasValue)
+      return false;
+
+    var candidates = new List<(double Inner, double TopBot)>();
+
+    var events = Intersection.CurveCurve(innerEdge, topBot, tol, tol);
+    if (events != null)
     {
-      if (ev.IsOverlap)
+      foreach (var ev in events)
       {
-        list.Add(ev.OverlapB.T0);
-        list.Add(ev.OverlapB.T1);
-      }
-      else
-      {
-        list.Add(ev.ParameterB);
+        if (ev.IsOverlap)
+        {
+          candidates.Add((ev.OverlapA.T0, ev.OverlapB.T0));
+          candidates.Add((ev.OverlapA.T1, ev.OverlapB.T1));
+        }
+        else
+        {
+          candidates.Add((ev.ParameterA, ev.ParameterB));
+        }
       }
     }
 
-    return list;
+    // Endpoint fallback for cases where Extend moved the inner edge endpoint onto topBot
+    // but CurveCurve does not return an event at tolerance.
+    var tEndpointOnTopBot = NearestEndpointParam(innerEdge, topBot, tol);
+    if (tEndpointOnTopBot.HasValue)
+    {
+      var pt = topBot.PointAt(tEndpointOnTopBot.Value);
+      if (innerEdge.ClosestPoint(pt, out var tOnInner))
+        candidates.Add((tOnInner, tEndpointOnTopBot.Value));
+    }
+
+    var filtered = new List<(double Inner, double TopBot)>();
+    var paramTol = Math.Max(tol, RhinoMath.ZeroTolerance) * 10.0;
+
+    foreach (var c in candidates)
+    {
+      if (Math.Abs(c.TopBot - tSide.Value) <= RhinoMath.ZeroTolerance)
+        continue;
+
+      var duplicate = filtered.Any(f =>
+        Math.Abs(f.Inner - c.Inner) <= paramTol &&
+        Math.Abs(f.TopBot - c.TopBot) <= paramTol);
+
+      if (!duplicate)
+        filtered.Add(c);
+    }
+
+    if (filtered.Count == 0)
+      return false;
+
+    var best = filtered
+      .OrderBy(c => CurveLengthBetweenForCap(topBot, tSide.Value, c.TopBot))
+      .First();
+
+    tInnerEdge = best.Inner;
+    tTopBotSide = tSide.Value;
+    tTopBotCap = best.TopBot;
+    return true;
   }
 
-  private static double CurveLengthBetween(Curve curve, double t0, double t1)
+  private static double CurveLengthBetweenForCap(Curve curve, double t0, double t1)
   {
     var lo = Math.Min(t0, t1);
     var hi = Math.Max(t0, t1);
@@ -927,34 +982,7 @@ public sealed class vBiminiParts : Command
     }
   }
 
-  private sealed class DoubleTolComparer : IEqualityComparer<double>
-  {
-    private readonly double _tol;
-
-    public DoubleTolComparer(double tol)
-    {
-      _tol = Math.Max(tol, RhinoMath.ZeroTolerance);
-    }
-
-    public bool Equals(double x, double y)
-    {
-      return Math.Abs(x - y) <= _tol;
-    }
-
-    public int GetHashCode(double obj)
-    {
-      return Math.Round(obj / _tol).GetHashCode();
-    }
-  }
-
-
-
-  /// <summary>
-  /// Returns the parameter on <paramref name="onCurve"/> of the endpoint of
-  /// <paramref name="source"/> (start or end) that lies within <paramref name="tol"/>,
-  /// or null if neither endpoint qualifies.
-  /// </summary>
-  private static double? NearestEndpointParam(Curve source, Curve onCurve, double tol)
+private static double? NearestEndpointParam(Curve source, Curve onCurve, double tol)
   {
     foreach (var pt in new[] { source.PointAtStart, source.PointAtEnd })
     {
