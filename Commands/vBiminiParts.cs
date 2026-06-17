@@ -1684,32 +1684,32 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
     Curve[] segments;
     if (mirLeft != null && mirRight != null)
     {
-      // Top corners: mirrored flares ∩ offset sides
-      if (!FindIntersectionParam(mirLeft,  offLExt, tol, out var tML_mir, out var tML_off)) { L("  BuildPocketOutline: no mirLeft∩offLeft"); return null; }
-      if (!FindIntersectionParam(mirRight, offRExt, tol, out var tMR_mir, out var tMR_off)) { L("  BuildPocketOutline: no mirRight∩offRight"); return null; }
+      var adjExt = adjSeam.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? adjSeam.DuplicateCurve();
+      var mirLeftExt  = mirLeft.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)  ?? mirLeft.DuplicateCurve();
+      var mirRightExt = mirRight.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? mirRight.DuplicateCurve();
 
-      // Trim flares from adjSeam endpoint (T0) to where they meet the offset side
-      var mirLeftSeg  = mirLeft.Trim(mirLeft.Domain.T0,   tML_mir)
-                      ?? mirLeft.Trim(tML_mir, mirLeft.Domain.T1);
-      var mirRightSeg = mirRight.Trim(mirRight.Domain.T0, tMR_mir)
-                      ?? mirRight.Trim(tMR_mir, mirRight.Domain.T1);
-      if (mirLeftSeg == null || mirRightSeg == null) { L($"  BuildPocketOutline: flare trim null  mirLeftSeg={mirLeftSeg != null}  mirRightSeg={mirRightSeg != null}"); return null; }
+      // Top corners are true CUT1 intersections: trim the parent CUT1 and mirrored CUT1,
+      // do not bridge them with a connector line.
+      if (!FindIntersectionParam(adjExt, mirLeftExt,  tol, out var tAdj_L, out var tML_top)) { L("  BuildPocketOutline: no adjSeam∩mirLeft"); return null; }
+      if (!FindIntersectionParam(adjExt, mirRightExt, tol, out var tAdj_R, out var tMR_top)) { L("  BuildPocketOutline: no adjSeam∩mirRight"); return null; }
+      if (!FindIntersectionParam(mirLeftExt,  offLExt, tol, out var tML_offMir, out var tML_off)) { L("  BuildPocketOutline: no mirLeft∩offLeft"); return null; }
+      if (!FindIntersectionParam(mirRightExt, offRExt, tol, out var tMR_offMir, out var tMR_off)) { L("  BuildPocketOutline: no mirRight∩offRight"); return null; }
+
+      var topSeg      = TrimBetweenParams(adjExt,      tAdj_L,   tAdj_R);
+      var mirLeftSeg  = TrimBetweenParams(mirLeftExt,  tML_top,  tML_offMir);
+      var mirRightSeg = TrimBetweenParams(mirRightExt, tMR_top,  tMR_offMir);
+      if (topSeg == null || mirLeftSeg == null || mirRightSeg == null) { L($"  BuildPocketOutline: top/flare trim null  topSeg={topSeg != null}  mirLeftSeg={mirLeftSeg != null}  mirRightSeg={mirRightSeg != null}"); return null; }
 
       // Offset sides: flare intersection (top) to perpendicular foot (bottom)
       var offLSeg = offLExt.Trim(Math.Min(tML_off, tBotL_off), Math.Max(tML_off, tBotL_off));
       var offRSeg = offRExt.Trim(Math.Min(tMR_off, tBotR_off), Math.Max(tMR_off, tBotR_off));
       if (offLSeg == null || offRSeg == null) { L($"  BuildPocketOutline: offSide trim null  offLSeg={offLSeg != null}  offRSeg={offRSeg != null}"); return null; }
 
-      var seamToRight = MakeGapConnector(adjSeam, mirRightSeg, tol);
-      var seamToLeft  = MakeGapConnector(adjSeam, mirLeftSeg,  tol);
-
-      // 8-seg plus optional short connectors between CUT1 top and mirrored CUT1 flares.
+      // 8-seg: trimmed CUT1 top → mirrored CUT1 right → offRight → perpR → zip → perpL → offLeft → mirrored CUT1 left
       if (perpL != null && perpR != null)
-        segments = new Curve?[] { adjSeam.DuplicateCurve(), seamToRight, mirRightSeg, offRSeg, perpR, zipSeg, perpL, offLSeg, mirLeftSeg, seamToLeft }
-                   .Where(c => c != null).Cast<Curve>().ToArray();
+        segments = new Curve[] { topSeg, mirRightSeg, offRSeg, perpR, zipSeg, perpL, offLSeg, mirLeftSeg };
       else
-        segments = new Curve?[] { adjSeam.DuplicateCurve(), seamToRight, mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg, seamToLeft }
-                   .Where(c => c != null).Cast<Curve>().ToArray();
+        segments = new Curve[] { topSeg, mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
     }
     else
     {
@@ -1774,31 +1774,13 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
     return trimmed ?? flare.DuplicateCurve();
   }
 
-  private static Curve? MakeGapConnector(Curve a, Curve b, double tol)
+  private static Curve? TrimBetweenParams(Curve crv, double a, double b)
   {
-    var ptsA = new[] { a.PointAtStart, a.PointAtEnd };
-    var ptsB = new[] { b.PointAtStart, b.PointAtEnd };
-    var best = double.MaxValue;
-    var pa = Point3d.Unset;
-    var pb = Point3d.Unset;
-
-    foreach (var aa in ptsA)
-      foreach (var bb in ptsB)
-      {
-        var d = aa.DistanceTo(bb);
-        if (d < best)
-        {
-          best = d;
-          pa = aa;
-          pb = bb;
-        }
-      }
-
-    if (!pa.IsValid || !pb.IsValid || best <= Math.Max(tol * 10.0, 0.001))
+    var lo = Math.Min(a, b);
+    var hi = Math.Max(a, b);
+    if (hi - lo <= 1e-9)
       return null;
-
-    L($"  MakeGapConnector: gap={best:F4}  from={pa}  to={pb}");
-    return new LineCurve(pa, pb);
+    return crv.Trim(lo, hi);
   }
 
   /// <summary>
