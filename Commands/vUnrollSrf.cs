@@ -116,6 +116,16 @@ public sealed class vUnrollSrf : Command
       var toSelect = flatGeom.Concat(flatDots).ToList();
       if (toSelect.Count > 0)
       {
+        if (toSelect.Count > 1)
+        {
+          var groupIndex = doc.Groups.Add($"vUnrollSrf {DateTime.Now:yyyyMMdd HHmmss}");
+          if (groupIndex >= 0)
+          {
+            foreach (var obj in toSelect)
+              doc.Groups.AddToGroup(groupIndex, obj.Id);
+          }
+        }
+
         doc.Objects.UnselectAll();
         foreach (var obj in toSelect)
           obj.Select(true);

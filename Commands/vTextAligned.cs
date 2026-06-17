@@ -1278,7 +1278,10 @@ public sealed class vTextAligned : Command
 
     private TextEntity BuildPreviewText(Plane plane)
     {
-      return BuildTextEntity(_doc, _text, _height, plane);
+      var te = BuildTextEntity(_doc, _text, _height, plane);
+      try { te.DrawForward = false; } catch { }
+      try { te.DimensionScale = 0.9; } catch { }
+      return te;
     }
   }
 }
