@@ -258,7 +258,7 @@ public sealed class vBiminiParts : Command
     go.SetCommandPrompt("Select bimini boundary curves");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
-    go.GroupSelect = true;
+    go.GroupSelect = false;
     go.EnablePreSelect(true, true);
     go.AcceptNothing(false);
 
