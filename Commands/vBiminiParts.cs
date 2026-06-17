@@ -1078,13 +1078,26 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
       var pocketOutline = BuildPocketOutline(adjSeam, mirLeft, mirRight,
                                              offLeft, offRight, zipperRaw, fin.Left, fin.Right, extLen, tol);
 
-      // Collect objects inside the pocket boundary before moving
+      // Collect objects inside the pocket boundary before moving.
+      // Then remove only strictly-inside side-strip content from the copied pocket objects.
+      // Boundary curves, including the side sew curve, remain in the pocket copy.
       var interiorObjects = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
       L($"  mc: pocketOutline={pocketOutline != null}  closed={(pocketOutline?.IsClosed)}  globalExclude={globalExclude.Count}");
       if (pocketOutline != null)
         L($"  mc: outline bbox={pocketOutline.GetBoundingBox(true)}");
       if (pocketOutline != null && pocketOutline.IsClosed)
+      {
         interiorObjects = CollectInsideObjects(doc, globalExclude, pocketOutline, Plane.WorldXY, tol);
+
+        var sideStrips = BuildSideStripBoundaries(adjFin!, fin.Left, offLeft, seam.Left,
+                                                  fin.Right, offRight, seam.Right,
+                                                  zipperRaw, extLen, tol);
+        foreach (var strip in sideStrips)
+        {
+          var removed = RemoveSideStripFromCollectedCopies(ref interiorObjects, strip, Plane.WorldXY, tol);
+          L($"  mc: side-strip removed-from-copy={removed}  bbox={strip.GetBoundingBox(true)}");
+        }
+      }
       L($"  mc: interior collected={interiorObjects.Count}");
 
       // outDir = perpendicular to adjSeam pointing outward, derived from the zipper offset.
@@ -1783,6 +1796,88 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
     return crv.Trim(lo, hi);
   }
 
+  private static List<Curve> BuildSideStripBoundaries(
+    Curve adjFin,
+    Curve? leftSide, Curve? leftOffset, Curve? leftSeam,
+    Curve? rightSide, Curve? rightOffset, Curve? rightSeam,
+    Curve zipper, double extLen, double tol)
+  {
+    var result = new List<Curve>();
+    AddSideStripBoundary(result, adjFin, leftSide, leftOffset, leftSeam, zipper, extLen, tol);
+    AddSideStripBoundary(result, adjFin, rightSide, rightOffset, rightSeam, zipper, extLen, tol);
+    return result;
+  }
+
+  private static void AddSideStripBoundary(
+    List<Curve> result,
+    Curve adjFin, Curve? side, Curve? offset, Curve? seamSide,
+    Curve zipper, double extLen, double tol)
+  {
+    if (side == null || offset == null || seamSide == null)
+      return;
+
+    var sideStart = FindSharedEndpoint(adjFin, side);
+    if (!sideStart.IsValid)
+      return;
+
+    var zipExt = zipper.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? zipper.DuplicateCurve();
+    var seamExt = seamSide.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? seamSide.DuplicateCurve();
+    if (!FindIntersectionParam(seamExt, zipExt, tol, out _, out var tZip))
+      return;
+
+    var zipSidePt = zipExt.PointAt(tZip);
+    if (!side.ClosestPoint(zipSidePt, out var tSideEnd))
+      return;
+    var sideEnd = side.PointAt(tSideEnd);
+
+    var boundary = BuildSideStripBoundary(side, offset, sideStart, sideEnd, tol);
+    if (boundary != null)
+      result.Add(boundary);
+  }
+
+  private static Curve? BuildSideStripBoundary(Curve side, Curve offset, Point3d sideStart, Point3d sideEnd, double tol)
+  {
+    if (!side.ClosestPoint(sideStart, out var tSideA) || !side.ClosestPoint(sideEnd, out var tSideB))
+      return null;
+
+    var sideSeg = TrimBetweenParams(side, tSideA, tSideB);
+    if (sideSeg == null)
+      return null;
+    if (sideSeg.PointAtStart.DistanceTo(sideStart) > sideSeg.PointAtEnd.DistanceTo(sideStart))
+      sideSeg.Reverse();
+
+    var pSideA = sideSeg.PointAtStart;
+    var pSideB = sideSeg.PointAtEnd;
+    if (!offset.ClosestPoint(pSideA, out var tOffA) || !offset.ClosestPoint(pSideB, out var tOffB))
+      return null;
+
+    var offSeg = TrimBetweenParams(offset, tOffA, tOffB);
+    if (offSeg == null)
+      return null;
+
+    var pOffA = offset.PointAt(tOffA);
+    var pOffB = offset.PointAt(tOffB);
+    if (offSeg.PointAtStart.DistanceTo(pOffB) > offSeg.PointAtEnd.DistanceTo(pOffB))
+      offSeg.Reverse();
+
+    var joinTol = Math.Max(tol * 200.0, 0.1);
+    var joined = Curve.JoinCurves(new Curve[]
+    {
+      sideSeg,
+      new LineCurve(pSideB, pOffB),
+      offSeg,
+      new LineCurve(pOffA, pSideA)
+    }, joinTol);
+
+    if (joined == null || joined.Length != 1 || !joined[0].IsClosed)
+    {
+      L($"  BuildSideStripBoundary: failed  joined={joined?.Length}  closed={(joined?.Length == 1 ? joined[0].IsClosed.ToString() : "n/a")}");
+      return null;
+    }
+
+    return joined[0];
+  }
+
   /// <summary>
   /// Mirrors a section of <paramref name="adjSeam"/> (length ≤ <paramref name="depth"/>)
   /// at the end nearest <paramref name="cornerPt"/> across <paramref name="finSide"/> at
@@ -2203,6 +2298,84 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
 
     L($"CollectInsideObjects done: scanned={nScanned}  excluded={nExcluded}  outside={nOutside}  collected={result.Count}");
     return result;
+  }
+
+  private static int RemoveSideStripFromCollectedCopies(
+    ref List<(GeometryBase Geom, ObjectAttributes Attr)> objects,
+    Curve stripBoundary, Plane plane, double tol)
+  {
+    var kept = new List<(GeometryBase, ObjectAttributes)>();
+    var boundary = new List<Curve> { stripBoundary };
+    var removed = 0;
+
+    foreach (var (geom, attr) in objects)
+    {
+      if (geom is Curve crv)
+      {
+        var splitParams = new SortedSet<double>();
+        var events = Intersection.CurveCurve(crv, stripBoundary, tol, tol);
+        if (events != null)
+          foreach (var ev in events)
+          {
+            if (ev.IsOverlap) { splitParams.Add(ev.OverlapA.T0); splitParams.Add(ev.OverlapA.T1); }
+            else splitParams.Add(ev.ParameterA);
+          }
+
+        if (splitParams.Count == 0)
+        {
+          if (IsStrictlyInside(crv.PointAtNormalizedLength(0.5), boundary, plane, tol))
+          {
+            removed++;
+            continue;
+          }
+
+          kept.Add((geom, attr));
+          continue;
+        }
+
+        var segments = crv.Split(splitParams);
+        if (segments == null)
+        {
+          kept.Add((geom, attr));
+          continue;
+        }
+
+        foreach (var seg in segments)
+        {
+          if (seg.GetLength() < tol) continue;
+          if (IsStrictlyInside(seg.PointAtNormalizedLength(0.5), boundary, plane, tol))
+          {
+            removed++;
+            continue;
+          }
+
+          kept.Add((seg, attr.Duplicate()));
+        }
+      }
+      else
+      {
+        var testPt = RepresentativePoint(geom);
+        if (testPt.IsValid && IsStrictlyInside(testPt, boundary, plane, tol))
+        {
+          removed++;
+          continue;
+        }
+
+        kept.Add((geom, attr));
+      }
+    }
+
+    objects = kept;
+    return removed;
+  }
+
+  private static bool IsStrictlyInside(Point3d pt, List<Curve> closed, Plane plane, double tol)
+  {
+    if (!pt.IsValid) return false;
+    foreach (var c in closed)
+      if (c.Contains(pt, plane, tol) == PointContainment.Inside)
+        return true;
+    return false;
   }
 
   private static Point3d RepresentativePoint(GeometryBase geom)
