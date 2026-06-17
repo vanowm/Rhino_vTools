@@ -1041,19 +1041,37 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
       var zipperRaw = OffsetToward(adjSeam, centroid, pocketDepth, tol);
       if (zipperRaw == null) { L($"  mc: zipperRaw offset failed"); continue; }
 
-      var offLeft  = seam.Left  != null ? OffsetAway(seam.Left,  centroid, _sidePktOutward, tol) : null;
-      var offRight = seam.Right != null ? OffsetAway(seam.Right, centroid, _sidePktOutward, tol) : null;
-      if (offLeft == null || offRight == null) { L($"  mc: offLeft={offLeft != null} offRight={offRight != null} seamL={seam.Left != null} seamR={seam.Right != null}"); continue; }
+      var adjFin = ClosestOf(adjSeam, fin.Top, fin.Bottom, fin.Left, fin.Right);
+      if (adjFin == null) { L("  mc: no adjFin/sew curve"); continue; }
 
-      // Build mirrored end flares at each corner where adjSeam meets the fin sides
-      var adjFin   = ClosestOf(adjSeam, fin.Top, fin.Bottom, fin.Left, fin.Right);
+      // SidePktOutward comes from the side sew curves, not the side CUT1 curves.
+      var offLeft  = fin.Left  != null ? OffsetAway(fin.Left,  centroid, _sidePktOutward, tol) : null;
+      var offRight = fin.Right != null ? OffsetAway(fin.Right, centroid, _sidePktOutward, tol) : null;
+      if (offLeft == null || offRight == null) { L($"  mc: offLeft={offLeft != null} offRight={offRight != null} finL={fin.Left != null} finR={fin.Right != null}"); continue; }
+
+      // Only the two main curves are mirrored: CUT1 and sew.  Both use the side
+      // sew curve as the mirror plane and both are trimmed to the side offset.
       Curve? mirLeft = null, mirRight = null;
-      if (adjFin != null)
+      Curve? sewMirLeft = null, sewMirRight = null;
+      if (fin.Left != null)
       {
-        if (fin.Left  != null) { var c = FindSharedEndpoint(adjFin, fin.Left);  if (c.IsValid) mirLeft  = BuildMirroredEnd(adjSeam, fin.Left,  c, pocketDepth, extLen); }
-        if (fin.Right != null) { var c = FindSharedEndpoint(adjFin, fin.Right); if (c.IsValid) mirRight = BuildMirroredEnd(adjSeam, fin.Right, c, pocketDepth, extLen); }
+        var c = FindSharedEndpoint(adjFin, fin.Left);
+        if (c.IsValid)
+        {
+          mirLeft = TrimFlareToSide(BuildMirroredEnd(adjSeam, fin.Left, c, pocketDepth, extLen), offLeft, extLen, tol);
+          sewMirLeft = TrimFlareToSide(BuildMirroredEnd(adjFin, fin.Left, c, pocketDepth, extLen), offLeft, extLen, tol);
+        }
       }
-      L($"  mc: adjFin={adjFin != null}  mirLeft={mirLeft != null}  mirRight={mirRight != null}");
+      if (fin.Right != null)
+      {
+        var c = FindSharedEndpoint(adjFin, fin.Right);
+        if (c.IsValid)
+        {
+          mirRight = TrimFlareToSide(BuildMirroredEnd(adjSeam, fin.Right, c, pocketDepth, extLen), offRight, extLen, tol);
+          sewMirRight = TrimFlareToSide(BuildMirroredEnd(adjFin, fin.Right, c, pocketDepth, extLen), offRight, extLen, tol);
+        }
+      }
+      L($"  mc: adjFin={adjFin != null}  mirLeft={mirLeft != null}  mirRight={mirRight != null}  sewMirLeft={sewMirLeft != null}  sewMirRight={sewMirRight != null}");
 
       // Build closed pocket outline: adjSeam (top) → mirRight → offRight → perpR
       //   → zipper (full width to finished sides) → perpL → offLeft → mirLeft → back
@@ -1174,6 +1192,23 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
         outlineAttr.SetUserString("vBiminiPkt", seamKey);
         var id2 = doc.Objects.AddCurve(pocketOutline, outlineAttr);
         if (id2 != Guid.Empty) addedIds.Add(id2);
+
+        // Add matching mirrored sew curves only after the CUT1 outline exists.
+        var plotIdxMain = EnsureLayer(doc, _layerPlot, _layerPlotColor);
+        foreach (var sewMir in new[] { sewMirLeft, sewMirRight })
+        {
+          if (sewMir == null)
+            continue;
+
+          var copy = sewMir.DuplicateCurve();
+          copy.Transform(xf);
+
+          var sewAttr = MakeAttr(plotIdxMain);
+          sewAttr.SetUserString("vBiminiPkt", seamKey);
+
+          var sewId = doc.Objects.AddCurve(copy, sewAttr);
+          if (sewId != Guid.Empty) addedIds.Add(sewId);
+        }
       }
 
       // Center point — project to finished edge; Reference layer
@@ -1665,11 +1700,16 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
       var offRSeg = offRExt.Trim(Math.Min(tMR_off, tBotR_off), Math.Max(tMR_off, tBotR_off));
       if (offLSeg == null || offRSeg == null) { L($"  BuildPocketOutline: offSide trim null  offLSeg={offLSeg != null}  offRSeg={offRSeg != null}"); return null; }
 
-      // 8-seg: adjSeam → mirRight → offRight → perpR → zip → perpL → offLeft → mirLeft
+      var seamToRight = MakeGapConnector(adjSeam, mirRightSeg, tol);
+      var seamToLeft  = MakeGapConnector(adjSeam, mirLeftSeg,  tol);
+
+      // 8-seg plus optional short connectors between CUT1 top and mirrored CUT1 flares.
       if (perpL != null && perpR != null)
-        segments = new Curve[] { adjSeam.DuplicateCurve(), mirRightSeg, offRSeg, perpR, zipSeg, perpL, offLSeg, mirLeftSeg };
+        segments = new Curve?[] { adjSeam.DuplicateCurve(), seamToRight, mirRightSeg, offRSeg, perpR, zipSeg, perpL, offLSeg, mirLeftSeg, seamToLeft }
+                   .Where(c => c != null).Cast<Curve>().ToArray();
       else
-        segments = new Curve[] { adjSeam.DuplicateCurve(), mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg };
+        segments = new Curve?[] { adjSeam.DuplicateCurve(), seamToRight, mirRightSeg, offRSeg, zipSeg, offLSeg, mirLeftSeg, seamToLeft }
+                   .Where(c => c != null).Cast<Curve>().ToArray();
     }
     else
     {
@@ -1718,6 +1758,49 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
     return true;
   }
 
+  private static Curve? TrimFlareToSide(Curve? flare, Curve? side, double extLen, double tol)
+  {
+    if (flare == null)
+      return null;
+    if (side == null)
+      return flare.DuplicateCurve();
+
+    var sideExt = side.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? side.DuplicateCurve();
+    if (!FindIntersectionParam(flare, sideExt, tol, out var tFlare, out _))
+      return flare.DuplicateCurve();
+
+    var trimmed = flare.Trim(flare.Domain.T0, tFlare)
+                  ?? flare.Trim(tFlare, flare.Domain.T1);
+    return trimmed ?? flare.DuplicateCurve();
+  }
+
+  private static Curve? MakeGapConnector(Curve a, Curve b, double tol)
+  {
+    var ptsA = new[] { a.PointAtStart, a.PointAtEnd };
+    var ptsB = new[] { b.PointAtStart, b.PointAtEnd };
+    var best = double.MaxValue;
+    var pa = Point3d.Unset;
+    var pb = Point3d.Unset;
+
+    foreach (var aa in ptsA)
+      foreach (var bb in ptsB)
+      {
+        var d = aa.DistanceTo(bb);
+        if (d < best)
+        {
+          best = d;
+          pa = aa;
+          pb = bb;
+        }
+      }
+
+    if (!pa.IsValid || !pb.IsValid || best <= Math.Max(tol * 10.0, 0.001))
+      return null;
+
+    L($"  MakeGapConnector: gap={best:F4}  from={pa}  to={pb}");
+    return new LineCurve(pa, pb);
+  }
+
   /// <summary>
   /// Mirrors a section of <paramref name="adjSeam"/> (length ≤ <paramref name="depth"/>)
   /// at the end nearest <paramref name="cornerPt"/> across <paramref name="finSide"/> at
@@ -1746,15 +1829,23 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
     var sideDir      = finSide.PointAtEnd - finSide.PointAtStart;
     sideDir.Unitize();
     var mirrorNormal = new Vector3d(-sideDir.Y, sideDir.X, 0);
-    var mirrorOrigin = isAtStart ? adjSeam.PointAtStart : adjSeam.PointAtEnd;
-    var mirrored     = section.DuplicateCurve();
-    mirrored.Transform(Transform.Mirror(new Plane(mirrorOrigin, mirrorNormal)));
+    var mirrorOrigin = cornerPt;
+    if (finSide.ClosestPoint(cornerPt, out var tAxis))
+      mirrorOrigin = finSide.PointAt(tAxis);
+    var mirrorPlane = new Plane(mirrorOrigin, mirrorNormal);
+    L($"  BuildMirroredEnd: sourceStart={adjSeam.PointAtStart} sourceEnd={adjSeam.PointAtEnd} axisStart={finSide.PointAtStart} axisEnd={finSide.PointAtEnd} origin={mirrorOrigin} normal={mirrorNormal}");
 
-    // Ensure Start = mirrorOrigin so T0-based trim in BuildPocketOutline connects directly to adjSeam
-    if (mirrored.PointAtEnd.DistanceTo(mirrorOrigin) < mirrored.PointAtStart.DistanceTo(mirrorOrigin))
+    var mirrored     = section.DuplicateCurve();
+    mirrored.Transform(Transform.Mirror(mirrorPlane));
+
+    // Orient the mirrored curve so its start is closest to the mirrored source endpoint.
+    var sourceEnd = isAtStart ? adjSeam.PointAtStart : adjSeam.PointAtEnd;
+    var mirroredSourceEnd = sourceEnd;
+    mirroredSourceEnd.Transform(Transform.Mirror(mirrorPlane));
+    if (mirrored.PointAtEnd.DistanceTo(mirroredSourceEnd) < mirrored.PointAtStart.DistanceTo(mirroredSourceEnd))
       mirrored.Reverse();
 
-    // Extend the far end (away from cornerPt) so it overshoots the offset side
+    // Extend the far end so it overshoots the offset side
     var extended = mirrored.Extend(CurveEnd.End, extLen, CurveExtensionStyle.Line);
     return extended ?? mirrored;
   }
