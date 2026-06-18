@@ -1076,7 +1076,8 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
       // Build closed pocket outline: adjSeam (top) → mirRight → offRight → perpR
       //   → zipper (full width to finished sides) → perpL → offLeft → mirLeft → back
       var pocketOutline = BuildPocketOutline(adjSeam, mirLeft, mirRight,
-                                             offLeft, offRight, zipperRaw, fin.Left, fin.Right, extLen, tol);
+                                             offLeft, offRight, zipperRaw, fin.Left, fin.Right, extLen, tol,
+                                             out var pocketSegments);
 
       // Collect objects inside the pocket boundary before moving.
       // Then remove only strictly-inside side-strip content from the copied pocket objects.
@@ -1203,8 +1204,7 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
 
         var outlineAttr = MakeAttr(cut1Idx);
         outlineAttr.SetUserString("vBiminiPkt", seamKey);
-        var id2 = doc.Objects.AddCurve(pocketOutline, outlineAttr);
-        if (id2 != Guid.Empty) addedIds.Add(id2);
+        AddCurveSegments(doc, pocketSegments, outlineAttr, addedIds, xf);
 
         // Add matching mirrored sew curves only after the CUT1 outline exists.
         var plotIdxMain = EnsureLayer(doc, _layerPlot, _layerPlotColor);
@@ -1518,8 +1518,7 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
 
       var outlineAttr = MakeAttr(cut1Idx);
       outlineAttr.SetUserString("vBiminiPkt", seamKey);
-      var outlineId = doc.Objects.AddCurve(pocketOutline, outlineAttr);
-      if (outlineId != Guid.Empty) addedIds.Add(outlineId);
+      AddCurveSegments(doc, ExplodeForOutput(pocketOutline), outlineAttr, addedIds, Transform.Identity);
 
       foreach (var (geom, geomAttr) in interiorObjects)
       {
@@ -1655,8 +1654,10 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
                                             Curve  offLeft,  Curve  offRight,
                                             Curve  zipper,
                                             Curve? seamLeft, Curve? seamRight,
-                                            double extLen,   double tol)
+                                            double extLen,   double tol,
+                                            out Curve[] outputSegments)
   {
+    outputSegments = Array.Empty<Curve>();
     var offLExt = offLeft.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? offLeft.DuplicateCurve();
     var offRExt = offRight.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line) ?? offRight.DuplicateCurve();
     var zipExt  = zipper.Extend(CurveEnd.Both, extLen, CurveExtensionStyle.Line)  ?? zipper.DuplicateCurve();
@@ -1743,6 +1744,8 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
       else
         segments = new Curve[] { topSeg, offRSeg4, zipSeg, offLSeg4 };
     }
+
+    outputSegments = segments.Select(c => c.DuplicateCurve()).ToArray();
 
     for (int i = 0; i < segments.Length; i++)
     {
@@ -2209,6 +2212,30 @@ private static double? NearestEndpointParam(Curve source, Curve onCurve, double 
         return ro.Id;  // reuse existing segment
     }
     return doc.Objects.AddCurve(target, attr);
+  }
+
+  private static Curve[] ExplodeForOutput(Curve curve)
+  {
+    var segments = curve.DuplicateSegments();
+    return segments != null && segments.Length > 0
+      ? segments
+      : new[] { curve.DuplicateCurve() };
+  }
+
+  private static void AddCurveSegments(RhinoDoc doc,
+                                       IEnumerable<Curve> segments,
+                                       ObjectAttributes attr,
+                                       List<Guid> addedIds,
+                                       Transform xf)
+  {
+    foreach (var segment in segments)
+    {
+      var copy = segment.DuplicateCurve();
+      copy.Transform(xf);
+
+      var id = doc.Objects.AddCurve(copy, attr);
+      if (id != Guid.Empty) addedIds.Add(id);
+    }
   }
 
   private static Curve? ClosestOf(Curve reference, params Curve?[] candidates)
