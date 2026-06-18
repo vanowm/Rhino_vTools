@@ -377,7 +377,6 @@ public sealed class vLine : Command
       [idxBisector] = "Bisector",
       [idxPerp] = "Perpendicular",
       [idxTangent] = "Tangent",
-      [idxBiTangent] = "BiTangent",
       [idxExtension] = "Extension"
     };
 
@@ -399,6 +398,14 @@ public sealed class vLine : Command
         var option = getPoint.Option();
         if (option == null)
           continue;
+
+        if (option.Index == idxBiTangent)
+        {
+          _chainMode = chainModeIndex;
+          return RunBiTangent(doc)
+            ? FirstPointResult.Delegated(bothSides.CurrentValue, chainModeIndex)
+            : FirstPointResult.None(bothSides.CurrentValue, chainModeIndex);
+        }
 
         if (delegatedModes.TryGetValue(option.Index, out var modeKeyword))
         {
@@ -1622,6 +1629,205 @@ public sealed class vLine : Command
     return valid[0].Point;
   }
 
+  private static bool RunBiTangent(RhinoDoc doc)
+  {
+    var first = PickCurveWithPoint("Select first tangent curve");
+    if (first == null)
+      return false;
+
+    var second = PickCurveWithPoint("Select second tangent curve");
+    if (second == null)
+      return false;
+
+    var cplane = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
+    if (!TryFindBiTangent(first.Value.Curve, second.Value.Curve,
+                         first.Value.PickPoint, second.Value.PickPoint,
+                         cplane, out var line))
+    {
+      RhinoApp.WriteLine("vLine: no bitangent solution found for the selected curves.");
+      return false;
+    }
+
+    _ = doc.Objects.AddLine(line);
+    doc.Views.Redraw();
+    return true;
+  }
+
+  private static (Curve Curve, Point3d PickPoint)? PickCurveWithPoint(string prompt)
+  {
+    var go = new GetObject();
+    go.SetCommandPrompt(prompt);
+    go.GeometryFilter = ObjectType.Curve;
+    go.SubObjectSelect = false;
+    go.GroupSelect = false;
+    go.EnablePreSelect(false, true);
+
+    if (go.Get() != GetResult.Object)
+      return null;
+
+    var objRef = go.Object(0);
+    var curve = objRef.Curve();
+    if (curve == null)
+      return null;
+
+    var pickPoint = objRef.SelectionPoint();
+    if (!pickPoint.IsValid)
+      pickPoint = curve.PointAtNormalizedLength(0.5);
+
+    return (curve, pickPoint);
+  }
+
+  private static bool TryFindBiTangent(Curve a, Curve b, Point3d pickA, Point3d pickB,
+                                       Plane cplane, out Line line)
+  {
+    line = Line.Unset;
+
+    var da = a.Domain;
+    var db = b.Domain;
+    if (da.T1 <= da.T0 || db.T1 <= db.T0)
+      return false;
+
+    const int samples = 64;
+    var candidates = new List<(double TA, double TB, double Error, double PickScore)>();
+
+    for (var ia = 0; ia <= samples; ia++)
+    {
+      var ta = da.T0 + (da.T1 - da.T0) * ia / samples;
+      for (var ib = 0; ib <= samples; ib++)
+      {
+        var tb = db.T0 + (db.T1 - db.T0) * ib / samples;
+        var score = BiTangentScore(a, b, ta, tb, cplane);
+        if (!score.HasValue)
+          continue;
+
+        var pa = a.PointAt(ta);
+        var pb = b.PointAt(tb);
+        candidates.Add((ta, tb, score.Value,
+          pa.DistanceToSquared(pickA) + pb.DistanceToSquared(pickB)));
+      }
+    }
+
+    if (candidates.Count == 0)
+      return false;
+
+    candidates.Sort((x, y) =>
+    {
+      var e = x.Error.CompareTo(y.Error);
+      return e != 0 ? e : x.PickScore.CompareTo(y.PickScore);
+    });
+
+    var refined = new List<(double TA, double TB, double Error, double PickScore, Point3d PA, Point3d PB)>();
+    var refineCount = Math.Min(48, candidates.Count);
+    var stepA = (da.T1 - da.T0) / samples;
+    var stepB = (db.T1 - db.T0) / samples;
+
+    for (var i = 0; i < refineCount; i++)
+    {
+      var r = RefineBiTangent(a, b, candidates[i].TA, candidates[i].TB,
+                              stepA, stepB, cplane, 28);
+      if (!r.HasValue)
+        continue;
+
+      var pa = a.PointAt(r.Value.TA);
+      var pb = b.PointAt(r.Value.TB);
+      refined.Add((r.Value.TA, r.Value.TB, r.Value.Error,
+        pa.DistanceToSquared(pickA) + pb.DistanceToSquared(pickB), pa, pb));
+    }
+
+    if (refined.Count == 0)
+      return false;
+
+    var bestError = double.MaxValue;
+    foreach (var r in refined)
+      if (r.Error < bestError)
+        bestError = r.Error;
+
+    var valid = refined.FindAll(r => r.Error <= Math.Max(0.02, bestError + 0.01));
+    if (valid.Count == 0)
+      valid = refined;
+
+    valid.Sort((x, y) =>
+    {
+      var p = x.PickScore.CompareTo(y.PickScore);
+      return p != 0 ? p : x.Error.CompareTo(y.Error);
+    });
+
+    var best = valid[0];
+    if (best.PA.DistanceTo(best.PB) <= RhinoMath.SqrtEpsilon)
+      return false;
+
+    line = new Line(best.PA, best.PB);
+    return line.IsValid;
+  }
+
+  private static (double TA, double TB, double Error)? RefineBiTangent(
+    Curve a, Curve b, double ta, double tb, double stepA, double stepB,
+    Plane cplane, int iterations)
+  {
+    var da = a.Domain;
+    var db = b.Domain;
+
+    var current = BiTangentScore(a, b, ta, tb, cplane);
+    if (!current.HasValue)
+      return null;
+
+    for (var iter = 0; iter < iterations; iter++)
+    {
+      var improved = false;
+      var bestTA = ta;
+      var bestTB = tb;
+      var best = current.Value;
+
+      for (var ia = -1; ia <= 1; ia++)
+      {
+        for (var ib = -1; ib <= 1; ib++)
+        {
+          if (ia == 0 && ib == 0) continue;
+          var ca = Math.Max(da.T0, Math.Min(da.T1, ta + ia * stepA));
+          var cb = Math.Max(db.T0, Math.Min(db.T1, tb + ib * stepB));
+          var score = BiTangentScore(a, b, ca, cb, cplane);
+          if (!score.HasValue || score.Value >= best) continue;
+          best = score.Value;
+          bestTA = ca;
+          bestTB = cb;
+          improved = true;
+        }
+      }
+
+      if (improved)
+      {
+        ta = bestTA;
+        tb = bestTB;
+        current = best;
+      }
+      else
+      {
+        stepA *= 0.5;
+        stepB *= 0.5;
+      }
+    }
+
+    return (ta, tb, current.Value);
+  }
+
+  private static double? BiTangentScore(Curve a, Curve b, double ta, double tb, Plane cplane)
+  {
+    var pa = a.PointAt(ta);
+    var pb = b.PointAt(tb);
+    var dir2 = ToCPlane2d(pb - pa, cplane);
+    if (!TryUnitize2d(dir2, out var dirU))
+      return null;
+
+    var tanA = ToCPlane2d(a.TangentAt(ta), cplane);
+    var tanB = ToCPlane2d(b.TangentAt(tb), cplane);
+    if (!TryUnitize2d(tanA, out var tanAU) || !TryUnitize2d(tanB, out var tanBU))
+      return null;
+
+    var crossA = Math.Abs((tanAU.X * dirU.Y) - (tanAU.Y * dirU.X));
+    var crossB = Math.Abs((tanBU.X * dirU.Y) - (tanBU.Y * dirU.X));
+    return crossA + crossB;
+  }
+
   private static Point3d? FindParallelRaySnap(
     Point3d startPoint,
     Vector3d dir,
@@ -1836,7 +2042,7 @@ public sealed class vLine : Command
 
     // SendKeystrokes posts to Rhino's input queue — processed after RunCommand returns,
     // no re-entrancy issue, no idle timing dependency.
-    string script = mode == "BiTangent" ? "_Line _Tangent _Tangent" : $"_Line _{mode}";
+    string script = $"_Line _{mode}";
     RhinoApp.SendKeystrokes(script, true);
   }
 
