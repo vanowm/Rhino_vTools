@@ -196,4 +196,12 @@
       Condition="'$(VersionCommitDiffExitCode)' == '0'" />
   </Target>
 
+  <Target Name="ShowOutputVersionAfterBuild" AfterTargets="Build" Condition="Exists('$(TargetPath)')">
+    <GetAssemblyIdentity AssemblyFiles="$(TargetPath)">
+      <Output TaskParameter="Assemblies" ItemName="BuiltAssembly" />
+    </GetAssemblyIdentity>
+
+    <Message Importance="high" Text="Built output: $(TargetPath)" />
+    <Message Importance="high" Text="Built version: %(BuiltAssembly.Version)" />
+  </Target>
 </Project>
