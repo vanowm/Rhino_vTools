@@ -89,6 +89,7 @@ public sealed class vUnrollSrf : Command
     _snapshot = null;
 
     var ok = RhinoApp.RunScript("_UnrollSrf", false);
+    var startOrient2pt = false;
 
     if (ok)
     {
@@ -130,10 +131,15 @@ public sealed class vUnrollSrf : Command
         foreach (var obj in toSelect)
           obj.Select(true);
         doc.Views.Redraw();
+
+        startOrient2pt = true;
       }
     }
 
-    // Silently re-run vUnrollSrf so pressing Enter repeats it, not _UnrollSrf.
+    if (startOrient2pt)
+      _ = RhinoApp.RunScript("_vOrient2pt", false);
+
+    // Silently re-run vUnrollSrf so pressing Enter repeats it, not _UnrollSrf or vOrient2pt.
     _restartingAfterDelegate = true;
     _ = RhinoApp.RunScript("_vUnrollSrf", false);
     _restartingAfterDelegate = false;
