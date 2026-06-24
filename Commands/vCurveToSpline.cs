@@ -142,6 +142,30 @@ public sealed class vCurveToSpline : Command
     _ = ToolsOptionStore.Update(OptionsSectionName, section => section[JoinModeKey] = modeName);
   }
 
+  private static bool TryGetJoinModeIndexFromShortcut(string shortcut, out int joinModeIndex)
+  {
+    joinModeIndex = -1;
+    if (string.IsNullOrWhiteSpace(shortcut))
+      return false;
+
+    shortcut = shortcut.Trim();
+
+    for (int i = 0; i < JoinModes.Length; i++)
+    {
+      var joinMode = JoinModes[i];
+      for (int len = 1; len <= joinMode.Length; len++)
+      {
+        if (string.Equals(shortcut, joinMode[..len], StringComparison.OrdinalIgnoreCase))
+        {
+          joinModeIndex = i;
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   /// <summary>
   /// Gets selected curves and/or points plus join mode, with dynamic preview while editing options.
   /// </summary>
@@ -155,6 +179,7 @@ public sealed class vCurveToSpline : Command
     go.SetCommandPrompt("Select curves and/or points to convert to InterpCrv");
     go.GeometryFilter = ObjectType.Curve | ObjectType.Point;
     go.AcceptNothing(true);
+    go.AcceptString(true);
     go.EnablePreSelect(true, true);
     go.EnableClearObjectsOnEntry(false);
     go.EnableUnselectObjectsOnExit(false);
@@ -187,6 +212,21 @@ public sealed class vCurveToSpline : Command
             _joinModeIndex = option.CurrentListOptionIndex;
             joinMode = JoinModes[Math.Max(0, Math.Min(_joinModeIndex, JoinModes.Length - 1))];
             Log.Write("vCurveToSpline", $"Join -> {joinMode}");
+            preview.SetJoinMode(joinMode);
+            doc.Views.Redraw();
+            SavePersistedOptions();
+          }
+          continue;
+        }
+
+        if (getResult == GetResult.String)
+        {
+          var shortcut = (go.StringResult() ?? string.Empty).Trim();
+          if (TryGetJoinModeIndexFromShortcut(shortcut, out var shortcutJoinModeIndex))
+          {
+            _joinModeIndex = shortcutJoinModeIndex;
+            joinMode = JoinModes[_joinModeIndex];
+            Log.Write("vCurveToSpline", $"Join shortcut -> {joinMode}");
             preview.SetJoinMode(joinMode);
             doc.Views.Redraw();
             SavePersistedOptions();
