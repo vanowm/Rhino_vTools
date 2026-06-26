@@ -152,6 +152,60 @@ public sealed class vUnrollSrf : Command
     }
   }
 
+  private static HashSet<Guid> SnapshotObjectIds(RhinoDoc doc)
+    => new(doc.Objects
+      .GetObjectList(new ObjectEnumeratorSettings
+      {
+        IncludeGrips   = false,
+        DeletedObjects = false
+      })
+      .Select(o => o.Id));
+
+  private static List<RhinoObject> NewVisibleObjectsSince(RhinoDoc doc, ISet<Guid> snapshot)
+    => doc.Objects
+      .GetObjectList(new ObjectEnumeratorSettings
+      {
+        IncludeGrips   = false,
+        DeletedObjects = false,
+        VisibleFilter  = true
+      })
+      .Where(o => !snapshot.Contains(o.Id))
+      .ToList();
+
+  private static bool SelectAndGroupNewFlatOutput(RhinoDoc doc, IList<RhinoObject> allNew, double tolerance)
+  {
+    // Flat geometry (surfaces, curves, etc.) — always selected.
+    var flatGeom = allNew.Where(o => o.Geometry is not TextDot).ToList();
+
+    // TextDots: UnrollSrf places them on both the flat result AND the original
+    // 3D surface.  Only include dots whose position touches a newly created
+    // flat object — that filters out the 3D-surface correspondence labels.
+    var flatDots = allNew
+      .Where(o => o.Geometry is TextDot td && IsTouchingAny(td.Point, flatGeom, tolerance))
+      .ToList();
+
+    var toSelect = flatGeom.Concat(flatDots).ToList();
+    if (toSelect.Count == 0)
+      return false;
+
+    if (toSelect.Count > 1)
+    {
+      var groupIndex = doc.Groups.Add($"vUnrollSrf {DateTime.Now:yyyyMMdd HHmmss}");
+      if (groupIndex >= 0)
+      {
+        foreach (var obj in toSelect)
+          doc.Groups.AddToGroup(groupIndex, obj.Id);
+      }
+    }
+
+    doc.Objects.UnselectAll();
+    foreach (var obj in toSelect)
+      obj.Select(true);
+    doc.Views.Redraw();
+
+    return true;
+  }
+
   private static bool TryRunPreselectedSurfaceUnrolls(RhinoDoc doc, double tolerance, out bool handled)
   {
     handled = false;
@@ -173,6 +227,8 @@ public sealed class vUnrollSrf : Command
 
     foreach (var surface in surfaces)
     {
+      var unrollSnapshot = SnapshotObjectIds(doc);
+
       doc.Objects.UnselectAll();
       surface.Select(true);
 
@@ -192,6 +248,10 @@ public sealed class vUnrollSrf : Command
 
       if (!RhinoApp.RunScript("_UnrollSrf", false))
         break;
+
+      var allNew = NewVisibleObjectsSince(doc, unrollSnapshot);
+      if (SelectAndGroupNewFlatOutput(doc, allNew, tolerance))
+        _ = RhinoApp.RunScript("_vOrient2pt", false);
 
       anySucceeded = true;
     }
@@ -222,57 +282,17 @@ public sealed class vUnrollSrf : Command
 
     var snapTol = doc.ModelAbsoluteTolerance * 10.0;
     var ok = TryRunPreselectedSurfaceUnrolls(doc, snapTol, out var handledPreselectedSurfaces);
+
     if (!handledPreselectedSurfaces)
-      ok = RhinoApp.RunScript("_UnrollSrf", false);
-
-    var startOrient2pt = false;
-
-    if (ok)
     {
-      var allNew = doc.Objects
-        .GetObjectList(new ObjectEnumeratorSettings
-        {
-          IncludeGrips   = false,
-          DeletedObjects = false,
-          VisibleFilter  = true
-        })
-        .Where(o => !snapshot.Contains(o.Id))
-        .ToList();
-
-      // Flat geometry (surfaces, curves, etc.) — always selected.
-      var flatGeom = allNew.Where(o => o.Geometry is not TextDot).ToList();
-
-      // TextDots: UnrollSrf places them on both the flat result AND the original
-      // 3D surface.  Only include dots whose position touches a newly created
-      // flat object — that filters out the 3D-surface correspondence labels.
-      var flatDots = allNew
-        .Where(o => o.Geometry is TextDot td && IsTouchingAny(td.Point, flatGeom, snapTol))
-        .ToList();
-
-      var toSelect = flatGeom.Concat(flatDots).ToList();
-      if (toSelect.Count > 0)
+      ok = RhinoApp.RunScript("_UnrollSrf", false);
+      if (ok)
       {
-        if (toSelect.Count > 1)
-        {
-          var groupIndex = doc.Groups.Add($"vUnrollSrf {DateTime.Now:yyyyMMdd HHmmss}");
-          if (groupIndex >= 0)
-          {
-            foreach (var obj in toSelect)
-              doc.Groups.AddToGroup(groupIndex, obj.Id);
-          }
-        }
-
-        doc.Objects.UnselectAll();
-        foreach (var obj in toSelect)
-          obj.Select(true);
-        doc.Views.Redraw();
-
-        startOrient2pt = true;
+        var allNew = NewVisibleObjectsSince(doc, snapshot);
+        if (SelectAndGroupNewFlatOutput(doc, allNew, snapTol))
+          _ = RhinoApp.RunScript("_vOrient2pt", false);
       }
     }
-
-    if (startOrient2pt)
-      _ = RhinoApp.RunScript("_vOrient2pt", false);
 
     // Silently re-run vUnrollSrf so pressing Enter repeats it, not _UnrollSrf or vOrient2pt.
     _restartingAfterDelegate = true;
