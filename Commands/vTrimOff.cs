@@ -22,6 +22,12 @@ public sealed class vTrimOff : Command
     public ObjectAttributes Attr { get; init; } = null!;
   }
 
+  private sealed class BoundarySelection
+  {
+    public Curve Curve { get; init; } = null!;
+    public HashSet<Guid> SourceIds { get; init; } = new();
+  }
+
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     var tol = doc.ModelAbsoluteTolerance;
@@ -69,20 +75,20 @@ public sealed class vTrimOff : Command
     if (vp != null && vp.GetCameraFrame(out var camFrame))
       plane = new Plane(Point3d.Origin, camFrame.XAxis, camFrame.YAxis);
 
-    var boundaryIndex = PickBoundaryCurve(selected, plane, tol);
-    if (boundaryIndex < 0)
+    var boundarySelection = TryPickBoundary(selected, plane, tol);
+    if (boundarySelection == null)
     {
       RhinoApp.WriteLine("vTrimOff: select a closed boundary box.");
       return Result.Nothing;
     }
 
-    var boundaryObjId = selected[boundaryIndex].ObjectId;
-    var boundary = new List<Curve> { selected[boundaryIndex].Curve.DuplicateCurve() };
+    var boundarySourceIds = boundarySelection.SourceIds;
+    var boundary = new List<Curve> { boundarySelection.Curve.DuplicateCurve() };
 
-    var scanDocument = selected.Count == 1;
+    var scanDocument = selected.All(t => boundarySourceIds.Contains(t.ObjectId));
     var targets = scanDocument
-      ? CollectDocumentTargets(doc, boundaryObjId)
-      : selected.Where((_, i) => i != boundaryIndex).ToList();
+      ? CollectDocumentTargets(doc, boundarySourceIds)
+      : selected.Where(t => !boundarySourceIds.Contains(t.ObjectId)).ToList();
 
     if (targets.Count == 0)
     {
@@ -160,13 +166,13 @@ public sealed class vTrimOff : Command
     return Result.Success;
   }
 
-  private static List<TargetCurve> CollectDocumentTargets(RhinoDoc doc, Guid boundaryObjId)
+  private static List<TargetCurve> CollectDocumentTargets(RhinoDoc doc, HashSet<Guid> boundaryObjIds)
   {
     var targets = new List<TargetCurve>();
 
     foreach (var obj in doc.Objects)
     {
-      if (obj.Id == boundaryObjId)
+      if (boundaryObjIds.Contains(obj.Id))
         continue;
 
       if (obj.IsDeleted || obj.IsReference)
@@ -184,6 +190,116 @@ public sealed class vTrimOff : Command
     }
 
     return targets;
+  }
+
+  private static BoundarySelection? TryPickBoundary(List<TargetCurve> selected, Plane plane, double tol)
+  {
+    var closedIndex = PickBoundaryCurve(selected, plane, tol);
+    if (closedIndex >= 0)
+    {
+      return new BoundarySelection
+      {
+        Curve = selected[closedIndex].Curve.DuplicateCurve(),
+        SourceIds = new HashSet<Guid> { selected[closedIndex].ObjectId }
+      };
+    }
+
+    var (closed, _) = BuildClosedPerimeterLikeVPart(
+      selected.Select(s => s.Curve.DuplicateCurve()).ToList(),
+      plane,
+      tol);
+
+    if (closed == null)
+      return null;
+
+    return new BoundarySelection
+    {
+      Curve = closed,
+      SourceIds = selected.Select(s => s.ObjectId).ToHashSet()
+    };
+  }
+
+  private static (Curve? Closed, List<LineCurve> Bridges) BuildClosedPerimeterLikeVPart(
+    List<Curve> curves,
+    Plane plane,
+    double tol)
+  {
+    var bridges = new List<LineCurve>();
+
+    if (curves.Count == 1 && curves[0].IsClosed)
+      return (curves[0].DuplicateCurve(), bridges);
+
+    var regions = Curve.CreateBooleanRegions(curves.ToArray(), plane, combineRegions: true, tol);
+    if (regions != null)
+    {
+      for (var r = 0; r < regions.RegionCount; r++)
+      {
+        var rc = regions.RegionCurves(r);
+        if (rc == null)
+          continue;
+
+        foreach (var c in rc)
+          if (c?.IsClosed == true)
+            return (c, bridges);
+      }
+    }
+
+    var pieces = curves.Select(c => c.DuplicateCurve()).ToList();
+
+    var openEnds = new List<(int CrvIdx, bool IsStart, Point3d Pt)>();
+    for (var i = 0; i < pieces.Count; i++)
+    {
+      if (pieces[i].IsClosed)
+        continue;
+
+      openEnds.Add((i, true, pieces[i].PointAtStart));
+      openEnds.Add((i, false, pieces[i].PointAtEnd));
+    }
+
+    var used = new HashSet<int>();
+    for (var i = 0; i < openEnds.Count; i++)
+    {
+      if (used.Contains(i))
+        continue;
+
+      var bestDist = tol * 200.0;
+      var bestJ = -1;
+
+      for (var j = i + 1; j < openEnds.Count; j++)
+      {
+        if (used.Contains(j))
+          continue;
+
+        if (openEnds[j].CrvIdx == openEnds[i].CrvIdx)
+          continue;
+
+        var d = openEnds[i].Pt.DistanceTo(openEnds[j].Pt);
+        if (d > tol && d < bestDist)
+        {
+          bestDist = d;
+          bestJ = j;
+        }
+      }
+
+      if (bestJ < 0)
+        continue;
+
+      var bridge = new LineCurve(openEnds[i].Pt, openEnds[bestJ].Pt);
+      bridges.Add(bridge);
+      pieces.Add(bridge);
+      used.Add(i);
+      used.Add(bestJ);
+    }
+
+    var joined = Curve.JoinCurves(pieces.ToArray(), tol * 10.0);
+    if (joined != null && joined.Length == 1 && joined[0].IsClosed)
+      return (joined[0], bridges);
+
+    var final = Curve.JoinCurves(pieces.ToArray(), tol * 100.0);
+    if (final != null && final.Length == 1 && final[0].IsClosed)
+      return (final[0], bridges);
+
+    return (null, bridges);
   }
 
   private static int PickBoundaryCurve(List<TargetCurve> selected, Plane plane, double tol)
@@ -231,6 +347,404 @@ public sealed class vTrimOff : Command
     }
 
     return bestIndex;
+  }
+
+  private static BoundarySelection? TryBuildBoundaryFromBooleanRegions(List<TargetCurve> selected, Plane plane, double tol)
+  {
+    BoundarySelection? best = null;
+    var bestScore = double.NegativeInfinity;
+
+    void Consider(List<TargetCurve> candidateSet)
+    {
+      var candidate = TryBuildBoundaryFromSet(selected, candidateSet, plane, tol);
+      if (candidate == null)
+        return;
+
+      var score = ScoreBoundaryCandidate(candidate.Curve, selected, plane, tol);
+      if (score <= bestScore)
+        return;
+
+      bestScore = score;
+      best = candidate;
+    }
+
+    Consider(selected);
+
+    // If targets overlap the boundary box, building regions from all selected
+    // curves can fail or create the wrong regions. Try smaller selected subsets
+    // so the actual box curves can be found, like vPart finds the perimeter.
+    if (selected.Count > 1 && selected.Count <= 12)
+    {
+      var maxSubsetSize = Math.Min(8, selected.Count);
+      for (var size = 2; size <= maxSubsetSize; size++)
+      {
+        foreach (var subset in EnumerateSubsets(selected, size))
+          Consider(subset);
+      }
+    }
+
+    return best ?? TryBuildBoundaryFromBoxEdges(selected, plane, tol);
+  }
+
+  private static BoundarySelection? TryBuildBoundaryFromSet(
+    List<TargetCurve> allSelected,
+    List<TargetCurve> candidateSet,
+    Plane plane,
+    double tol)
+  {
+    var curves = candidateSet.Select(s => s.Curve.DuplicateCurve()).ToArray();
+    var regions = Curve.CreateBooleanRegions(curves, plane, combineRegions: true, tol);
+    if (regions == null)
+      return null;
+
+    Curve? best = null;
+    var bestScore = double.NegativeInfinity;
+
+    for (var r = 0; r < regions.RegionCount; r++)
+    {
+      var regionCurves = regions.RegionCurves(r);
+      if (regionCurves == null)
+        continue;
+
+      foreach (var c in regionCurves)
+      {
+        if (c?.IsClosed != true)
+          continue;
+
+        var score = ScoreBoundaryCandidate(c, allSelected, plane, tol);
+        if (score <= bestScore)
+          continue;
+
+        bestScore = score;
+        best = c.DuplicateCurve();
+      }
+    }
+
+    if (best == null)
+      return null;
+
+    var sourceIds = candidateSet.Count == allSelected.Count
+      ? SourceIdsForBoundary(allSelected, best, tol)
+      : candidateSet.Select(s => s.ObjectId).ToHashSet();
+
+    if (sourceIds.Count == 0)
+      return null;
+
+    return new BoundarySelection { Curve = best, SourceIds = sourceIds };
+  }
+
+  private static double ScoreBoundaryCandidate(Curve candidate, List<TargetCurve> selected, Plane plane, double tol)
+  {
+    var boxScore = BoxLikeScore(candidate, plane, tol);
+    var containsScore = 0;
+
+    foreach (var target in selected)
+    {
+      foreach (var pt in SampleCurve(target.Curve, 9))
+      {
+        var pc = candidate.Contains(pt, plane, tol);
+        if (pc == PointContainment.Inside || pc == PointContainment.Coincident)
+          containsScore++;
+      }
+    }
+
+    var area = Math.Abs(AreaMassProperties.Compute(candidate)?.Area ?? 0.0);
+    return boxScore * 10000.0 + containsScore * 10.0 + area * 0.000001;
+  }
+
+  private static IEnumerable<List<TargetCurve>> EnumerateSubsets(List<TargetCurve> items, int size)
+  {
+    return EnumerateSubsets(items, size, 0, new List<TargetCurve>(size));
+  }
+
+  private static IEnumerable<List<TargetCurve>> EnumerateSubsets(
+    List<TargetCurve> items,
+    int size,
+    int start,
+    List<TargetCurve> current)
+  {
+    if (current.Count == size)
+    {
+      yield return current.ToList();
+      yield break;
+    }
+
+    var remainingNeeded = size - current.Count;
+    for (var i = start; i <= items.Count - remainingNeeded; i++)
+    {
+      current.Add(items[i]);
+
+      foreach (var subset in EnumerateSubsets(items, size, i + 1, current))
+        yield return subset;
+
+      current.RemoveAt(current.Count - 1);
+    }
+  }
+
+
+  private static BoundarySelection? TryBuildBoundaryFromBoxEdges(List<TargetCurve> selected, Plane plane, double tol)
+  {
+    var lineTol = Math.Max(tol * 20.0, RhinoMath.ZeroTolerance);
+
+    var uValues = new List<double>();
+    var vValues = new List<double>();
+
+    foreach (var target in selected)
+    {
+      foreach (var pt in SampleCurve(target.Curve, 33))
+      {
+        if (!plane.ClosestParameter(pt, out var u, out var v))
+          continue;
+
+        uValues.Add(u);
+        vValues.Add(v);
+      }
+    }
+
+    var uCandidates = ClusterCandidateCoordinates(uValues, lineTol);
+    var vCandidates = ClusterCandidateCoordinates(vValues, lineTol);
+
+    if (uCandidates.Count < 2 || vCandidates.Count < 2)
+      return null;
+
+    Curve? bestCurve = null;
+    HashSet<Guid>? bestSourceIds = null;
+    var bestScore = double.NegativeInfinity;
+
+    for (var ui0 = 0; ui0 < uCandidates.Count - 1; ui0++)
+    {
+      for (var ui1 = ui0 + 1; ui1 < uCandidates.Count; ui1++)
+      {
+        var u0 = uCandidates[ui0];
+        var u1 = uCandidates[ui1];
+
+        for (var vi0 = 0; vi0 < vCandidates.Count - 1; vi0++)
+        {
+          for (var vi1 = vi0 + 1; vi1 < vCandidates.Count; vi1++)
+          {
+            var v0 = vCandidates[vi0];
+            var v1 = vCandidates[vi1];
+
+            var score = ScoreRectangleBoundary(selected, plane, tol, lineTol, u0, u1, v0, v1, out var sourceIds);
+            if (score <= bestScore || sourceIds.Count == 0)
+              continue;
+
+            bestScore = score;
+            bestSourceIds = sourceIds;
+            bestCurve = RectangleCurve(plane, u0, u1, v0, v1);
+          }
+        }
+      }
+    }
+
+    if (bestCurve == null || bestSourceIds == null || bestSourceIds.Count == 0)
+      return null;
+
+    return new BoundarySelection { Curve = bestCurve, SourceIds = bestSourceIds };
+  }
+
+  private static List<double> ClusterCandidateCoordinates(IEnumerable<double> values, double tol)
+  {
+    var sorted = values.OrderBy(v => v).ToList();
+    var clusters = new List<(double Value, int Count)>();
+
+    var i = 0;
+    while (i < sorted.Count)
+    {
+      var sum = sorted[i];
+      var count = 1;
+      var first = sorted[i];
+      i++;
+
+      while (i < sorted.Count && Math.Abs(sorted[i] - first) <= tol)
+      {
+        sum += sorted[i];
+        count++;
+        i++;
+      }
+
+      if (count >= 3)
+        clusters.Add((sum / count, count));
+    }
+
+    return clusters
+      .OrderByDescending(c => c.Count)
+      .Take(12)
+      .Select(c => c.Value)
+      .OrderBy(v => v)
+      .ToList();
+  }
+
+  private static double ScoreRectangleBoundary(
+    List<TargetCurve> selected,
+    Plane plane,
+    double tol,
+    double lineTol,
+    double u0,
+    double u1,
+    double v0,
+    double v1,
+    out HashSet<Guid> sourceIds)
+  {
+    sourceIds = new HashSet<Guid>();
+
+    var width = u1 - u0;
+    var height = v1 - v0;
+    if (width <= lineTol * 2.0 || height <= lineTol * 2.0)
+      return double.NegativeInfinity;
+
+    var edgeValues = new[]
+    {
+      new List<double>(),
+      new List<double>(),
+      new List<double>(),
+      new List<double>()
+    };
+
+    var edgeSourceIds = new[]
+    {
+      new HashSet<Guid>(),
+      new HashSet<Guid>(),
+      new HashSet<Guid>(),
+      new HashSet<Guid>()
+    };
+
+    foreach (var target in selected)
+    {
+      var perCurveEdgeValues = new[]
+      {
+        new List<double>(),
+        new List<double>(),
+        new List<double>(),
+        new List<double>()
+      };
+
+      foreach (var pt in SampleCurve(target.Curve, 33))
+      {
+        if (!plane.ClosestParameter(pt, out var u, out var v))
+          continue;
+
+        if (v >= v0 - lineTol && v <= v1 + lineTol)
+        {
+          if (Math.Abs(u - u0) <= lineTol) perCurveEdgeValues[0].Add(v);
+          if (Math.Abs(u - u1) <= lineTol) perCurveEdgeValues[1].Add(v);
+        }
+
+        if (u >= u0 - lineTol && u <= u1 + lineTol)
+        {
+          if (Math.Abs(v - v0) <= lineTol) perCurveEdgeValues[2].Add(u);
+          if (Math.Abs(v - v1) <= lineTol) perCurveEdgeValues[3].Add(u);
+        }
+      }
+
+      for (var edge = 0; edge < 4; edge++)
+      {
+        if (perCurveEdgeValues[edge].Count < 2)
+          continue;
+
+        edgeValues[edge].AddRange(perCurveEdgeValues[edge]);
+
+        var span = perCurveEdgeValues[edge].Max() - perCurveEdgeValues[edge].Min();
+        var edgeLength = edge < 2 ? height : width;
+
+        if (span >= Math.Max(lineTol * 2.0, edgeLength * 0.10))
+          edgeSourceIds[edge].Add(target.ObjectId);
+      }
+    }
+
+    var coverage = new double[4];
+    for (var edge = 0; edge < 4; edge++)
+    {
+      if (edgeValues[edge].Count < 2 || edgeSourceIds[edge].Count == 0)
+        return double.NegativeInfinity;
+
+      var span = edgeValues[edge].Max() - edgeValues[edge].Min();
+      var edgeLength = edge < 2 ? height : width;
+      coverage[edge] = span / edgeLength;
+
+      if (coverage[edge] < 0.35)
+        return double.NegativeInfinity;
+
+      sourceIds.UnionWith(edgeSourceIds[edge]);
+    }
+
+    if (sourceIds.Count == 0)
+      return double.NegativeInfinity;
+
+    var minCoverage = coverage.Min();
+    var totalCoverage = coverage.Sum();
+    var area = width * height;
+
+    return minCoverage * 10000.0 + totalCoverage * 100.0 + area * 0.000001;
+  }
+
+  private static Curve RectangleCurve(Plane plane, double u0, double u1, double v0, double v1)
+  {
+    var polyline = new Polyline(new[]
+    {
+      plane.PointAt(u0, v0),
+      plane.PointAt(u1, v0),
+      plane.PointAt(u1, v1),
+      plane.PointAt(u0, v1),
+      plane.PointAt(u0, v0)
+    });
+
+    return polyline.ToNurbsCurve();
+  }
+
+  private static HashSet<Guid> SourceIdsForBoundary(List<TargetCurve> selected, Curve boundary, double tol)
+  {
+    var ids = new HashSet<Guid>();
+
+    foreach (var target in selected)
+      if (CurveMostlyOnBoundary(target.Curve, boundary, tol))
+        ids.Add(target.ObjectId);
+
+    return ids;
+  }
+
+  private static bool CurveMostlyOnBoundary(Curve curve, Curve boundary, double tol)
+  {
+    var curveLength = curve.GetLength();
+    var onTol = Math.Max(tol * 20.0, RhinoMath.ZeroTolerance);
+
+    var overlapLength = 0.0;
+    var events = Intersection.CurveCurve(curve, boundary, onTol, onTol);
+    if (events != null)
+    {
+      foreach (var e in events)
+      {
+        if (!e.IsOverlap)
+          continue;
+
+        var overlap = curve.Trim(e.OverlapA.T0, e.OverlapA.T1);
+        if (overlap != null)
+          overlapLength += overlap.GetLength();
+      }
+    }
+
+    if (curveLength > tol && overlapLength >= Math.Max(onTol, curveLength * 0.10))
+      return true;
+
+    var total = 0;
+    var on = 0;
+
+    foreach (var pt in SampleCurve(curve, 17))
+    {
+      total++;
+      if (IsOnCurve(pt, boundary, onTol))
+        on++;
+    }
+
+    return total > 0 && on >= Math.Max(2, (int)Math.Ceiling(total * 0.25));
+  }
+
+  private static bool IsOnCurve(Point3d pt, Curve curve, double tol)
+  {
+    if (!pt.IsValid || !curve.ClosestPoint(pt, out var t))
+      return false;
+
+    return pt.DistanceTo(curve.PointAt(t)) <= tol;
   }
 
   private static double BoxLikeScore(Curve curve, Plane plane, double tol)

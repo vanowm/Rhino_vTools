@@ -505,32 +505,12 @@ public sealed class vPart : Command
 
       if (geom is Curve crv)
       {
-        // Curves: split at perimeter and keep inside segments
-        var splitParams = new SortedSet<double>();
-        var events = Intersection.CurveCurve(crv, perimeter, tol, tol);
-        if (events != null)
-          foreach (var ev in events)
-          {
-            if (ev.IsOverlap) { splitParams.Add(ev.OverlapA.T0); splitParams.Add(ev.OverlapA.T1); }
-            else               splitParams.Add(ev.ParameterA);
-          }
-
-        if (splitParams.Count == 0)
-        {
-          if (IsInsideOrOn(crv.PointAtNormalizedLength(0.5), boundary, plane, tol))
-            result.Add((crv.DuplicateCurve(), attr));
-        }
-        else
-        {
-          var segments = crv.Split(splitParams);
-          if (segments == null) continue;
-          foreach (var seg in segments)
-          {
-            if (seg.GetLength() < tol) continue;
-            if (IsInsideOrOn(seg.PointAtNormalizedLength(0.5), boundary, plane, tol))
-              result.Add((seg, attr));
-          }
-        }
+        // Curves: split at perimeter and keep only inside pieces.
+        // If there are no split points, include the whole curve only when the
+        // whole sampled curve is inside. This prevents a curve with midpoint
+        // inside but ends sticking out from being copied untrimmed.
+        foreach (var insidePiece in TrimCurveInsidePerimeter(crv, perimeter, plane, tol))
+          result.Add((insidePiece, attr));
       }
       else
       {
@@ -542,6 +522,296 @@ public sealed class vPart : Command
     }
 
     return result;
+  }
+
+  private static IEnumerable<Curve> TrimCurveInsidePerimeter(Curve crv, Curve perimeter, Plane plane, double tol)
+  {
+    var boundary = new List<Curve> { perimeter };
+
+    // Fast path: when intersection parameters are available, split directly.
+    // The slower sampling fallback is only used when intersections fail.
+    var splitParams = CollectPerimeterSplitParams(crv, perimeter, plane, tol);
+    if (splitParams.Count > 0)
+    {
+      var pieces = crv.IsClosed
+        ? SplitClosedCurveByParameters(crv, splitParams, tol)
+        : crv.Split(splitParams.ToArray()) ?? Enumerable.Empty<Curve>();
+
+      foreach (var piece in pieces)
+      {
+        if (piece.GetLength() < tol)
+          continue;
+
+        if (IsInsideOrOn(piece.PointAtNormalizedLength(0.5), boundary, plane, tol))
+          yield return piece;
+      }
+
+      yield break;
+    }
+
+    // No intersection points. Keep/discard most curves from a small sample and
+    // only run the expensive bisection sampler for mixed inside/outside curves.
+    var quickSamples = SampleCurveInsideState(crv, boundary, plane, tol, 17);
+    if (quickSamples.All(s => s.Inside))
+    {
+      yield return crv.DuplicateCurve();
+      yield break;
+    }
+
+    if (quickSamples.All(s => !s.Inside))
+      yield break;
+
+    var intervals = FindInsideCurveIntervals(crv, boundary, plane, tol, quickSamples);
+    foreach (var (a, b) in intervals)
+    {
+      var piece = TrimCurveInterval(crv, a, b, tol);
+      if (piece != null && piece.GetLength() >= tol)
+        yield return piece;
+    }
+  }
+
+  private static List<(double T, bool Inside)> SampleCurveInsideState(
+    Curve crv,
+    List<Curve> boundary,
+    Plane plane,
+    double tol,
+    int sampleCount)
+  {
+    var samples = new List<(double T, bool Inside)>();
+    var domain = crv.Domain;
+    sampleCount = Math.Max(1, sampleCount);
+
+    for (var i = 0; i <= sampleCount; i++)
+    {
+      var t = domain.ParameterAt(i / (double)sampleCount);
+      samples.Add((t, IsInsideOrOn(crv.PointAt(t), boundary, plane, tol)));
+    }
+
+    return samples;
+  }
+
+  private static List<(double A, double B)> FindInsideCurveIntervals(
+    Curve crv,
+    List<Curve> boundary,
+    Plane plane,
+    double tol,
+    List<(double T, bool Inside)> initialSamples)
+  {
+    var result = new List<(double A, double B)>();
+    var domain = crv.Domain;
+    var parameterSpan = domain.T1 - domain.T0;
+    if (parameterSpan <= RhinoMath.ZeroTolerance || initialSamples.Count < 2)
+      return result;
+
+    double? insideStart = initialSamples[0].Inside ? domain.T0 : null;
+
+    for (var i = 1; i < initialSamples.Count; i++)
+    {
+      var prev = initialSamples[i - 1];
+      var cur = initialSamples[i];
+
+      if (prev.Inside == cur.Inside)
+        continue;
+
+      var crossing = FindContainmentChangeParameter(crv, boundary, plane, tol, prev.T, cur.T, prev.Inside);
+
+      if (!prev.Inside && cur.Inside)
+      {
+        insideStart = crossing;
+      }
+      else if (prev.Inside && !cur.Inside && insideStart.HasValue)
+      {
+        if (crossing - insideStart.Value > RhinoMath.ZeroTolerance)
+          result.Add((insideStart.Value, crossing));
+        insideStart = null;
+      }
+    }
+
+    if (insideStart.HasValue && domain.T1 - insideStart.Value > RhinoMath.ZeroTolerance)
+      result.Add((insideStart.Value, domain.T1));
+
+    return result;
+  }
+
+  private static double FindContainmentChangeParameter(
+    Curve crv,
+    List<Curve> boundary,
+    Plane plane,
+    double tol,
+    double a,
+    double b,
+    bool insideAtA)
+  {
+    for (var i = 0; i < 40; i++)
+    {
+      var mid = 0.5 * (a + b);
+      var insideAtMid = IsInsideOrOn(crv.PointAt(mid), boundary, plane, tol);
+
+      if (insideAtMid == insideAtA)
+        a = mid;
+      else
+        b = mid;
+    }
+
+    return 0.5 * (a + b);
+  }
+
+  private static Curve? TrimCurveInterval(Curve crv, double a, double b, double tol)
+  {
+    if (b - a <= RhinoMath.ZeroTolerance)
+      return null;
+
+    return crv.IsClosed
+      ? TrimClosedInterval(crv, a, b, crv.Domain, tol)
+      : crv.Trim(a, b);
+  }
+
+  private static List<double> CollectPerimeterSplitParams(Curve crv, Curve perimeter, Plane plane, double tol)
+  {
+    var splitParams = new List<double>();
+
+    var events = Intersection.CurveCurve(crv, perimeter, tol, tol);
+    if (events == null || events.Count == 0)
+      events = Intersection.CurveCurve(crv, perimeter, tol * 10.0, tol * 10.0);
+
+    // Fallback to view-plane 2D intersections. This catches curves that cross the
+    // boundary in the active view plane but do not intersect in 3D exactly.
+    if (events == null || events.Count == 0)
+    {
+      var crv2d = crv.DuplicateCurve();
+      var perimeter2d = perimeter.DuplicateCurve();
+      var toWorldXY = Transform.PlaneToPlane(plane, Plane.WorldXY);
+
+      crv2d.Transform(toWorldXY);
+      perimeter2d.Transform(toWorldXY);
+
+      events = Intersection.CurveCurve(crv2d, perimeter2d, tol, tol);
+      if (events == null || events.Count == 0)
+        events = Intersection.CurveCurve(crv2d, perimeter2d, tol * 10.0, tol * 10.0);
+    }
+
+    if (events == null)
+      return splitParams;
+
+    foreach (var ev in events)
+    {
+      if (ev.IsOverlap)
+      {
+        AddCurveSplitParam(crv, splitParams, ev.OverlapA.T0, tol);
+        AddCurveSplitParam(crv, splitParams, ev.OverlapA.T1, tol);
+      }
+      else
+      {
+        AddCurveSplitParam(crv, splitParams, ev.ParameterA, tol);
+      }
+    }
+
+    return splitParams.OrderBy(t => t).ToList();
+  }
+
+  private static void AddCurveSplitParam(Curve crv, List<double> splitParams, double t, double tol)
+  {
+    if (crv.IsClosed)
+    {
+      t = NormalizeClosedParameter(t, crv.Domain);
+    }
+    else
+    {
+      var d = crv.Domain;
+      var paramTol = Math.Max(tol, RhinoMath.ZeroTolerance) * 10.0;
+      if (t <= d.T0 + paramTol || t >= d.T1 - paramTol)
+        return;
+    }
+
+    var duplicateTol = Math.Max(tol, RhinoMath.ZeroTolerance) * 10.0;
+    if (!splitParams.Any(existing => Math.Abs(existing - t) <= duplicateTol))
+      splitParams.Add(t);
+  }
+
+  private static IEnumerable<Curve> SplitClosedCurveByParameters(Curve crv, List<double> splitParams, double tol)
+  {
+    var domain = crv.Domain;
+    var period = domain.T1 - domain.T0;
+    if (period <= RhinoMath.ZeroTolerance)
+      yield break;
+
+    var paramTol = Math.Max(tol, RhinoMath.ZeroTolerance) * 10.0;
+    var parameters = splitParams
+      .Select(t => NormalizeClosedParameter(t, domain))
+      .OrderBy(t => t)
+      .ToList();
+
+    if (parameters.Count < 2)
+      yield break;
+
+    for (var i = 0; i < parameters.Count; i++)
+    {
+      var a = parameters[i];
+      var b = i == parameters.Count - 1 ? parameters[0] + period : parameters[i + 1];
+      if (b - a <= paramTol)
+        continue;
+
+      var piece = TrimClosedInterval(crv, a, b, domain, tol);
+      if (piece != null && piece.GetLength() >= tol)
+        yield return piece;
+    }
+  }
+
+  private static Curve? TrimClosedInterval(Curve crv, double a, double b, Interval domain, double tol)
+  {
+    var period = domain.T1 - domain.T0;
+
+    while (a < domain.T0) a += period;
+    while (a > domain.T1) a -= period;
+    while (b < domain.T0) b += period;
+
+    if (b <= domain.T1)
+      return crv.Trim(a, b);
+
+    var first = crv.Trim(a, domain.T1);
+    var second = crv.Trim(domain.T0, b - period);
+
+    if (first == null) return second;
+    if (second == null) return first;
+
+    var joined = Curve.JoinCurves(new[] { first, second }, tol);
+    if (joined != null && joined.Length == 1)
+      return joined[0];
+
+    var pc = new PolyCurve();
+    pc.Append(first);
+    pc.Append(second);
+    return pc;
+  }
+
+  private static double NormalizeClosedParameter(double t, Interval domain)
+  {
+    var period = domain.T1 - domain.T0;
+    if (period <= RhinoMath.ZeroTolerance)
+      return t;
+
+    while (t < domain.T0) t += period;
+    while (t > domain.T1) t -= period;
+    return t;
+  }
+
+  private static bool AllSamplesInsideOrOn(Curve crv, List<Curve> boundary, Plane plane, double tol)
+  {
+    foreach (var pt in SampleCurve(crv, 17))
+      if (!IsInsideOrOn(pt, boundary, plane, tol))
+        return false;
+    return true;
+  }
+
+  private static IEnumerable<Point3d> SampleCurve(Curve curve, int count)
+  {
+    count = Math.Max(1, count);
+
+    for (var i = 0; i < count; i++)
+    {
+      var s = (i + 0.5) / count;
+      yield return curve.PointAtNormalizedLength(s);
+    }
   }
 
   /// <summary>Returns the most meaningful single point for containment testing.</summary>
