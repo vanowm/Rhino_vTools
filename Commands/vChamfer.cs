@@ -1,6 +1,5 @@
 using System;
 using System.Drawing;
-using System.Globalization;
 using Rhino;
 using Rhino.Commands;
 using Rhino.Display;
@@ -47,7 +46,7 @@ public sealed class vChamfer : Command
   private static void LoadOptions() =>
     ToolsOptionStore.Read<int>(SectionName, section =>
     {
-      if (ToolsOptionStore.TryGetDouble(section, LengthKey, out var l) && l > 0)
+      if (ToolsOptionStore.TryGetDouble(section, LengthKey, out var l) && l >= 0.0)
         _length = l;
       if (ToolsOptionStore.TryGetBool(section, TrimKey, out var t))
         _trim = t;
@@ -76,8 +75,9 @@ public sealed class vChamfer : Command
       go.SubObjectSelect             = false;
       go.EnablePreSelect(false, true);
       go.DeselectAllBeforePostSelect = false;
-      go.AcceptNumber(true, false);
-      go.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
+      go.AcceptNumber(true, true);
+      var lengthOpt = new OptionDouble(_length, 0.0, double.MaxValue);
+      var idxLength = go.AddOptionDouble("Length", ref lengthOpt);
       var trimToggle = new OptionToggle(_trim, "No", "Yes");
       go.AddOptionToggle("Trim", ref trimToggle);
       var joinTogglePick = new OptionToggle(_join, "No", "Yes");
@@ -100,35 +100,32 @@ public sealed class vChamfer : Command
       if (res == GetResult.Number)
       {
         var v = go.Number();
-        if (v > 0) { _length = v; SaveOptions(); }
+        if (TrySetLength(v))
+          SaveOptions();
         continue;
       }
 
       if (res == GetResult.Option)
       {
+        if (go.Option()?.Index == idxLength)
+          TrySetLength(lengthOpt.CurrentValue);
         _trim = trimToggle.CurrentValue;
         if (_trim) _join = joinTogglePick.CurrentValue;
         SaveOptions();
-        if (go.Option()?.EnglishName == "Length")
-          HandleLengthSubprompt();
       }
     }
   }
 
-  private static void HandleLengthSubprompt()
+  private static bool TrySetLength(double value)
   {
-    var gs = new GetString();
-    gs.SetCommandPrompt($"Chamfer cut length ({_length:0.##})");
-    gs.AcceptNothing(true);
-    if (gs.Get() == GetResult.String)
+    if (double.IsNaN(value) || double.IsInfinity(value) || value < 0.0)
     {
-      var raw = gs.StringResult().Trim();
-      if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0)
-      {
-        _length = v;
-        SaveOptions();
-      }
+      RhinoApp.WriteLine("vChamfer: length must be zero or greater.");
+      return false;
     }
+
+    _length = value;
+    return true;
   }
 
   // â”€â”€ Corner detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -204,6 +201,19 @@ public sealed class vChamfer : Command
     ptA = ptB = Point3d.Unset;
     tA  = tB  = double.NaN;
 
+    if (length < 0.0)
+      return false;
+
+    if (length <= RhinoMath.ZeroTolerance)
+    {
+      if (!c1.ClosestPoint(corner, out tA)) return false;
+      if (!c2.ClosestPoint(corner, out tB)) return false;
+
+      ptA = c1.PointAt(tA);
+      ptB = c2.PointAt(tB);
+      return ptA.IsValid && ptB.IsValid;
+    }
+
     // Tangents pointing AWAY from the corner along each curve.
     var rawT1 = c1AtStart ?  c1.TangentAtStart : -c1.TangentAtEnd;
     var rawT2 = c2AtStart ?  c2.TangentAtStart : -c2.TangentAtEnd;
@@ -256,6 +266,130 @@ public sealed class vChamfer : Command
     if (!c2AtStart && tB >= c2.Domain.Max - tol) return false;
 
     return true;
+  }
+
+  private static bool TryBuildChamferDirections(
+    Curve c1, bool c1AtStart,
+    Curve c2, bool c2AtStart,
+    Plane cplane,
+    out Vector3d bisDir,
+    out Vector3d chamferDir)
+  {
+    bisDir = Vector3d.Unset;
+    chamferDir = Vector3d.Unset;
+
+    var rawT1 = c1AtStart ?  c1.TangentAtStart : -c1.TangentAtEnd;
+    var rawT2 = c2AtStart ?  c2.TangentAtStart : -c2.TangentAtEnd;
+
+    if (rawT1.IsTiny() || rawT2.IsTiny()) return false;
+    rawT1.Unitize(); rawT2.Unitize();
+
+    double t1x = Vector3d.Multiply(rawT1, cplane.XAxis);
+    double t1y = Vector3d.Multiply(rawT1, cplane.YAxis);
+    double t2x = Vector3d.Multiply(rawT2, cplane.XAxis);
+    double t2y = Vector3d.Multiply(rawT2, cplane.YAxis);
+
+    double len1 = Math.Sqrt(t1x * t1x + t1y * t1y);
+    double len2 = Math.Sqrt(t2x * t2x + t2y * t2y);
+    if (len1 < 1e-12 || len2 < 1e-12) return false;
+
+    t1x /= len1; t1y /= len1;
+    t2x /= len2; t2y /= len2;
+
+    double bx = t1x + t2x, by = t1y + t2y;
+    double blen = Math.Sqrt(bx * bx + by * by);
+    if (blen < 1e-12) { bx = -t1y; by = t1x; }
+    else              { bx /= blen; by /= blen; }
+
+    double px = -by, py = bx;
+    bisDir = (cplane.XAxis * bx) + (cplane.YAxis * by);
+    chamferDir = (cplane.XAxis * px) + (cplane.YAxis * py);
+
+    return bisDir.Unitize() && chamferDir.Unitize();
+  }
+
+  private static bool ComputeChamferThroughPoint(
+    Curve c1, bool c1AtStart,
+    Curve c2, bool c2AtStart,
+    Point3d corner, Point3d pickedPt, Plane cplane, double tolerance,
+    out Point3d ptA, out Point3d ptB,
+    out double tA, out double tB)
+  {
+    ptA = ptB = Point3d.Unset;
+    tA = tB = double.NaN;
+
+    tolerance = Math.Max(tolerance, RhinoMath.ZeroTolerance);
+
+    if (!TryBuildChamferDirections(c1, c1AtStart, c2, c2AtStart, cplane, out var bisDir, out var chamferDir))
+      return false;
+
+    if (Vector3d.Multiply(pickedPt - corner, bisDir) <= tolerance)
+      return false;
+
+    var span = Math.Max(corner.DistanceTo(pickedPt) + c1.GetLength() + c2.GetLength(), 1.0) * 4.0;
+    span = Math.Max(span, tolerance * 100.0);
+    var targetLine = new Line(pickedPt - chamferDir * span, pickedPt + chamferDir * span);
+
+    if (!TryIntersectChamferLine(c1, c1AtStart, corner, targetLine, tolerance, out tA, out ptA))
+      return false;
+    if (!TryIntersectChamferLine(c2, c2AtStart, corner, targetLine, tolerance, out tB, out ptB))
+      return false;
+
+    if (ptA.DistanceTo(ptB) <= tolerance)
+      return false;
+
+    var chamferSegment = new Line(ptA, ptB);
+    var closest = chamferSegment.ClosestPoint(pickedPt, true);
+    return closest.DistanceTo(pickedPt) <= Math.Max(tolerance * 10.0, 1e-6);
+  }
+
+  private static bool TryIntersectChamferLine(
+    Curve curve, bool atStart, Point3d corner, Line targetLine, double tolerance,
+    out double t, out Point3d point)
+  {
+    t = double.NaN;
+    point = Point3d.Unset;
+
+    var events = Intersection.CurveLine(curve, targetLine, tolerance, tolerance);
+    if (events == null || events.Count == 0)
+      return false;
+
+    var bestScore = double.MaxValue;
+    for (var i = 0; i < events.Count; i++)
+    {
+      var candidateT = events[i].ParameterA;
+      if (double.IsNaN(candidateT))
+        continue;
+      if (!IsInsideChamferParameter(curve, atStart, candidateT))
+        continue;
+
+      var candidate = curve.PointAt(candidateT);
+      if (!candidate.IsValid)
+        continue;
+
+      var cornerDistance = candidate.DistanceTo(corner);
+      if (cornerDistance <= tolerance)
+        continue;
+
+      var lineDistance = candidate.DistanceTo(targetLine.ClosestPoint(candidate, false));
+      var score = cornerDistance + lineDistance * 1000.0;
+      if (score >= bestScore)
+        continue;
+
+      bestScore = score;
+      t = candidateT;
+      point = candidate;
+    }
+
+    return point.IsValid;
+  }
+
+  private static bool IsInsideChamferParameter(Curve curve, bool atStart, double t)
+  {
+    const double tol = 1e-10;
+    return atStart
+      ? t > curve.Domain.Min + tol
+      : t < curve.Domain.Max - tol;
   }
 
   // â”€â”€ Preview conduit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -346,7 +480,7 @@ public sealed class vChamfer : Command
     }
     else conduit.Ext2 = null;
 
-    conduit.ChamferLine = new Line(ptA, ptB);
+    conduit.ChamferLine = ptA.DistanceTo(ptB) > 1e-10 ? new Line(ptA, ptB) : (Line?)null;
     conduit.ShowTrim    = _trim;
   }
   // â”€â”€ Command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -398,8 +532,9 @@ public sealed class vChamfer : Command
           ? "Chamfer placed at point — Enter to apply"
           : "Press Enter to apply chamfer; pick a point to place at Length distance from point");
         get.AcceptNothing(true);
-        get.AcceptNumber(true, false);
-        get.AddOption("Length", _length.ToString("0.##", CultureInfo.InvariantCulture));
+        get.AcceptNumber(true, true);
+        var lengthOpt = new OptionDouble(_length, 0.0, double.MaxValue);
+        var idxLength = get.AddOptionDouble("Length", ref lengthOpt);
         var trimOpt = new OptionToggle(_trim, "No", "Yes");
         get.AddOptionToggle("Trim", ref trimOpt);
         var joinOpt = new OptionToggle(_join, "No", "Yes");
@@ -414,6 +549,21 @@ public sealed class vChamfer : Command
         if (res == GetResult.Point)
         {
           var pickedPt = get.Point();
+
+          if (_length <= RhinoMath.ZeroTolerance)
+          {
+            if (!ComputeChamferThroughPoint(work1, c1AtStart, work2, c2AtStart, corner, pickedPt, cplane,
+                  doc.ModelAbsoluteTolerance, out ptA, out ptB, out tA, out tB))
+            {
+              RhinoApp.WriteLine("vChamfer: cannot create a chamfer through that point.");
+              continue;
+            }
+
+            pointActive = true;
+            UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
+            doc.Views.Redraw();
+            continue;
+          }
 
           // The chamfer line is always perpendicular to the corner bisector, and its
           // bisector-distance from the corner scales linearly with cut-length.
@@ -471,22 +621,22 @@ public sealed class vChamfer : Command
         if (res == GetResult.Number)
         {
           var v = get.Number();
-          if (v > 0) { _length = v; pointActive = false; SaveOptions(); }
+          if (TrySetLength(v))
+          {
+            pointActive = false;
+            SaveOptions();
+          }
         }
         else if (res == GetResult.Option)
         {
+          var option = get.Option();
           _trim = trimOpt.CurrentValue;
           if (_trim) _join = joinOpt.CurrentValue;
-          SaveOptions();
 
-          if (get.Option()?.EnglishName == "Length")
-          {
-            conduit.Enabled = false;
-            doc.Views.Redraw();
-            HandleLengthSubprompt();
-            conduit.Enabled = true;
+          if (option?.Index == idxLength && TrySetLength(lengthOpt.CurrentValue))
             pointActive = false;
-          }
+
+          SaveOptions();
         }
 
         if (res == GetResult.Number || res == GetResult.Option)
@@ -511,7 +661,8 @@ public sealed class vChamfer : Command
     }
 
     // Apply.
-    var chamferLineId = doc.Objects.AddLine(ptA, ptB);
+    var hasChamferLine = ptA.DistanceTo(ptB) > doc.ModelAbsoluteTolerance;
+    var chamferLineId = hasChamferLine ? doc.Objects.AddLine(ptA, ptB) : Guid.Empty;
 
     if (_trim)
     {
@@ -535,12 +686,15 @@ public sealed class vChamfer : Command
       if (_join)
       {
         var tol = doc.ModelAbsoluteTolerance;
-        var chamferCrv = new LineCurve(ptA, ptB);
-        var joined = Curve.JoinCurves(new Curve[] { trimmedC1, chamferCrv, trimmedC2 }, tol);
+        var joinCurves = hasChamferLine
+          ? new Curve[] { trimmedC1, new LineCurve(ptA, ptB), trimmedC2 }
+          : new Curve[] { trimmedC1, trimmedC2 };
+        var joined = Curve.JoinCurves(joinCurves, tol);
         if (joined != null && joined.Length == 1)
         {
           // Replace the chamfer line and both trimmed curves with the single joined result.
-          doc.Objects.Delete(chamferLineId, quiet: true);
+          if (hasChamferLine)
+            doc.Objects.Delete(chamferLineId, quiet: true);
           doc.Objects.Replace(ref1.ObjectId, joined[0]);
           doc.Objects.Delete(ref2.ObjectId, quiet: true);
         }

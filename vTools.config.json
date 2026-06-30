@@ -1,4 +1,11 @@
 {
+  "vMiddleCurve": {
+    "lines": false,
+    "lineMode": "EqualDistance",
+    "lineInterval": 0.5,
+    "seamAllowance": 0.5,
+    "minimumLength": 0.25
+  },
   "vUzip": {
     "label": "",
     "tail": 0.75,
