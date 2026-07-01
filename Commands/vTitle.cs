@@ -162,6 +162,10 @@ public sealed class vTitle : Command
           SelectGroup(doc, _activeGrpIdx, false);
           if (string.IsNullOrEmpty(_text)) continue;
           PlaceTitle(doc, pt, _text, _size, _padding, _box);
+          // New placement does NOT enter edit mode — reset so UpdateActive is a no-op.
+          // _activeGrpIdx is kept so the newly placed group stays highlighted.
+          _activeTextId = Guid.Empty;
+          _activeBoxId  = Guid.Empty;
           SelectGroup(doc, _activeGrpIdx, true);
           doc.Views.Redraw();
         }
