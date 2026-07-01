@@ -237,8 +237,24 @@ namespace vTools.Commands
               hiddenCurveIndexes.Add(rightIdx);
             }
 
-            // Match edge mate curves and collect flat positions (also marks their indices hidden)
+            // Match edge mate curves by length scan (Rhino does not guarantee output order).
+            // Also hides the matched edge curve indices inside hiddenCurveIndexes.
             edgeFlatPoints = MatchEdgeCurveOutputs(unrolledCurves, edgeMateInfos, hiddenCurveIndexes, tol);
+
+            // Cleanup pass: hide any remaining orientation helper curves not caught by
+            // ResolveOrientationCurves (e.g. when only one of the two was returned by Rhino).
+            if (frame != null && orientCrvCount > 0)
+            {
+              double expStep = frame.Step > tol ? frame.Step : Math.Max(
+                frame.Point.DistanceTo(frame.UpPoint), frame.Point.DistanceTo(frame.RightPoint));
+              for (int ci = 0; ci < unrolledCurves.Length; ci++)
+              {
+                if (hiddenCurveIndexes.Contains(ci) || unrolledCurves[ci] == null) continue;
+                double cl = unrolledCurves[ci].GetLength();
+                if (expStep > tol && Math.Abs(cl - expStep) / expStep < 0.15)
+                  hiddenCurveIndexes.Add(ci);
+              }
+            }
 
             for (int ci = 0; ci < unrolledCurves.Length; ci++)
             {
@@ -844,7 +860,7 @@ namespace vTools.Commands
 
       var actualY = Unit(upPoint - point.Value, tol) ?? y;
       var actualX = Unit(rightPoint - point.Value, tol) ?? x;
-      return new LabelFrame(point.Value, upPoint, rightPoint, actualX, actualY, normal, height);
+      return new LabelFrame(point.Value, upPoint, rightPoint, actualX, actualY, normal, height, step);
     }
 
     private class FaceHit
@@ -1375,8 +1391,11 @@ namespace vTools.Commands
       center = upEnd = rightEnd = Point3d.Unset;
       if (curves == null || frame == null) return false;
 
-      double upLen    = frame.Point.DistanceTo(frame.UpPoint);
-      double rightLen = frame.Point.DistanceTo(frame.RightPoint);
+      // Use the arc-length step as the reference length so curved-surface unrollings
+      // (where the 3D chord differs from the arc length) still match correctly.
+      double expLen = frame.Step > tol ? frame.Step : Math.Max(
+        frame.Point.DistanceTo(frame.UpPoint),
+        frame.Point.DistanceTo(frame.RightPoint));
       const double lenTol = 0.15;
 
       int    bI = -1, bJ = -1;
@@ -1387,23 +1406,23 @@ namespace vTools.Commands
       {
         var ci = curves[i]; if (ci == null) continue;
         double li = ci.GetLength();
-        if (upLen > tol && Math.Abs(li - upLen) / upLen > lenTol) continue;
+        if (expLen > tol && Math.Abs(li - expLen) / expLen > lenTol) continue;
 
         for (int j = 0; j < curves.Length; j++)
         {
           if (i == j) continue;
           var cj = curves[j]; if (cj == null) continue;
           double lj = cj.GetLength();
-          if (rightLen > tol && Math.Abs(lj - rightLen) / rightLen > lenTol) continue;
+          if (expLen > tol && Math.Abs(lj - expLen) / expLen > lenTol) continue;
 
           var (sd, ctr, ue, re) = EndpointPairDistance(ci, cj);
-          double sharedMax = Math.Max(Math.Max(upLen, rightLen), tol * 100.0) * 0.01;
+          double sharedMax = Math.Max(expLen, tol * 100.0) * 0.01;
           if (sd > sharedMax) continue;
 
-          double lenScore = 0.0;
-          if (upLen    > tol) lenScore += Math.Abs(li - upLen)    / upLen;
-          if (rightLen > tol) lenScore += Math.Abs(lj - rightLen) / rightLen;
-          double scale = Math.Max(Math.Max(upLen, rightLen), tol * 100.0);
+          double lenScore = expLen > tol
+            ? (Math.Abs(li - expLen) + Math.Abs(lj - expLen)) / expLen
+            : 0.0;
+          double scale = Math.Max(expLen, tol * 100.0);
           double score = lenScore + sd / scale * 10.0;
           if (score < bScore)
           {
@@ -1574,41 +1593,64 @@ namespace vTools.Commands
     }
 
     /// <summary>
-    /// Matches edge mate output curves back to flat midpoints. Marks all
-    /// edge mate output curve indices as hidden. Reuses the same flat point
-    /// for all records that share the same physical output curve index.
+    /// Matches edge mate output curves back to flat positions by scanning all unrolled curves
+    /// for the best length match (Rhino does not preserve AddFollowingGeometry order).
+    /// Hides matched curve indices in <paramref name="hiddenIdxs"/>.
     /// </summary>
     private static Dictionary<(string, int, int), Point3d> MatchEdgeCurveOutputs(
       Curve[]? curves, List<EdgeMateInfo> infos, HashSet<int> hiddenIdxs, double tol)
     {
-      var result     = new Dictionary<(string, int, int), Point3d>();
-      var matchedByIdx = new Dictionary<int, Point3d>();
+      var result      = new Dictionary<(string, int, int), Point3d>();
+      var matchedByEdge = new Dictionary<int, (int idx, Curve crv)>(); // edge_index → (outputIdx, curve)
+      var usedIdxs    = new HashSet<int>(hiddenIdxs);
 
       foreach (var info in infos)
       {
-        int idx = info.CurveOutputIndex;
-        hiddenIdxs.Add(idx);
+        var rec = info.Record;
+        if (rec.Curve == null) continue;
+        double srcLen = rec.Curve.GetLength();
+        if (srcLen <= tol) continue;
 
-        if (matchedByIdx.TryGetValue(idx, out var cached))
+        int outIdx; Curve outCrv;
+
+        if (matchedByEdge.TryGetValue(rec.EdgeIndex, out var existing))
         {
-          result[(info.Record.MateId, info.Record.EdgeIndex, info.Record.MatePartIndex)] = cached;
-          continue;
+          outIdx = existing.idx;
+          outCrv = existing.crv;
+        }
+        else
+        {
+          // Scan all unrolled curves (length-based — order not guaranteed by Rhino)
+          int bestIdx = -1; Curve? bestCrv = null; double bestScore = double.MaxValue;
+          if (curves != null)
+          {
+            for (int ci = 0; ci < curves.Length; ci++)
+            {
+              if (usedIdxs.Contains(ci) || curves[ci] == null) continue;
+              double s = Math.Abs(curves[ci].GetLength() - srcLen) / Math.Max(srcLen, tol);
+              if (s < bestScore) { bestScore = s; bestIdx = ci; bestCrv = curves[ci]; }
+            }
+          }
+          if (bestIdx < 0 || bestScore > 0.20) continue;
+          outIdx = bestIdx; outCrv = bestCrv!;
+          usedIdxs.Add(outIdx);
+          hiddenIdxs.Add(outIdx);
+          matchedByEdge[rec.EdgeIndex] = (outIdx, outCrv);
         }
 
-        if (curves == null || idx < 0 || idx >= curves.Length || curves[idx] == null)
-          continue;
-
-        var crv     = curves[idx];
-        double exp  = info.Record.Curve?.GetLength() ?? 0.0;
-        double act  = crv.GetLength();
-        if (act < tol * 2.0) continue;
-        if (Math.Abs(exp / act - 1.0) > 0.20) continue; // 20% threshold
-
-        var midPt = CurveMidpoint(crv);
-        matchedByIdx[idx] = midPt;
-        result[(info.Record.MateId, info.Record.EdgeIndex, info.Record.MatePartIndex)] = midPt;
+        // Map 3D marker position to its fractional parameter on the source curve,
+        // then sample the same fraction on the unrolled curve for the flat position.
+        double fraction = CurveFractionOfPoint(rec.Curve, rec.Marker, tol);
+        result[(rec.MateId, rec.EdgeIndex, rec.MatePartIndex)] =
+          outCrv.PointAt(outCrv.Domain.ParameterAt(fraction));
       }
       return result;
+    }
+
+    private static double CurveFractionOfPoint(Curve c, Point3d pt, double tol)
+    {
+      if (!c.ClosestPoint(pt, out double t)) return 0.5;
+      return c.Domain.NormalizedParameterAt(t);
     }
 
     private static IEnumerable<EdgeMateInfo> UniqueEdgeMateInfos(List<EdgeMateInfo> infos)
@@ -1667,8 +1709,9 @@ namespace vTools.Commands
       public Vector3d Y { get; }
       public Vector3d Normal { get; }
       public double Height { get; }
+      public double Step { get; }
 
-      public LabelFrame(Point3d point, Point3d upPoint, Point3d rightPoint, Vector3d x, Vector3d y, Vector3d normal, double height)
+      public LabelFrame(Point3d point, Point3d upPoint, Point3d rightPoint, Vector3d x, Vector3d y, Vector3d normal, double height, double step)
       {
         Point = point;
         UpPoint = upPoint;
@@ -1677,6 +1720,7 @@ namespace vTools.Commands
         Y = y;
         Normal = normal;
         Height = height;
+        Step = step;
       }
     }
 
