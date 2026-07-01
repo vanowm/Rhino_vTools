@@ -22,9 +22,18 @@ public sealed class vTitle : Command
   private static bool   _box     = true;
 
   // ── Active placement tracking (for live update) ───────────────────────
-  private static Guid _activeTextId = Guid.Empty;
-  private static Guid _activeBoxId  = Guid.Empty;
-  private static int  _activeGrpIdx = -1;
+  private static Guid _activeTextId  = Guid.Empty;
+  private static Guid _activeBoxId   = Guid.Empty;
+  private static int  _activeGrpIdx  = -1;
+  private static bool _internalReplace = false;
+
+  // ── External-edit event subscription ───────────────────────────────
+  private static readonly System.Collections.Generic.HashSet<Guid> _pendingBoxUpdates = new();
+
+  static vTitle()
+  {
+    RhinoDoc.ReplaceRhinoObject += OnRhinoObjectReplaced;
+  }
 
   private const string SectionName = "vTitle";
   private const string KeyText    = "text";
@@ -38,47 +47,42 @@ public sealed class vTitle : Command
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadSettings();
+    _activeTextId = Guid.Empty;
+    _activeBoxId  = Guid.Empty;
+    _activeGrpIdx = -1;
 
     while (true)
     {
       var gp = new GetPoint();
-      string textHint = string.IsNullOrEmpty(_text) ? "(no text)" : $"\"{_text}\"";
-      gp.SetCommandPrompt($"Title center  {textHint}");
+      gp.SetCommandPrompt("Title center");
 
-      int idxText    = gp.AddOption("Text");
+      int idxText    = gp.AddOption("Text",    string.IsNullOrEmpty(_text) ? "-" : _text);
       int idxSize    = gp.AddOption("Size",    $"{_size:G}");
       int idxPadding = gp.AddOption("Padding", $"{_padding:G}");
       var optBox     = new OptionToggle(_box, "Off", "On");
       gp.AddOptionToggle("Box", ref optBox);
-      gp.AcceptString(true);          // quick single-word text update
-      gp.AcceptNumber(true, false);   // quick size update
       gp.AcceptNothing(false);
 
-      gp.DynamicDraw += (_, e) => DrawPreview(e, _text, _size, _padding, _box);
+      gp.DynamicDraw += (_, e) =>
+      {
+        DrawPreview(e, _text, _size, _padding, _box);
+        DrawHoverHighlight(doc, e);
+      };
 
       var res = gp.Get();
       _box = optBox.CurrentValue;
 
-      if (gp.CommandResult() == Result.Cancel) break;
-
-      if (res == GetResult.String)
+      if (gp.CommandResult() == Result.Cancel)
       {
-        string s = gp.StringResult()?.Trim() ?? "";
-        if (!string.IsNullOrEmpty(s)) { _text = s; UpdateActive(doc); SaveSettings(); }
-        continue;
-      }
-
-      if (res == GetResult.Number)
-      {
-        double v = gp.Number();
-        if (v > 0) { _size = v; UpdateActive(doc); SaveSettings(); }
-        continue;
+        SelectGroup(doc, _activeGrpIdx, false);
+        doc.Views.Redraw();
+        break;
       }
 
       if (res == GetResult.Option)
       {
         var opt = gp.Option();
-        if (opt == null) { SaveSettings(); continue; }
+        if (opt == null) { UpdateActive(doc); SaveSettings(); continue; }
 
         if (opt.Index == idxText)
         {
@@ -124,16 +128,43 @@ public sealed class vTitle : Command
           continue;
         }
 
-        // Box toggle already applied via optBox above
+        // Box toggle
         UpdateActive(doc); SaveSettings();
         continue;
       }
 
       if (res == GetResult.Point)
       {
-        if (string.IsNullOrEmpty(_text)) continue;
-        PlaceTitle(doc, gp.Point(), _text, _size, _padding, _box);
-        doc.Views.Redraw();
+        var pt = gp.Point();
+        var hit = FindVTitleAt(doc, pt);
+
+        if (hit.HasValue)
+        {
+          if (_activeGrpIdx >= 0 && _activeGrpIdx != hit.Value.grpIdx)
+            SelectGroup(doc, _activeGrpIdx, false);
+
+          _activeTextId = hit.Value.textId;
+          _activeBoxId  = hit.Value.boxId;
+          _activeGrpIdx = hit.Value.grpIdx;
+
+          if (doc.Objects.FindId(_activeTextId)?.Geometry is TextEntity et)
+          {
+            _text = et.PlainText ?? _text;
+            _size = et.TextHeight;
+            _box  = _activeBoxId != Guid.Empty;
+            SaveSettings();
+          }
+          SelectGroup(doc, _activeGrpIdx, true);
+          doc.Views.Redraw();
+        }
+        else
+        {
+          SelectGroup(doc, _activeGrpIdx, false);
+          if (string.IsNullOrEmpty(_text)) continue;
+          PlaceTitle(doc, pt, _text, _size, _padding, _box);
+          SelectGroup(doc, _activeGrpIdx, true);
+          doc.Views.Redraw();
+        }
       }
     }
 
@@ -206,7 +237,8 @@ public sealed class vTitle : Command
     };
 
     var attr = new ObjectAttributes();
-    attr.SetUserString("vTitle", "1");
+    attr.SetUserString("vTitle",        "1");
+    attr.SetUserString("vTitlePadding", padding.ToString(CultureInfo.InvariantCulture));
     _activeTextId = doc.Objects.AddText(te, attr);
     _activeBoxId  = Guid.Empty;
     _activeGrpIdx = -1;
@@ -235,24 +267,21 @@ public sealed class vTitle : Command
   // ── Find existing vTitle at a point ───────────────────────────────────
 
   private static (Guid textId, Guid boxId, int grpIdx)? FindVTitleAt(
-    RhinoDoc doc, Point3d pt, double tol)
+    RhinoDoc doc, Point3d pt)
   {
-    (Guid, Guid, int)? best = null;
-    double bestDist = tol;
-
     foreach (var obj in doc.Objects)
     {
+      if (obj.IsLocked || obj.IsHidden) continue;
       if (obj.Geometry is not TextEntity te) continue;
       if (obj.Attributes.GetUserString("vTitle") != "1") continue;
+      if (!GetTitleHalfExtents(doc, obj, te, out double hw, out double hh)) continue;
 
-      double dist = pt.DistanceTo(te.Plane.Origin);
-      if (dist > bestDist) continue;
-      bestDist = dist;
+      var rel = pt - te.Plane.Origin;
+      if (Math.Abs(rel * te.Plane.XAxis) > hw) continue;
+      if (Math.Abs(rel * te.Plane.YAxis) > hh) continue;
 
       var grpList = obj.Attributes.GetGroupList();
       int grpIdx = grpList?.Length > 0 ? grpList[0] : -1;
-
-      // Find the box curve in the same group
       Guid boxId = Guid.Empty;
       if (grpIdx >= 0)
       {
@@ -260,13 +289,53 @@ public sealed class vTitle : Command
         {
           if (other.Id == obj.Id || other.Geometry is not PolylineCurve) continue;
           var gl = other.Attributes.GetGroupList();
-          if (gl != null && Array.IndexOf(gl, grpIdx) >= 0)
-          { boxId = other.Id; break; }
+          if (gl != null && Array.IndexOf(gl, grpIdx) >= 0) { boxId = other.Id; break; }
         }
       }
-      best = (obj.Id, boxId, grpIdx);
+      return (obj.Id, boxId, grpIdx);
     }
-    return best;
+    return null;
+  }
+
+  /// <summary>Gets half-extents of a title's box in text-plane coordinates.</summary>
+  private static bool GetTitleHalfExtents(RhinoDoc doc, RhinoObject textRhObj,
+    TextEntity te, out double hw, out double hh)
+  {
+    hw = hh = 0;
+    if (te == null) return false;
+
+    // Try the associated box curve first
+    var grpList = textRhObj.Attributes.GetGroupList();
+    int grpIdx = grpList?.Length > 0 ? grpList[0] : -1;
+    if (grpIdx >= 0)
+    {
+      var center = te.Plane.Origin;
+      foreach (var obj in doc.Objects)
+      {
+        if (obj.Geometry is not PolylineCurve poly) continue;
+        var gl = obj.Attributes.GetGroupList();
+        if (gl == null || Array.IndexOf(gl, grpIdx) < 0) continue;
+        double maxU = 0, maxV = 0;
+        foreach (var corner in poly.ToPolyline())
+        {
+          var r = corner - center;
+          maxU = Math.Max(maxU, Math.Abs(r * te.Plane.XAxis));
+          maxV = Math.Max(maxV, Math.Abs(r * te.Plane.YAxis));
+        }
+        if (maxU > 0 && maxV > 0) { hw = maxU; hh = maxV; return true; }
+      }
+    }
+
+    // Fallback: approximate from stored padding
+    double padding = 10.0;
+    if (double.TryParse(textRhObj.Attributes.GetUserString("vTitlePadding"),
+          NumberStyles.Any, CultureInfo.InvariantCulture, out double sp))
+      padding = sp;
+    var (tw, th) = ApproxBounds(te.PlainText ?? "", te.TextHeight);
+    double padFactor = 1.0 + padding * 2.0 / 100.0;
+    hw = tw * padFactor / 2.0;
+    hh = th * padFactor / 2.0;
+    return true;
   }
 
   // ── Select / deselect a group ─────────────────────────────────────────
@@ -282,6 +351,86 @@ public sealed class vTitle : Command
     }
   }
 
+  // ── Hover highlight ───────────────────────────────────────────────────────
+
+  private static void DrawHoverHighlight(RhinoDoc doc, GetPointDrawEventArgs e)
+  {
+    var pt = e.CurrentPoint;
+    foreach (var obj in doc.Objects)
+    {
+      if (obj.IsLocked || obj.IsHidden) continue;
+      if (obj.Geometry is not TextEntity te) continue;
+      if (obj.Attributes.GetUserString("vTitle") != "1") continue;
+      if (!GetTitleHalfExtents(doc, obj, te, out double hw, out double hh)) continue;
+
+      var rel = pt - te.Plane.Origin;
+      if (Math.Abs(rel * te.Plane.XAxis) > hw) continue;
+      if (Math.Abs(rel * te.Plane.YAxis) > hh) continue;
+
+      var o  = te.Plane.Origin;
+      var xa = te.Plane.XAxis;
+      var ya = te.Plane.YAxis;
+      var hc = Color.FromArgb(220, 255, 220, 40);
+      e.Display.DrawLine(o + xa*(-hw) + ya*(-hh), o + xa*(hw) + ya*(-hh), hc, 2);
+      e.Display.DrawLine(o + xa*( hw) + ya*(-hh), o + xa*(hw) + ya*( hh), hc, 2);
+      e.Display.DrawLine(o + xa*( hw) + ya*( hh), o + xa*(-hw) + ya*( hh), hc, 2);
+      e.Display.DrawLine(o + xa*(-hw) + ya*( hh), o + xa*(-hw) + ya*(-hh), hc, 2);
+    }
+  }
+
+  // ── External-edit handler ───────────────────────────────────────────────
+
+  private static void OnRhinoObjectReplaced(object? sender,
+    RhinoReplaceObjectEventArgs e)
+  {
+    if (_internalReplace) return;
+    if (e.OldRhinoObject?.Attributes.GetUserString("vTitle") != "1") return;
+    _pendingBoxUpdates.Add(e.OldRhinoObject.Id);
+    RhinoApp.Idle -= OnIdleUpdateBoxes;
+    RhinoApp.Idle += OnIdleUpdateBoxes;
+  }
+
+  private static void OnIdleUpdateBoxes(object? sender, EventArgs e)
+  {
+    RhinoApp.Idle -= OnIdleUpdateBoxes;
+    var doc = RhinoDoc.ActiveDoc;
+    if (doc == null || _pendingBoxUpdates.Count == 0) { _pendingBoxUpdates.Clear(); return; }
+    foreach (var id in _pendingBoxUpdates)
+      UpdateBoxForTitle(doc, id);
+    _pendingBoxUpdates.Clear();
+    doc.Views.Redraw();
+  }
+
+  private static void UpdateBoxForTitle(RhinoDoc doc, Guid textId)
+  {
+    if (textId == Guid.Empty) return;
+    var textObj = doc.Objects.FindId(textId);
+    if (textObj?.Geometry is not TextEntity te) return;
+    if (textObj.Attributes.GetUserString("vTitle") != "1") return;
+
+    double padding = 10.0;
+    if (double.TryParse(textObj.Attributes.GetUserString("vTitlePadding"),
+          NumberStyles.Any, CultureInfo.InvariantCulture, out double sp))
+      padding = sp;
+
+    var grpList = textObj.Attributes.GetGroupList();
+    int grpIdx = grpList?.Length > 0 ? grpList[0] : -1;
+    if (grpIdx < 0) return;
+
+    foreach (var obj in doc.Objects)
+    {
+      if (obj.Geometry is not PolylineCurve) continue;
+      var gl = obj.Attributes.GetGroupList();
+      if (gl == null || Array.IndexOf(gl, grpIdx) < 0) continue;
+      var newBox = BoxCurve(te.Plane.Origin, te.Plane.XAxis, te.Plane.YAxis,
+        te.PlainText ?? "", te.TextHeight, padding);
+      _internalReplace = true;
+      doc.Objects.Replace(obj.Id, newBox);
+      _internalReplace = false;
+      break;
+    }
+  }
+
   // ── Live update of last placed group ─────────────────────────────────
 
   private static void UpdateActive(RhinoDoc doc)
@@ -294,7 +443,17 @@ public sealed class vTitle : Command
     var newTe = (TextEntity)oldTe.Duplicate();
     newTe.PlainText  = _text;
     newTe.TextHeight = _size;
+    _internalReplace = true;
     doc.Objects.Replace(_activeTextId, newTe);
+    _internalReplace = false;
+    // Keep padding in sync on the text object's attributes
+    var tobj0 = doc.Objects.FindId(_activeTextId);
+    if (tobj0 != null)
+    {
+      var ta0 = tobj0.Attributes.Duplicate();
+      ta0.SetUserString("vTitlePadding", _padding.ToString(CultureInfo.InvariantCulture));
+      doc.Objects.ModifyAttributes(tobj0, ta0, true);
+    }
 
     var center = oldTe.Plane.Origin;
     var xAxis  = oldTe.Plane.XAxis;
