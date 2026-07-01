@@ -227,10 +227,25 @@ internal static bool Update(string sectionName, Action<JsonObject> updater)
 }
 
   /// <summary>
-  /// Resolves config path in plug-in deployment directory.
+  /// Resolves the config path. Walks up from the assembly directory to find
+  /// the project root (vTools.csproj), then uses the config there so that
+  /// runtime writes survive dotnet builds (which copy project-root → output).
+  /// Falls back to the assembly directory if the project root is not found.
   /// </summary>
   private static string GetToolsConfigPath()
   {
+    try
+    {
+      var dir = new DirectoryInfo(
+        Path.GetDirectoryName(typeof(ToolsOptionStore).Assembly.Location) ?? ".");
+      while (dir != null)
+      {
+        if (File.Exists(Path.Combine(dir.FullName, "vTools.csproj")))
+          return Path.Combine(dir.FullName, ToolsConfigFileName);
+        dir = dir.Parent;
+      }
+    }
+    catch { }
     var pluginDir = Path.GetDirectoryName(typeof(ToolsOptionStore).Assembly.Location) ?? ".";
     Directory.CreateDirectory(pluginDir);
     return Path.Combine(pluginDir, ToolsConfigFileName);
