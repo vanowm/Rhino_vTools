@@ -196,8 +196,11 @@ namespace vTools.Commands
         while (true)
         {
           var ires = go.GetMultiple(0, 0);
+          bool rsChanged = optRs.CurrentValue != _randStart;
+          bool rnChanged = optRn.CurrentValue != _randNext;
           _randStart = optRs.CurrentValue;
           _randNext  = optRn.CurrentValue;
+          if (rsChanged || rnChanged) SaveSettings();
 
           if (go.CommandResult() == Result.Cancel)
           {
@@ -339,6 +342,12 @@ namespace vTools.Commands
 
         doc.Views.Redraw();
         allDots = ScanDots(doc);
+
+        // Reselect all assembled parts so the user can see what moved
+        foreach (var grp in selGrpSet)
+          foreach (var id in ObjsInGrp(doc, grp))
+            doc.Objects.FindId(id)?.Select(true);
+        doc.Views.Redraw();
       }
     }
 

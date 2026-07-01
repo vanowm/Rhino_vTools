@@ -301,21 +301,31 @@ namespace vTools.Commands
 
           Vector3d unrolledY = Vector3d.YAxis;
           Vector3d? unrolledX = null;
-          // curveY = direction from orientation curves (preferred)
+          // curveY: from orientation curves, projected onto Z-plane (matches Python)
           Vector3d? curveY = null;
           if (curveLabelPoint.HasValue && curveLabelUp.HasValue)
-            curveY = curveLabelUp.Value - curveLabelPoint.Value;
-          // pointY = fallback direction from unrolled frame points
+          {
+            var raw = curveLabelUp.Value - curveLabelPoint.Value;
+            curveY = new Vector3d(raw.X, raw.Y, 0.0);
+          }
+          // pointY: from unrolled frame points, also projected onto Z-plane
           Vector3d? pointY = null;
           if (labelPoint.HasValue && labelUp.HasValue)
-            pointY = labelUp.Value - labelPoint.Value;
+          {
+            var raw = labelUp.Value - labelPoint.Value;
+            pointY = new Vector3d(raw.X, raw.Y, 0.0);
+          }
           else if (frame != null)
-            pointY = frame.Y;
-          // use curveY if found, else pointY
-          if (curveY.HasValue && curveY.Value.IsValid && curveY.Value.Length > RhinoMath.ZeroTolerance)
-            unrolledY = curveY.Value;
-          else if (pointY.HasValue && pointY.Value.IsValid && pointY.Value.Length > RhinoMath.ZeroTolerance)
-            unrolledY = pointY.Value;
+          {
+            pointY = new Vector3d(frame.Y.X, frame.Y.Y, 0.0);
+          }
+          // use curveY if valid, else pointY; final result projected onto Z-plane
+          Vector3d chosen = Vector3d.YAxis;
+          if (curveY.HasValue && curveY.Value.Length > RhinoMath.ZeroTolerance)
+            chosen = curveY.Value;
+          else if (pointY.HasValue && pointY.Value.Length > RhinoMath.ZeroTolerance)
+            chosen = pointY.Value;
+          unrolledY = chosen;
           if (curveLabelPoint.HasValue && curveLabelRight.HasValue)
             unrolledX = curveLabelRight.Value - curveLabelPoint.Value;
           else if (labelPoint.HasValue && labelRight.HasValue)
