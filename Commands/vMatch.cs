@@ -69,13 +69,21 @@ namespace vTools.Commands
       while (true)
       {
         var gp = new GetPoint();
-        gp.SetCommandPrompt($"Click near an edge mate dot  Distance={_distance:G}");
+        gp.SetCommandPrompt("Click near an edge mate dot");
         int idxDist = gp.AddOption("Distance", $"{_distance:G}");
         int idxAuto = gp.AddOption("Auto");
+        gp.AcceptNumber(true, false);
         gp.AcceptNothing(false);
 
         var res = gp.Get();
         if (gp.CommandResult() == Result.Cancel) break;
+
+        if (res == GetResult.Number)
+        {
+          double v = gp.Number();
+          if (v >= 0.0) { _distance = v; SaveSettings(); }
+          continue;
+        }
 
         if (res == GetResult.Option)
         {
@@ -85,9 +93,9 @@ namespace vTools.Commands
             dots = AutoAlign(doc, dots, _distance);
             continue;
           }
-          // Distance — use GetString sub-prompt (memory rule: no AddOptionDouble)
+          // Distance — sub-prompt (memory rule: no AddOptionDouble)
           var gs = new GetString();
-          gs.SetCommandPrompt($"Gap distance <{_distance:G}>");
+          gs.SetCommandPrompt($"Gap distance");
           gs.SetDefaultString($"{_distance:G}");
           gs.AcceptNothing(true);
           if (gs.Get() == GetResult.String &&
@@ -166,8 +174,7 @@ namespace vTools.Commands
         var optRn  = new OptionToggle(_randNext,  "Off", "On");
 
         var go = new GetObject();
-        go.SetCommandPrompt(
-            $"Add/remove parts → Enter=run  RandStart={(_randStart ? "On" : "Off")} RandNext={(_randNext ? "On" : "Off")}");
+        go.SetCommandPrompt("Add/remove parts, Enter=run");
         go.GeometryFilter            = brepsFilt;
         go.SubObjectSelect           = false;
         go.GroupSelect               = true;
@@ -180,8 +187,10 @@ namespace vTools.Commands
         go.AlreadySelectedObjectSelect = true;
 
         int idxBack = go.AddOption("Back");
+        int idxDist = go.AddOption("Distance", $"{_distance:G}");
         go.AddOptionToggle("RandStart", ref optRs);
         go.AddOptionToggle("RandNext",  ref optRn);
+        go.AcceptNumber(true, false);
 
         bool goBack = false;
         while (true)
@@ -197,10 +206,28 @@ namespace vTools.Commands
             SaveSettings();
             return ScanDots(doc);
           }
+          if (ires == GetResult.Number)
+          {
+            double v = go.Number();
+            if (v >= 0.0) { _distance = v; }
+            continue;
+          }
           if (ires == GetResult.Option)
           {
             var opt = go.Option();
             if (opt != null && opt.Index == idxBack) { goBack = true; break; }
+            if (opt != null && opt.Index == idxDist)
+            {
+              var gs = new GetString();
+              gs.SetCommandPrompt("Gap distance");
+              gs.SetDefaultString($"{_distance:G}");
+              gs.AcceptNothing(true);
+              if (gs.Get() == GetResult.String &&
+                  double.TryParse(gs.StringResult().Trim(),
+                                  NumberStyles.Any, CultureInfo.InvariantCulture, out double dv)
+                  && dv >= 0.0)
+                _distance = dv;
+            }
             continue;
           }
           break;
