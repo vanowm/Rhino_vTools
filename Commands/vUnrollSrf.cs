@@ -1477,7 +1477,11 @@ namespace vTools.Commands
 
     private class EdgePairResult
     {
+      public double  MaxDist;
+      public double  AvgDist;
       public bool    Reversed;
+      public bool    Full;        // length_ratio >= 0.90
+      public bool    ShortFirst;  // ea is the shorter curve
       public Point3d Point1;
       public Point3d Point2;
     }
@@ -1490,79 +1494,154 @@ namespace vTools.Commands
       for (int i = 0; i < sources.Count; i++)
         result.Add(new List<EdgeMateRecord>());
 
-      int counter = 0;
-      double matchTol = tol * EdgeMateTolFactor;
+      // Collect naked edges per source, filtering out degenerate ones
+      var allEdges = sources
+        .Select(s => (s.Brep.DuplicateEdgeCurves(true) ?? Array.Empty<Curve>())
+          .Select((c, idx) => (idx, c))
+          .Where(x => x.c != null && x.c.GetLength() > tol)
+          .ToArray())
+        .ToArray();
 
+      // Build and score all candidate pairs
+      var candidates = new List<(double maxD, double avgD, int i, int ei, int j, int ej, EdgePairResult score)>();
       for (int i = 0; i < sources.Count; i++)
-      {
-        var edgesA = sources[i].Brep.DuplicateEdgeCurves(true) ?? Array.Empty<Curve>();
         for (int j = i + 1; j < sources.Count; j++)
-        {
-          var edgesB = sources[j].Brep.DuplicateEdgeCurves(true) ?? Array.Empty<Curve>();
-          for (int ei = 0; ei < edgesA.Length; ei++)
-          {
-            if (edgesA[ei] == null) continue;
-            for (int ej = 0; ej < edgesB.Length; ej++)
+          foreach (var (ei, ci) in allEdges[i])
+            foreach (var (ej, cj) in allEdges[j])
             {
-              if (edgesB[ej] == null) continue;
-              var pair = TestEdgePair(edgesA[ei], edgesB[ej], matchTol);
-              if (pair == null) continue;
-              counter++;
-              string mateId = $"{EdgeMatePrefix}{counter:D2}";
-              result[i].Add(new EdgeMateRecord
-              {
-                MateId = mateId, EdgeIndex = ei, Curve = edgesA[ei], Marker = pair.Point1,
-                MatePartIndex = j, MatePartNumber = j + 1, MateEdgeIndex = ej, Reversed = pair.Reversed
-              });
-              result[j].Add(new EdgeMateRecord
-              {
-                MateId = mateId, EdgeIndex = ej, Curve = edgesB[ej], Marker = pair.Point2,
-                MatePartIndex = i, MatePartNumber = i + 1, MateEdgeIndex = ei, Reversed = !pair.Reversed
-              });
+              var score = TestEdgePair(ci, cj, tol);
+              if (score != null)
+                candidates.Add((score.MaxDist, score.AvgDist, i, ei, j, ej, score));
             }
-          }
+
+      // Sort best matches first, then deduplicate using full/short tracking
+      candidates.Sort((a, b) => {
+        int c = a.maxD.CompareTo(b.maxD);
+        return c != 0 ? c : a.avgD.CompareTo(b.avgD);
+      });
+
+      var usedFull  = new HashSet<(int, int)>();
+      var usedShort = new HashSet<(int, int)>();
+      int counter = 0;
+
+      foreach (var (_, __, i, ei, j, ej, score) in candidates)
+      {
+        var key1     = (i, ei);
+        var key2     = (j, ej);
+        var shortKey = score.ShortFirst ? key1 : key2;
+
+        if (score.Full)
+        {
+          if (usedFull.Contains(key1) || usedFull.Contains(key2) ||
+              usedShort.Contains(key1) || usedShort.Contains(key2)) continue;
+          usedFull.Add(key1);
+          usedFull.Add(key2);
         }
+        else
+        {
+          if (usedFull.Contains(shortKey) || usedShort.Contains(shortKey)) continue;
+          usedShort.Add(shortKey);
+        }
+
+        counter++;
+        string mateId = $"{EdgeMatePrefix}{counter:D2}";
+        var edgeCi = allEdges[i].First(x => x.idx == ei).c;
+        var edgeCj = allEdges[j].First(x => x.idx == ej).c;
+        result[i].Add(new EdgeMateRecord
+        {
+          MateId = mateId, EdgeIndex = ei, Curve = edgeCi, Marker = score.Point1,
+          MatePartIndex = j, MatePartNumber = j + 1, MateEdgeIndex = ej, Reversed = score.Reversed
+        });
+        result[j].Add(new EdgeMateRecord
+        {
+          MateId = mateId, EdgeIndex = ej, Curve = edgeCj, Marker = score.Point2,
+          MatePartIndex = i, MatePartNumber = i + 1, MateEdgeIndex = ei, Reversed = !score.Reversed
+        });
       }
       return result;
     }
 
-    private static EdgePairResult? TestEdgePair(Curve ea, Curve eb, double matchTol)
+    /// <summary>
+    /// Port of Python edge_pair_score: samples the shorter curve and projects each point
+    /// onto the longer curve via ClosestPoint. Handles partial edge overlaps.
+    /// </summary>
+    private static EdgePairResult? TestEdgePair(Curve ea, Curve eb, double absTol)
     {
-      double lenA = ea.GetLength();
-      double lenB = eb.GetLength();
-      double minLen = Math.Min(lenA, lenB);
-      double maxLen = Math.Max(lenA, lenB);
-      if (maxLen < RhinoMath.ZeroTolerance) return null;
-      if (minLen / maxLen < 0.50) return null;
+      if (ea == null || eb == null) return null;
+      double lenA = ea.GetLength(); if (lenA <= absTol) return null;
+      double lenB = eb.GetLength(); if (lenB <= absTol) return null;
 
-      var ptsA = new Point3d[EdgeMateSamples];
-      var ptsB = new Point3d[EdgeMateSamples];
+      bool   shortFirst = lenA <= lenB;
+      var    shortCrv   = shortFirst ? ea : eb;
+      var    longCrv    = shortFirst ? eb : ea;
+      double shortLen   = Math.Min(lenA, lenB);
+      double longLen    = Math.Max(lenA, lenB);
+      double ratio      = shortLen / longLen;
+
+      double matchTol = Math.Max(absTol * EdgeMateTolFactor,
+                                 Math.Max(longLen, shortLen) * EdgeMateDiagFactor);
+
+      var distances = new List<double>(EdgeMateSamples * 2);
+
+      // Sample SHORT → project onto LONG
       for (int k = 0; k < EdgeMateSamples; k++)
       {
-        double t = (k + 0.5) / EdgeMateSamples;
-        ptsA[k] = ea.PointAt(ea.Domain.ParameterAt(t));
-        ptsB[k] = eb.PointAt(eb.Domain.ParameterAt(t));
+        var p = shortCrv.PointAt(shortCrv.Domain.ParameterAt((k + 0.5) / EdgeMateSamples));
+        if (!longCrv.ClosestPoint(p, out double tl)) return null;
+        distances.Add(p.DistanceTo(longCrv.PointAt(tl)));
       }
-
-      double normMax = 0, revMax = 0;
-      for (int k = 0; k < EdgeMateSamples; k++)
+      // For full-length pairs, also sample LONG → project onto SHORT
+      if (ratio >= 0.90)
       {
-        normMax = Math.Max(normMax, ptsA[k].DistanceTo(ptsB[k]));
-        revMax  = Math.Max(revMax,  ptsA[k].DistanceTo(ptsB[EdgeMateSamples - 1 - k]));
+        for (int k = 0; k < EdgeMateSamples; k++)
+        {
+          var p = longCrv.PointAt(longCrv.Domain.ParameterAt((k + 0.5) / EdgeMateSamples));
+          if (!shortCrv.ClosestPoint(p, out double ts)) return null;
+          distances.Add(p.DistanceTo(shortCrv.PointAt(ts)));
+        }
       }
 
-      bool reversed = revMax < normMax;
-      if ((reversed ? revMax : normMax) > matchTol) return null;
+      double maxD = distances.Max();
+      double avgD = distances.Average();
+      if (maxD > matchTol) return null;
+
+      // Verify both endpoints of the short edge project onto the long edge
+      foreach (var ep in new[] { shortCrv.PointAtStart, shortCrv.PointAtEnd })
+      {
+        if (!longCrv.ClosestPoint(ep, out double tl)) return null;
+        if (ep.DistanceTo(longCrv.PointAt(tl)) > matchTol) return null;
+      }
+
+      // Marker: arc-length midpoint of short, closest point on long
+      var shortMid = CurveMidpoint(shortCrv);
+      longCrv.ClosestPoint(shortMid, out double tlMid);
+      var longMid = longCrv.PointAt(tlMid);
+      var pt1 = shortFirst ? shortMid : longMid;
+      var pt2 = shortFirst ? longMid  : shortMid;
+
+      // Reversed: compare tangent directions at the marker points
+      bool reversed = false;
+      if (ea.ClosestPoint(pt1, out double ta) && eb.ClosestPoint(pt2, out double tb))
+      {
+        var t1 = ea.TangentAt(ta);
+        var t2 = eb.TangentAt(tb);
+        if (!t1.IsZero && !t2.IsZero) reversed = t1 * t2 < 0.0;
+      }
 
       return new EdgePairResult
       {
-        Reversed = reversed,
-        Point1   = CurveMidpoint(ea),
-        Point2   = CurveMidpoint(eb)
+        MaxDist = maxD, AvgDist = avgD, Reversed = reversed,
+        Full = ratio >= 0.90, ShortFirst = shortFirst,
+        Point1 = pt1, Point2 = pt2
       };
     }
 
-    private static Point3d CurveMidpoint(Curve c) => c.PointAt(c.Domain.Mid);
+    private static Point3d CurveMidpoint(Curve c)
+    {
+      if (c.LengthParameter(c.GetLength() * 0.5, out double t))
+        return c.PointAt(t);
+      return c.PointAt(c.Domain.Mid);
+    }
 
     /// <summary>
     /// Adds edge mate curves to the unroller. Deduplicates by EdgeIndex so each
