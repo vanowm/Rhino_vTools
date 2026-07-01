@@ -18,15 +18,14 @@ public sealed class vTitle : Command
   // ── Persistent settings ───────────────────────────────────────────────
   private static string _text    = "";
   private static double _size    = 20.0;
-  private static double _padding = 10.0;   // percent per side
+  private static double _padding = 50.0;   // percent per side
   private static bool   _box     = true;
   private static string _layer   = "Reference";
 
   // ── Active placement tracking (for live update) ───────────────────────
-  private static Guid _activeTextId    = Guid.Empty;
-  private static Guid _activeBoxId     = Guid.Empty;
-  private static Guid _activeInnerBoxId = Guid.Empty;
-  private static int  _activeGrpIdx    = -1;
+  private static Guid _activeTextId  = Guid.Empty;
+  private static Guid _activeBoxId   = Guid.Empty;
+  private static int  _activeGrpIdx  = -1;
   private static bool _internalReplace = false;
 
   // ── External-edit event subscription ───────────────────────────────
@@ -50,10 +49,9 @@ public sealed class vTitle : Command
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadSettings();
-    _activeTextId     = Guid.Empty;
-    _activeBoxId      = Guid.Empty;
-    _activeInnerBoxId = Guid.Empty;
-    _activeGrpIdx     = -1;
+    _activeTextId  = Guid.Empty;
+    _activeBoxId   = Guid.Empty;
+    _activeGrpIdx  = -1;
 
     while (true)
     {
@@ -164,10 +162,9 @@ public sealed class vTitle : Command
           if (_activeGrpIdx >= 0 && _activeGrpIdx != hit.Value.grpIdx)
             SelectGroup(doc, _activeGrpIdx, false);
 
-          _activeTextId     = hit.Value.textId;
-          _activeBoxId      = hit.Value.boxId;
-          _activeInnerBoxId = FindInnerBoxId(doc, hit.Value.grpIdx);
-          _activeGrpIdx     = hit.Value.grpIdx;
+          _activeTextId  = hit.Value.textId;
+          _activeBoxId   = hit.Value.boxId;
+          _activeGrpIdx  = hit.Value.grpIdx;
 
           if (doc.Objects.FindId(_activeTextId)?.Geometry is TextEntity et)
           {
@@ -185,10 +182,9 @@ public sealed class vTitle : Command
           if (string.IsNullOrEmpty(_text)) continue;
           PlaceTitle(doc, pt, _text, _size, _padding, _box);
           // New placement does NOT enter edit mode — reset so UpdateActive is a no-op.
-          _activeTextId     = Guid.Empty;
-          _activeBoxId      = Guid.Empty;
-          _activeInnerBoxId = Guid.Empty;
-          _activeGrpIdx     = -1;
+          _activeTextId  = Guid.Empty;
+          _activeBoxId   = Guid.Empty;
+          _activeGrpIdx  = -1;
           doc.Views.Redraw();
         }
       }
@@ -228,19 +224,28 @@ public sealed class vTitle : Command
 
     if (!box) return;
 
-    var (tw, th) = ApproxBounds(text, size);
-    double ihw = tw / 2.0;
-    double ihh = th / 2.0;
-    double pad = size * padding / 100.0;  // equal absolute gap on all 4 sides
+    // Try actual text bounds from the transient entity; fall back to approximation
+    double ihw, ihh;
+    try
+    {
+      var bb = te.GetBoundingBox(true);
+      if (bb.IsValid)
+      {
+        double maxU = 0, maxV = 0;
+        foreach (var corner in bb.GetCorners())
+        {
+          var r = corner - pt;
+          maxU = Math.Max(maxU, Math.Abs(r * xAxis));
+          maxV = Math.Max(maxV, Math.Abs(r * yAxis));
+        }
+        if (maxU > 0 && maxV > 0) { ihw = maxU; ihh = maxV; }
+        else { var (tw, th) = ApproxBounds(text, size); ihw = tw / 2.0; ihh = th / 2.0; }
+      }
+      else { var (tw, th) = ApproxBounds(text, size); ihw = tw / 2.0; ihh = th / 2.0; }
+    }
+    catch { var (tw, th) = ApproxBounds(text, size); ihw = tw / 2.0; ihh = th / 2.0; }
 
-    // Inner box: text bounds without padding (dim)
-    var ic = Color.FromArgb(100, 180, 180, 60);
-    e.Display.DrawLine(pt + xAxis*(-ihw) + yAxis*(-ihh), pt + xAxis*( ihw) + yAxis*(-ihh), ic, 1);
-    e.Display.DrawLine(pt + xAxis*( ihw) + yAxis*(-ihh), pt + xAxis*( ihw) + yAxis*( ihh), ic, 1);
-    e.Display.DrawLine(pt + xAxis*( ihw) + yAxis*( ihh), pt + xAxis*(-ihw) + yAxis*( ihh), ic, 1);
-    e.Display.DrawLine(pt + xAxis*(-ihw) + yAxis*( ihh), pt + xAxis*(-ihw) + yAxis*(-ihh), ic, 1);
-
-    // Outer box: equal padding on all sides
+    double pad = size * padding / 100.0;
     double ohw = ihw + pad;
     double ohh = ihh + pad;
     var c0 = pt + xAxis * (-ohw) + yAxis * (-ohh);
@@ -278,31 +283,22 @@ public sealed class vTitle : Command
     attr.SetUserString("vTitle",        "1");
     attr.SetUserString("vTitlePadding", padding.ToString(CultureInfo.InvariantCulture));
     attr.LayerIndex = layerIdx;
-    _activeTextId     = doc.Objects.AddText(te, attr);
-    _activeBoxId      = Guid.Empty;
-    _activeInnerBoxId = Guid.Empty;
-    _activeGrpIdx     = -1;
+    _activeTextId  = doc.Objects.AddText(te, attr);
+    _activeBoxId   = Guid.Empty;
+    _activeGrpIdx  = -1;
     if (_activeTextId == Guid.Empty) return;
 
     if (box)
     {
       var (ihw, ihh) = GetActualHalfExtents(doc, _activeTextId, text, size);
       double pad = size * padding / 100.0;
-
       var boxAttr = new ObjectAttributes { LayerIndex = layerIdx };
       _activeBoxId = doc.Objects.AddCurve(RectCurve(center, xAxis, yAxis, ihw + pad, ihh + pad), boxAttr);
-
-      var innerAttr = new ObjectAttributes { LayerIndex = layerIdx };
-      innerAttr.SetUserString("vTitle",        "1");
-      innerAttr.SetUserString("vTitleInner",   "1");
-      innerAttr.SetUserString("vTitlePadding", padding.ToString(CultureInfo.InvariantCulture));
-      _activeInnerBoxId = doc.Objects.AddCurve(RectCurve(center, xAxis, yAxis, ihw, ihh), innerAttr);
     }
 
-    // Group text + box + inner-box together
+    // Group text + box together
     var toGroup = new System.Collections.Generic.List<Guid> { _activeTextId };
-    if (_activeBoxId      != Guid.Empty) toGroup.Add(_activeBoxId);
-    if (_activeInnerBoxId != Guid.Empty) toGroup.Add(_activeInnerBoxId);
+    if (_activeBoxId != Guid.Empty) toGroup.Add(_activeBoxId);
     if (toGroup.Count > 1)
     {
       _activeGrpIdx = doc.Groups.Add();
@@ -341,7 +337,6 @@ public sealed class vTitle : Command
         foreach (var other in doc.Objects)
         {
       if (other.Id == obj.Id || other.Geometry is not PolylineCurve) continue;
-          if (other.Attributes.GetUserString("vTitleInner") == "1") continue; // skip inner box
           var gl = other.Attributes.GetGroupList();
           if (gl != null && Array.IndexOf(gl, grpIdx) >= 0) { boxId = other.Id; break; }
         }
@@ -367,7 +362,6 @@ public sealed class vTitle : Command
       foreach (var obj in doc.Objects)
       {
         if (obj.Geometry is not PolylineCurve poly) continue;
-        if (obj.Attributes.GetUserString("vTitleInner") == "1") continue; // skip inner box
         var gl = obj.Attributes.GetGroupList();
         if (gl == null || Array.IndexOf(gl, grpIdx) < 0) continue;
         double maxU = 0, maxV = 0;
@@ -480,28 +474,14 @@ public sealed class vTitle : Command
       if (obj.Geometry is not PolylineCurve) continue;
       var gl = obj.Attributes.GetGroupList();
       if (gl == null || Array.IndexOf(gl, grpIdx) < 0) continue;
-      bool isInner = obj.Attributes.GetUserString("vTitleInner") == "1";
-      var newBox = RectCurve(te.Plane.Origin, te.Plane.XAxis, te.Plane.YAxis,
-        isInner ? ihw       : ihw + pad,
-        isInner ? ihh       : ihh + pad);
+      var newBox = RectCurve(te.Plane.Origin, te.Plane.XAxis, te.Plane.YAxis, ihw + pad, ihh + pad);
       _internalReplace = true;
       doc.Objects.Replace(obj.Id, newBox);
       _internalReplace = false;
     }
   }
 
-  private static Guid FindInnerBoxId(RhinoDoc doc, int grpIdx)
-  {
-    if (grpIdx < 0) return Guid.Empty;
-    foreach (var obj in doc.Objects)
-    {
-      if (obj.Geometry is not PolylineCurve) continue;
-      if (obj.Attributes.GetUserString("vTitleInner") != "1") continue;
-      var gl = obj.Attributes.GetGroupList();
-      if (gl != null && Array.IndexOf(gl, grpIdx) >= 0) return obj.Id;
-    }
-    return Guid.Empty;
-  }
+  private static Guid FindInnerBoxId(RhinoDoc doc, int grpIdx) => Guid.Empty;
 
   // ── Live update of last placed group ─────────────────────────────────
 
@@ -534,10 +514,6 @@ public sealed class vTitle : Command
     // Get actual bounds from the just-replaced entity
     var (ihw, ihh) = GetActualHalfExtents(doc, _activeTextId, _text, _size);
     double pad = _size * _padding / 100.0;
-
-    // Update inner box (text bounds, no padding)
-    if (_activeInnerBoxId != Guid.Empty)
-      doc.Objects.Replace(_activeInnerBoxId, RectCurve(center, xAxis, yAxis, ihw, ihh));
 
     if (_box)
     {
