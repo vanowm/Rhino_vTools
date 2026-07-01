@@ -242,16 +242,20 @@ namespace vTools.Commands
             edgeFlatPoints = MatchEdgeCurveOutputs(unrolledCurves, edgeMateInfos, hiddenCurveIndexes, tol);
 
             // Cleanup pass: hide any remaining orientation helper curves not caught by
-            // ResolveOrientationCurves (e.g. when only one of the two was returned by Rhino).
+            // ResolveOrientationCurves (e.g. when only one was returned by Rhino).
+            // Check against both chord lengths (up/right) AND arc-length step — mirrors Python.
             if (frame != null && orientCrvCount > 0)
             {
-              double expStep = frame.Step > tol ? frame.Step : Math.Max(
-                frame.Point.DistanceTo(frame.UpPoint), frame.Point.DistanceTo(frame.RightPoint));
+              double upLen  = frame.Point.DistanceTo(frame.UpPoint);
+              double rtLen  = frame.Point.DistanceTo(frame.RightPoint);
+              double stp    = frame.Step;
               for (int ci = 0; ci < unrolledCurves.Length; ci++)
               {
                 if (hiddenCurveIndexes.Contains(ci) || unrolledCurves[ci] == null) continue;
                 double cl = unrolledCurves[ci].GetLength();
-                if (expStep > tol && Math.Abs(cl - expStep) / expStep < 0.15)
+                if ((upLen > tol && Math.Abs(cl - upLen) / upLen < 0.15) ||
+                    (rtLen > tol && Math.Abs(cl - rtLen) / rtLen < 0.15) ||
+                    (stp   > tol && Math.Abs(cl - stp)   / stp   < 0.15))
                   hiddenCurveIndexes.Add(ci);
               }
             }
@@ -1743,14 +1747,14 @@ namespace vTools.Commands
     private static Guid AddEdgeMateDot(
       RhinoDoc doc, EdgeMateRecord rec, Point3d position, int partNumber, int layerIdx)
     {
-      var dot = new TextDot(rec.MateId, position) { FontHeight = EdgeMateDotSize };
+      var dot  = new TextDot(rec.MateId, position) { FontHeight = EdgeMateDotSize };
       var attr = new ObjectAttributes();
       attr.Name = EdgeMateName;
       if (layerIdx >= 0) attr.LayerIndex = layerIdx;
-      attr.UserDictionary.Set(EdgeMateIdKey,      rec.MateId);
-      attr.UserDictionary.Set(EdgePartNumKey,      partNumber.ToString());
-      attr.UserDictionary.Set(EdgeMatePartNumKey,  rec.MatePartNumber.ToString());
-      attr.UserDictionary.Set(EdgeMateReversedKey, rec.Reversed ? "true" : "false");
+      attr.SetUserString(EdgeMateIdKey,      rec.MateId);
+      attr.SetUserString(EdgePartNumKey,      partNumber.ToString());
+      attr.SetUserString(EdgeMatePartNumKey,  rec.MatePartNumber.ToString());
+      attr.SetUserString(EdgeMateReversedKey, rec.Reversed ? "true" : "false");
       return doc.Objects.AddTextDot(dot, attr);
     }
 

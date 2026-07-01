@@ -67,6 +67,9 @@ if (-not (Test-Path $pendingFile)) {
 }
 
 # Build
+$dllPath = 'bin\Release\net7.0-windows\vTools.dll'
+$dllTimeBefore = if (Test-Path $dllPath) { (Get-Item $dllPath).LastWriteTime } else { $null }
+
 $buildOutput = dotnet build vTools.csproj -c Release --no-incremental 2>&1
 $buildExitCode = $LASTEXITCODE
 if ($buildExitCode -ne 0) {
@@ -76,4 +79,22 @@ if ($buildExitCode -ne 0) {
         Write-Host $buildOutput
         exit $buildExitCode
     }
+}
+
+# Commit only when build succeeded and DLL was actually updated
+$dllTimeAfter = if (Test-Path $dllPath) { (Get-Item $dllPath).LastWriteTime } else { $null }
+$dllUpdated = ($dllTimeAfter -ne $null) -and ($dllTimeAfter -ne $dllTimeBefore)
+
+if ($dllUpdated) {
+    $pendingMsg = (Get-Content $pendingFile -Raw -ErrorAction SilentlyContinue) -replace "`r`n|`r|`n", ' '
+    if ($pendingMsg) {
+        $ver = (Get-Date).ToString('yy.M.d.HHmm')
+        $commitMsg = "${ver}: $pendingMsg"
+        git add -A
+        git commit -m $commitMsg
+        Remove-Item $pendingFile -ErrorAction SilentlyContinue
+        Write-Host "Committed: $commitMsg" -ForegroundColor Green
+    }
+} else {
+    Write-Host "DLL not updated (build locked or unchanged) - commit deferred." -ForegroundColor Yellow
 }
