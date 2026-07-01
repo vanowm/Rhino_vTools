@@ -20,6 +20,7 @@ public sealed class vTitle : Command
   private static double _size    = 20.0;
   private static double _padding = 10.0;   // percent per side
   private static bool   _box     = true;
+  private static string _layer   = "Reference";
 
   // ── Active placement tracking (for live update) ───────────────────────
   private static Guid _activeTextId    = Guid.Empty;
@@ -41,6 +42,7 @@ public sealed class vTitle : Command
   private const string KeySize    = "size";
   private const string KeyPadding = "padding";
   private const string KeyBox     = "box";
+  private const string KeyLayer   = "layer";
 
   public override string EnglishName => "vTitle";
 
@@ -61,6 +63,7 @@ public sealed class vTitle : Command
       int idxText    = gp.AddOption("Text",    string.IsNullOrEmpty(_text) ? "-" : _text);
       int idxSize    = gp.AddOption("Size",    $"{_size:G}");
       int idxPadding = gp.AddOption("Padding", $"{_padding:G}");
+      int idxLayer   = gp.AddOption("Layer",   _layer);
       var optBox     = new OptionToggle(_box, "Off", "On");
       gp.AddOptionToggle("Box", ref optBox);
       gp.AcceptNothing(false);
@@ -127,6 +130,22 @@ public sealed class vTitle : Command
                 NumberStyles.Any, CultureInfo.InvariantCulture, out double pv) && pv >= 0)
             _padding = pv;
           UpdateActive(doc); SaveSettings();
+          continue;
+        }
+
+        if (opt.Index == idxLayer)
+        {
+          var gs = new GetString();
+          gs.SetCommandPrompt("Layer name  (. or * = current layer)");
+          gs.SetDefaultString(_layer);
+          gs.AcceptNothing(true);
+          gs.GetLiteralString();
+          if (gs.CommandResult() != Result.Cancel)
+          {
+            string s = gs.StringResult()?.Trim() ?? "";
+            if (!string.IsNullOrEmpty(s)) _layer = s;
+          }
+          SaveSettings();
           continue;
         }
 
@@ -210,22 +229,24 @@ public sealed class vTitle : Command
     if (!box) return;
 
     var (tw, th) = ApproxBounds(text, size);
+    double ihw = tw / 2.0;
+    double ihh = th / 2.0;
+    double pad = size * padding / 100.0;  // equal absolute gap on all 4 sides
 
-    // Inner box: text bounds without padding
+    // Inner box: text bounds without padding (dim)
     var ic = Color.FromArgb(100, 180, 180, 60);
-    e.Display.DrawLine(pt + xAxis*(-tw/2) + yAxis*(-th/2), pt + xAxis*(tw/2) + yAxis*(-th/2), ic, 1);
-    e.Display.DrawLine(pt + xAxis*(tw/2)  + yAxis*(-th/2), pt + xAxis*(tw/2) + yAxis*( th/2), ic, 1);
-    e.Display.DrawLine(pt + xAxis*(tw/2)  + yAxis*( th/2), pt + xAxis*(-tw/2) + yAxis*(th/2), ic, 1);
-    e.Display.DrawLine(pt + xAxis*(-tw/2) + yAxis*( th/2), pt + xAxis*(-tw/2) + yAxis*(-th/2), ic, 1);
+    e.Display.DrawLine(pt + xAxis*(-ihw) + yAxis*(-ihh), pt + xAxis*( ihw) + yAxis*(-ihh), ic, 1);
+    e.Display.DrawLine(pt + xAxis*( ihw) + yAxis*(-ihh), pt + xAxis*( ihw) + yAxis*( ihh), ic, 1);
+    e.Display.DrawLine(pt + xAxis*( ihw) + yAxis*( ihh), pt + xAxis*(-ihw) + yAxis*( ihh), ic, 1);
+    e.Display.DrawLine(pt + xAxis*(-ihw) + yAxis*( ihh), pt + xAxis*(-ihw) + yAxis*(-ihh), ic, 1);
 
-    // Outer box: text bounds with padding
-    double bw = tw * (1.0 + padding * 2.0 / 100.0);
-    double bh = th * (1.0 + padding * 2.0 / 100.0);
-
-    var c0 = pt + xAxis * (-bw / 2) + yAxis * (-bh / 2);
-    var c1 = pt + xAxis * ( bw / 2) + yAxis * (-bh / 2);
-    var c2 = pt + xAxis * ( bw / 2) + yAxis * ( bh / 2);
-    var c3 = pt + xAxis * (-bw / 2) + yAxis * ( bh / 2);
+    // Outer box: equal padding on all sides
+    double ohw = ihw + pad;
+    double ohh = ihh + pad;
+    var c0 = pt + xAxis * (-ohw) + yAxis * (-ohh);
+    var c1 = pt + xAxis * ( ohw) + yAxis * (-ohh);
+    var c2 = pt + xAxis * ( ohw) + yAxis * ( ohh);
+    var c3 = pt + xAxis * (-ohw) + yAxis * ( ohh);
 
     var boxColor = Color.FromArgb(180, 180, 220, 60);
     e.Display.DrawLine(c0, c1, boxColor, 1);
@@ -252,22 +273,30 @@ public sealed class vTitle : Command
       DimensionScale = 1.0,
     };
 
+    int layerIdx = GetTargetLayerIndex(doc);
     var attr = new ObjectAttributes();
     attr.SetUserString("vTitle",        "1");
     attr.SetUserString("vTitlePadding", padding.ToString(CultureInfo.InvariantCulture));
-    _activeTextId = doc.Objects.AddText(te, attr);
-    _activeBoxId  = Guid.Empty;
-    _activeGrpIdx = -1;
+    attr.LayerIndex = layerIdx;
+    _activeTextId     = doc.Objects.AddText(te, attr);
+    _activeBoxId      = Guid.Empty;
+    _activeInnerBoxId = Guid.Empty;
+    _activeGrpIdx     = -1;
     if (_activeTextId == Guid.Empty) return;
 
     if (box)
     {
-      _activeBoxId = doc.Objects.AddCurve(BoxCurve(center, xAxis, yAxis, text, size, padding));
-      var innerAttr = new ObjectAttributes();
-      innerAttr.SetUserString("vTitle",      "1");
-      innerAttr.SetUserString("vTitleInner", "1");
+      var (ihw, ihh) = GetActualHalfExtents(doc, _activeTextId, text, size);
+      double pad = size * padding / 100.0;
+
+      var boxAttr = new ObjectAttributes { LayerIndex = layerIdx };
+      _activeBoxId = doc.Objects.AddCurve(RectCurve(center, xAxis, yAxis, ihw + pad, ihh + pad), boxAttr);
+
+      var innerAttr = new ObjectAttributes { LayerIndex = layerIdx };
+      innerAttr.SetUserString("vTitle",        "1");
+      innerAttr.SetUserString("vTitleInner",   "1");
       innerAttr.SetUserString("vTitlePadding", padding.ToString(CultureInfo.InvariantCulture));
-      _activeInnerBoxId = doc.Objects.AddCurve(BoxCurve(center, xAxis, yAxis, text, size, 0.0), innerAttr);
+      _activeInnerBoxId = doc.Objects.AddCurve(RectCurve(center, xAxis, yAxis, ihw, ihh), innerAttr);
     }
 
     // Group text + box + inner-box together
@@ -443,15 +472,18 @@ public sealed class vTitle : Command
     int grpIdx = grpList?.Length > 0 ? grpList[0] : -1;
     if (grpIdx < 0) return;
 
+    var (ihw, ihh) = GetActualHalfExtents(doc, textId, te.PlainText ?? "", te.TextHeight);
+    double pad = te.TextHeight * padding / 100.0;
+
     foreach (var obj in doc.Objects)
     {
       if (obj.Geometry is not PolylineCurve) continue;
       var gl = obj.Attributes.GetGroupList();
       if (gl == null || Array.IndexOf(gl, grpIdx) < 0) continue;
       bool isInner = obj.Attributes.GetUserString("vTitleInner") == "1";
-      double p = isInner ? 0.0 : padding;
-      var newBox = BoxCurve(te.Plane.Origin, te.Plane.XAxis, te.Plane.YAxis,
-        te.PlainText ?? "", te.TextHeight, p);
+      var newBox = RectCurve(te.Plane.Origin, te.Plane.XAxis, te.Plane.YAxis,
+        isInner ? ihw       : ihw + pad,
+        isInner ? ihh       : ihh + pad);
       _internalReplace = true;
       doc.Objects.Replace(obj.Id, newBox);
       _internalReplace = false;
@@ -499,13 +531,17 @@ public sealed class vTitle : Command
     var xAxis  = oldTe.Plane.XAxis;
     var yAxis  = oldTe.Plane.YAxis;
 
+    // Get actual bounds from the just-replaced entity
+    var (ihw, ihh) = GetActualHalfExtents(doc, _activeTextId, _text, _size);
+    double pad = _size * _padding / 100.0;
+
     // Update inner box (text bounds, no padding)
     if (_activeInnerBoxId != Guid.Empty)
-      doc.Objects.Replace(_activeInnerBoxId, BoxCurve(center, xAxis, yAxis, _text, _size, 0.0));
+      doc.Objects.Replace(_activeInnerBoxId, RectCurve(center, xAxis, yAxis, ihw, ihh));
 
     if (_box)
     {
-      var newCurve = BoxCurve(center, xAxis, yAxis, _text, _size, _padding);
+      var newCurve = RectCurve(center, xAxis, yAxis, ihw + pad, ihh + pad);
       if (_activeBoxId != Guid.Empty)
       {
         doc.Objects.Replace(_activeBoxId, newCurve);
@@ -551,13 +587,67 @@ public sealed class vTitle : Command
     Vector3d xAxis, Vector3d yAxis, string text, double size, double padding)
   {
     var (tw, th) = ApproxBounds(text, size);
-    double bw = tw * (1.0 + padding * 2.0 / 100.0);
-    double bh = th * (1.0 + padding * 2.0 / 100.0);
-    var c0 = center + xAxis * (-bw / 2) + yAxis * (-bh / 2);
-    var c1 = center + xAxis * ( bw / 2) + yAxis * (-bh / 2);
-    var c2 = center + xAxis * ( bw / 2) + yAxis * ( bh / 2);
-    var c3 = center + xAxis * (-bw / 2) + yAxis * ( bh / 2);
+    double pad = size * padding / 100.0;
+    return RectCurve(center, xAxis, yAxis, tw / 2.0 + pad, th / 2.0 + pad);
+  }
+
+  private static PolylineCurve RectCurve(Point3d center,
+    Vector3d xAxis, Vector3d yAxis, double hw, double hh)
+  {
+    var c0 = center + xAxis * (-hw) + yAxis * (-hh);
+    var c1 = center + xAxis * ( hw) + yAxis * (-hh);
+    var c2 = center + xAxis * ( hw) + yAxis * ( hh);
+    var c3 = center + xAxis * (-hw) + yAxis * ( hh);
     return new PolylineCurve(new[] { c0, c1, c2, c3, c0 });
+  }
+
+  /// <summary>Gets half-extents of a placed text entity; falls back to ApproxBounds.</summary>
+  private static (double hw, double hh) GetActualHalfExtents(
+    RhinoDoc doc, Guid textId, string text, double size)
+  {
+    try
+    {
+      var robj = doc.Objects.FindId(textId);
+      if (robj != null)
+      {
+        var bb = robj.Geometry.GetBoundingBox(true);
+        if (bb.IsValid)
+        {
+          var te = robj.Geometry as TextEntity;
+          if (te != null)
+          {
+            double maxU = 0, maxV = 0;
+            var origin = te.Plane.Origin;
+            foreach (var corner in bb.GetCorners())
+            {
+              var r = corner - origin;
+              maxU = Math.Max(maxU, Math.Abs(r * te.Plane.XAxis));
+              maxV = Math.Max(maxV, Math.Abs(r * te.Plane.YAxis));
+            }
+            if (maxU > 0 && maxV > 0) return (maxU, maxV);
+          }
+        }
+      }
+    }
+    catch { }
+    var (tw, th) = ApproxBounds(text, size);
+    return (tw / 2.0, th / 2.0);
+  }
+
+  private static int GetTargetLayerIndex(RhinoDoc doc)
+  {
+    if (_layer == "." || _layer == "*")
+      return doc.Layers.CurrentLayerIndex;
+    int idx = doc.Layers.FindByFullPath(_layer, -1);
+    if (idx >= 0) return idx;
+    try
+    {
+      var layer = new Rhino.DocObjects.Layer { Name = _layer };
+      idx = doc.Layers.Add(layer);
+      if (idx >= 0) return idx;
+    }
+    catch { }
+    return doc.Layers.CurrentLayerIndex;
   }
 
   /// <summary>Approximate text extents based on size and character count.</summary>
@@ -578,6 +668,7 @@ public sealed class vTitle : Command
       if (ToolsOptionStore.TryGetDouble(s, KeySize,    out var v)) _size    = v;
       if (ToolsOptionStore.TryGetDouble(s, KeyPadding, out v))     _padding = v;
       if (ToolsOptionStore.TryGetBool  (s, KeyBox,     out var b)) _box     = b;
+      if (ToolsOptionStore.TryGetString(s, KeyLayer,   out var l)) _layer   = l;
       return 0;
     });
   }
@@ -590,6 +681,7 @@ public sealed class vTitle : Command
       s[KeySize]    = _size;
       s[KeyPadding] = _padding;
       s[KeyBox]     = _box;
+      s[KeyLayer]   = _layer;
     });
   }
 }
