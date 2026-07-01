@@ -49,7 +49,7 @@ public sealed class vTitle : Command
       gp.AcceptNumber(true, false);   // quick size update
       gp.AcceptNothing(false);
 
-      gp.DynamicDraw += (_, e) => DrawPreview(e, _text, _size, _padding, _box);
+      gp.DynamicDraw += (_, e) => DrawPreview(doc, e, _text, _size, _padding, _box);
 
       var res = gp.Get();
       _box = optBox.CurrentValue;
@@ -137,7 +137,7 @@ public sealed class vTitle : Command
 
   // ── Dynamic preview ───────────────────────────────────────────────────
 
-  private static void DrawPreview(GetPointDrawEventArgs e,
+  private static void DrawPreview(RhinoDoc doc, GetPointDrawEventArgs e,
     string text, double size, double padding, bool box)
   {
     if (string.IsNullOrEmpty(text)) return;
@@ -151,30 +151,29 @@ public sealed class vTitle : Command
     var textPlane = new Plane(pt, xAxis, yAxis);
 
     // Text annotation preview
-    try
+    var te = new TextEntity
     {
-      var te = new TextEntity
-      {
-        Plane          = textPlane,
-        PlainText      = text,
-        TextHeight     = size,
-        Justification  = TextJustification.MiddleCenter,
-        DimensionScale = 1.0,
-      };
-      try { te.DrawForward = false; } catch { }
-      e.Display.DrawAnnotation(te, Color.FromArgb(220, 255, 255, 80));
-    }
+      Plane          = textPlane,
+      PlainText      = text,
+      TextHeight     = size,
+      Justification  = TextJustification.MiddleCenter,
+      DimensionScale = 1.0,
+    };
+    try { te.DrawForward = false; } catch { }
+    // Attach current DimStyle so GetBoundingBox returns real metrics
+    try { te.DimensionStyleId = doc.DimStyles.Current.Id; } catch { }
+
+    try { e.Display.DrawAnnotation(te, Color.FromArgb(220, 255, 255, 80)); }
     catch
     {
-      // Fallback: 3D text
       try { e.Display.Draw3dText(new Text3d(text, textPlane, size), Color.Yellow); }
       catch { e.Display.DrawDot(pt, text); }
     }
 
     if (!box) return;
 
-    // Box outline
-    var (tw, th) = ApproxBounds(text, size);
+    // Prefer real bounds; fall back to approximation
+    var (tw, th) = TextBounds(te, text, size);
     double bw = tw * (1.0 + padding * 2.0 / 100.0);
     double bh = th * (1.0 + padding * 2.0 / 100.0);
 
@@ -209,11 +208,33 @@ public sealed class vTitle : Command
       Justification  = TextJustification.MiddleCenter,
       DimensionScale = 1.0,
     };
-    doc.Objects.AddText(te);
+    var titleId = doc.Objects.AddText(te);
 
     if (!box) return;
 
-    var (tw, th) = ApproxBounds(text, size);
+    // Use actual bounding box of placed text for accurate sizing
+    double tw, th;
+    var rhObj = doc.Objects.FindId(titleId);
+    var bb = rhObj?.Geometry?.GetBoundingBox(true) ?? BoundingBox.Empty;
+    if (bb.IsValid && (bb.Max.X - bb.Min.X) > doc.ModelAbsoluteTolerance)
+    {
+      // Project corners onto text plane axes to handle any orientation
+      var toLocal = Transform.ChangeBasis(Plane.WorldXY, textPlane);
+      double minU = double.MaxValue, maxU = double.MinValue;
+      double minV = double.MaxValue, maxV = double.MinValue;
+      foreach (var corner in bb.GetCorners())
+      {
+        var lp = corner; lp.Transform(toLocal);
+        if (lp.X < minU) minU = lp.X; if (lp.X > maxU) maxU = lp.X;
+        if (lp.Y < minV) minV = lp.Y; if (lp.Y > maxV) maxV = lp.Y;
+      }
+      tw = maxU - minU;
+      th = maxV - minV;
+    }
+    else
+    {
+      (tw, th) = TextBounds(te, text, size);
+    }
     double bw = tw * (1.0 + padding * 2.0 / 100.0);
     double bh = th * (1.0 + padding * 2.0 / 100.0);
 
@@ -227,11 +248,31 @@ public sealed class vTitle : Command
 
   // ── Helpers ───────────────────────────────────────────────────────────
 
+  /// <summary>
+  /// Returns text extents from the entity's bounding box if available,
+  /// falling back to a character-count approximation.
+  /// </summary>
+  private static (double w, double h) TextBounds(TextEntity te, string text, double size)
+  {
+    try
+    {
+      var bb = te.GetBoundingBox(true);
+      if (bb.IsValid)
+      {
+        double w = bb.Max.X - bb.Min.X;
+        double h = bb.Max.Y - bb.Min.Y;
+        if (w > 0 && h > 0) return (w, h);
+      }
+    }
+    catch { }
+    return ApproxBounds(text, size);
+  }
+
   /// <summary>Approximate text extents based on size and character count.</summary>
   private static (double w, double h) ApproxBounds(string text, double size)
   {
     double h = size * 1.4;
-    double w = Math.Max(text.Length * size * 0.6, size);
+    double w = Math.Max(text.Length * size * 0.75, size);
     return (w, h);
   }
 
