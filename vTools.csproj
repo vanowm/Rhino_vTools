@@ -19,7 +19,7 @@
     <CopyRetryCount>0</CopyRetryCount>
     <CopyRetryDelayMilliseconds>0</CopyRetryDelayMilliseconds>
     <!-- Enabled: successful Release builds auto-commit tracked version artifacts. -->
-    <AutoCommitVersionOnRelease>false</AutoCommitVersionOnRelease>
+    <AutoCommitVersionOnRelease>True</AutoCommitVersionOnRelease>
   </PropertyGroup>
 
   <ItemGroup>

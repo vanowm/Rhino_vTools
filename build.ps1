@@ -1,10 +1,7 @@
 Set-Location d:\github\rhino\vTools
 
-# Bump CalVer in csproj and AssemblyInfo: YY.M.D.HHmm
-$cur = (Select-String -Path vTools.csproj -Pattern '<Version>([^<]+)').Matches[0].Groups[1].Value
-$v   = Get-Date -Format 'yy.M.d.HHmm'
-(Get-Content vTools.csproj)             -replace [regex]::Escape($cur), $v | Set-Content vTools.csproj
-(Get-Content Properties\AssemblyInfo.cs) -replace [regex]::Escape($cur), $v | Set-Content Properties\AssemblyInfo.cs
+# Version is auto-computed at build time via $(BuildVersion) in vTools.csproj.
+# Do NOT modify vTools.csproj or Properties\AssemblyInfo.cs here.
 
 $pendingFile = '.git\vtools-pending-message.txt'
 

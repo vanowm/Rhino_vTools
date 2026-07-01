@@ -60,19 +60,23 @@ public sealed class vFacing : Command
     }
 
     // 3. Build facing pieces; boundaryCurve is used only for inside-object collection
-    var cplane = ActiveCPlane(doc);
+    var cplane     = ActiveCPlane(doc);
+    var excludeIds = new HashSet<Guid>(selectedCurves.Select(c => c.Id));
+    var viewPlane  = ViewPlane(doc);
+
+    List<(Curve Crv, int Layer)>? outPieces    = null;
+    Curve?                         boundaryCurve = null;
     if (!BuildFacingPieces(baseParts!, side1Parts!, side2Parts!,
-          _size, tol, cplane,
-          out var outPieces, out var boundaryCurve))
+          _size, tol, cplane, out outPieces, out boundaryCurve))
     {
       RhinoApp.WriteLine("vFacing: could not build facing boundary. Check that sides are long enough.");
       return Result.Nothing;
     }
 
     // 4. Collect inside objects
-    var excludeIds = new HashSet<Guid>(selectedCurves.Select(c => c.Id));
-    var viewPlane = ViewPlane(doc);
-    var inside    = CollectInsideObjects(doc, excludeIds, boundaryCurve!, viewPlane, tol);
+    var inside = boundaryCurve != null
+               ? CollectInsideObjects(doc, excludeIds, boundaryCurve, viewPlane, tol)
+               : new List<(GeometryBase Geom, ObjectAttributes Attr)>();
 
     // 5. Build item list: boundary pieces (each on its original layer) + inside
     var items = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
@@ -90,17 +94,49 @@ public sealed class vFacing : Command
     foreach (var (crv, _) in outPieces!) bbox.Union(crv.GetBoundingBox(true));
     var basePoint = bbox.IsValid ? bbox.Center : outPieces![0].Crv.PointAtStart;
 
-    var previewGeoms  = items
+    var previewGeoms = items
       .Select(p => (Geom: p.Geom.Duplicate()!,
                     Color: (p.Attr.LayerIndex < doc.Layers.Count
                             ? doc.Layers[p.Attr.LayerIndex]?.Color : null) ?? Color.Cyan))
       .Where(p => p.Geom != null)
       .ToList();
 
-    var sizeOpt = new OptionDouble(_size, 0.001, double.MaxValue);
-    var gp      = new GetPoint();
+    // Local helper: rebuild facing + preview when size changes during placement
+    bool RebuildFromSize()
+    {
+      List<(Curve Crv, int Layer)>? newPieces    = null;
+      Curve?                         newBoundary   = null;
+      if (!BuildFacingPieces(baseParts!, side1Parts!, side2Parts!,
+            _size, tol, cplane, out newPieces, out newBoundary))
+      {
+        RhinoApp.WriteLine("vFacing: could not rebuild with new size.");
+        return false;
+      }
+      outPieces     = newPieces;
+      boundaryCurve = newBoundary;
+      var newInside = boundaryCurve != null
+                    ? CollectInsideObjects(doc, excludeIds, boundaryCurve, viewPlane, tol)
+                    : new List<(GeometryBase Geom, ObjectAttributes Attr)>();
+      items.Clear();
+      foreach (var (crv, layerIdx) in outPieces!)
+        items.Add((crv, new ObjectAttributes { LayerIndex = layerIdx }));
+      items.AddRange(newInside);
+      bbox = BoundingBox.Empty;
+      foreach (var (crv, _) in outPieces!) bbox.Union(crv.GetBoundingBox(true));
+      basePoint    = bbox.IsValid ? bbox.Center : outPieces![0].Crv.PointAtStart;
+      previewGeoms = items
+        .Select(p => (Geom: p.Geom.Duplicate()!,
+                      Color: (p.Attr.LayerIndex < doc.Layers.Count
+                              ? doc.Layers[p.Attr.LayerIndex]?.Color : null) ?? Color.Cyan))
+        .Where(p => p.Geom != null)
+        .ToList();
+      return true;
+    }
+
+    var gp = new GetPoint();
     gp.SetCommandPrompt("Pick placement point for Facing");
-    gp.AddOptionDouble("Size", ref sizeOpt);
+    gp.AddOption("Size", _size.ToString("G"));
+    gp.AcceptNumber(true, false);
     gp.DynamicDraw += (_, e) =>
     {
       var xf = Transform.Translation(e.CurrentPoint - basePoint);
@@ -117,13 +153,38 @@ public sealed class vFacing : Command
     do
     {
       gpRes = gp.Get();
-      if (gpRes == GetResult.Option)
+      double? newSize = null;
+
+      if (gpRes == GetResult.Number)
       {
-        _size = sizeOpt.CurrentValue;
+        var n = gp.Number();
+        if (n > 0) newSize = n;
+      }
+      else if (gpRes == GetResult.Option)
+      {
+        var gs = new GetString();
+        gs.SetCommandPrompt($"Facing size <{_size:G}>");
+        gs.SetDefaultString(_size.ToString("G"));
+        gs.AcceptNothing(true);
+        if (gs.Get() == GetResult.String)
+        {
+          var str = gs.StringResult()?.Trim();
+          if (!string.IsNullOrEmpty(str) && double.TryParse(str, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var sv) && sv > 0)
+            newSize = sv;
+        }
+      }
+
+      if (newSize.HasValue)
+      {
+        _size = newSize.Value;
         SaveOptions();
+        if (!RebuildFromSize()) return Result.Nothing;
+        gp.ClearCommandOptions();
+        gp.AddOption("Size", _size.ToString("G"));
       }
     }
-    while (gpRes == GetResult.Option);
+    while (gpRes == GetResult.Option || gpRes == GetResult.Number);
 
     if (gpRes != GetResult.Point)
       return Result.Cancel;
@@ -164,8 +225,7 @@ public sealed class vFacing : Command
   {
     result = new List<(Guid, Curve, int)>();
 
-    var sizeOpt = new OptionDouble(_size, 0.001, double.MaxValue);
-    var go      = new GetObject();
+    var go = new GetObject();
     go.SetCommandPrompt("Select facing curves (base + two sides). Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
@@ -179,12 +239,26 @@ public sealed class vFacing : Command
     while (true)
     {
       go.ClearCommandOptions();
-      go.AddOptionDouble("Size", ref sizeOpt);
+      go.AddOption("Size", _size.ToString("G"));
 
       var res = go.GetMultiple(1, 0);
-      _size = sizeOpt.CurrentValue;
 
-      if (res == GetResult.Option) continue;
+      if (res == GetResult.Option)
+      {
+        var gs = new GetString();
+        gs.SetCommandPrompt($"Facing size <{_size:G}>");
+        gs.SetDefaultString(_size.ToString("G"));
+        gs.AcceptNothing(true);
+        if (gs.Get() == GetResult.String)
+        {
+          var str = gs.StringResult()?.Trim();
+          if (!string.IsNullOrEmpty(str) && double.TryParse(str, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var sv) && sv > 0)
+            _size = sv;
+        }
+        SaveOptions();
+        continue;
+      }
       if (go.CommandResult() != Result.Success) { SaveOptions(); return false; }
       if (go.ObjectsWerePreselected) { go.EnablePreSelect(false, false); continue; }
       break;
@@ -791,15 +865,7 @@ public sealed class vFacing : Command
     var s1Rev = s1Trimmed.DuplicateCurve();
     s1Rev.Reverse();
 
-    // Joined boundary for CollectInsideObjects only
-    var bndPieces = new Curve[] { baseJoined, s2Trimmed!, offTrimmed!, s1Rev };
-    var bnd = Curve.JoinCurves(bndPieces, tol * 10);
-    if (bnd == null || bnd.Length != 1 || !bnd[0].IsClosed)
-      bnd = Curve.JoinCurves(bndPieces, tol * 100);
-    if (bnd == null || bnd.Length != 1 || !bnd[0].IsClosed) return false;
-    boundaryCurve = bnd[0];
-
-    // Output: base, side2 trimmed, offset (on base layer), side1 trimmed+reversed
+    // Output pieces are ready; set them now so they are always returned on success.
     outPieces = new List<(Curve, int)>
     {
       (baseJoined,   baseLayer),
@@ -807,6 +873,20 @@ public sealed class vFacing : Command
       (offTrimmed!,  baseLayer),
       (s1Rev,        side1Layer),
     };
+
+    // Joined boundary for CollectInsideObjects only.
+    // Failure here is non-fatal — inside-object collection will be skipped.
+    var bndPieces = new Curve[] { baseJoined, s2Trimmed!, offTrimmed!, s1Rev };
+    foreach (var joinTol in new[] { tol * 10, tol * 100, tol * 1000, _size })
+    {
+      var bnd = Curve.JoinCurves(bndPieces, joinTol);
+      if (bnd != null && bnd.Length == 1 && bnd[0].IsClosed)
+      {
+        boundaryCurve = bnd[0];
+        break;
+      }
+    }
+    // boundaryCurve may remain null; caller handles that gracefully.
     return true;
   }
 
