@@ -205,7 +205,9 @@ public sealed class vTitle : Command
       DimensionScale = 1.0,
     };
 
-    _activeTextId = doc.Objects.AddText(te);
+    var attr = new ObjectAttributes();
+    attr.SetUserString("vTitle", "1");
+    _activeTextId = doc.Objects.AddText(te, attr);
     _activeBoxId  = Guid.Empty;
     _activeGrpIdx = -1;
     if (_activeTextId == Guid.Empty) return;
@@ -221,12 +223,62 @@ public sealed class vTitle : Command
       _activeGrpIdx = doc.Groups.Add();
       foreach (var id in toGroup)
       {
-        var obj = doc.Objects.FindId(id);
-        if (obj == null) continue;
-        var attr = obj.Attributes.Duplicate();
-        attr.AddToGroup(_activeGrpIdx);
-        doc.Objects.ModifyAttributes(obj, attr, true);
+        var obj2 = doc.Objects.FindId(id);
+        if (obj2 == null) continue;
+        var grpAttr = obj2.Attributes.Duplicate();
+        grpAttr.AddToGroup(_activeGrpIdx);
+        doc.Objects.ModifyAttributes(obj2, grpAttr, true);
       }
+    }
+  }
+
+  // ── Find existing vTitle at a point ───────────────────────────────────
+
+  private static (Guid textId, Guid boxId, int grpIdx)? FindVTitleAt(
+    RhinoDoc doc, Point3d pt, double tol)
+  {
+    (Guid, Guid, int)? best = null;
+    double bestDist = tol;
+
+    foreach (var obj in doc.Objects)
+    {
+      if (obj.Geometry is not TextEntity te) continue;
+      if (obj.Attributes.GetUserString("vTitle") != "1") continue;
+
+      double dist = pt.DistanceTo(te.Plane.Origin);
+      if (dist > bestDist) continue;
+      bestDist = dist;
+
+      var grpList = obj.Attributes.GetGroupList();
+      int grpIdx = grpList?.Length > 0 ? grpList[0] : -1;
+
+      // Find the box curve in the same group
+      Guid boxId = Guid.Empty;
+      if (grpIdx >= 0)
+      {
+        foreach (var other in doc.Objects)
+        {
+          if (other.Id == obj.Id || other.Geometry is not PolylineCurve) continue;
+          var gl = other.Attributes.GetGroupList();
+          if (gl != null && Array.IndexOf(gl, grpIdx) >= 0)
+          { boxId = other.Id; break; }
+        }
+      }
+      best = (obj.Id, boxId, grpIdx);
+    }
+    return best;
+  }
+
+  // ── Select / deselect a group ─────────────────────────────────────────
+
+  private static void SelectGroup(RhinoDoc doc, int grpIdx, bool select)
+  {
+    if (grpIdx < 0) return;
+    foreach (var obj in doc.Objects)
+    {
+      var gl = obj.Attributes.GetGroupList();
+      if (gl != null && Array.IndexOf(gl, grpIdx) >= 0)
+        obj.Select(select);
     }
   }
 
