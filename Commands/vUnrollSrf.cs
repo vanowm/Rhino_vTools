@@ -14,7 +14,9 @@ using Rhino.Input.Custom;
 // Modified 2026.06.29: nullable-warning cleanup and Rhino 8 TextEntity API update.
 // Modified 2026.06.29: fixed layout advance so unrolled parts move along row X baseline instead of diagonal top-right drift.
 // Modified 2026.06.29: restores the exact pre-command selection after finish/cancel, without changing the working object-add path.
-// Modified 2026.06.29 19:27:58: synchronized label height/rotation frame with Python script; height uses raw surface-frame Y axis, not projected label-up point.
+// Modified 2026.06.30 13:04:31: label up helper now stays on the same Brep face using local UV tangent stepping, avoiding upside-down flat labels from ClosestPoint jumping to another face/edge.
+// Modified 2026.06.30 17:08:45: hidden same-face orientation curves are unrolled for the label frame, reducing 180-degree flat-text direction ambiguity from standalone helper points.
+// Modified 2026.06.30 17:17:28: unrolled flat text keeps the raw unrolled up direction but forces the text plane normal to World +Z, preventing mirrored text while preserving orientation-marker direction.
 
 namespace vTools.Commands
 {
@@ -144,6 +146,19 @@ namespace vTools.Commands
 
           foreach (var curve in curves)
             unroller.AddFollowingGeometry(curve);
+
+          int labelUpCurveIndex = -1;
+          int labelRightCurveIndex = -1;
+          if (frame != null)
+          {
+            // Curves keep start/end direction more reliably than independent helper points.
+            // These two hidden same-face curves define the flattened label frame.
+            labelUpCurveIndex = curves.Count;
+            unroller.AddFollowingGeometry(new LineCurve(frame.Point, frame.UpPoint));
+            labelRightCurveIndex = curves.Count + 1;
+            unroller.AddFollowingGeometry(new LineCurve(frame.Point, frame.RightPoint));
+          }
+
           foreach (var point in points)
             unroller.AddFollowingGeometry(point.Location);
 
@@ -151,6 +166,7 @@ namespace vTools.Commands
           int labelUpIndex = -1;
           if (frame != null)
           {
+            // Point fallback only. The hidden curves above are preferred for orientation.
             labelPointIndex = points.Count;
             unroller.AddFollowingGeometry(frame.Point);
             labelUpIndex = points.Count + 1;
@@ -177,25 +193,55 @@ namespace vTools.Commands
           foreach (var brep in finalBreps)
             AddValid(outputIds, doc.Objects.AddBrep(brep));
 
+          Point3d? curveLabelPoint = null;
+          Point3d? curveLabelUp = null;
+          Point3d? curveLabelRight = null;
+          var hiddenCurveIndexes = new HashSet<int>();
           if (unrolledCurves != null)
           {
-            foreach (var curve in unrolledCurves)
-              AddValid(outputIds, doc.Objects.AddCurve(curve));
+            if (labelUpCurveIndex >= 0 && labelUpCurveIndex < unrolledCurves.Length)
+            {
+              var c = unrolledCurves[labelUpCurveIndex];
+              if (c != null)
+              {
+                curveLabelPoint = c.PointAtStart;
+                curveLabelUp = c.PointAtEnd;
+                hiddenCurveIndexes.Add(labelUpCurveIndex);
+              }
+            }
+            if (labelRightCurveIndex >= 0 && labelRightCurveIndex < unrolledCurves.Length)
+            {
+              var c = unrolledCurves[labelRightCurveIndex];
+              if (c != null)
+              {
+                curveLabelRight = c.PointAtEnd;
+                hiddenCurveIndexes.Add(labelRightCurveIndex);
+              }
+            }
+
+            for (int c = 0; c < unrolledCurves.Length; c++)
+            {
+              if (!hiddenCurveIndexes.Contains(c))
+                AddValid(outputIds, doc.Objects.AddCurve(unrolledCurves[c]));
+            }
           }
 
-          Point3d? labelPoint = null;
-          Point3d? labelUp = null;
+          Point3d? labelPoint = curveLabelPoint;
+          Point3d? labelUp = curveLabelUp;
+          Point3d? labelRight = curveLabelRight;
           var hiddenPointIndexes = new HashSet<int>();
           if (unrolledPoints != null)
           {
             if (labelPointIndex >= 0 && labelPointIndex < unrolledPoints.Length)
             {
-              labelPoint = unrolledPoints[labelPointIndex];
+              if (!labelPoint.HasValue)
+                labelPoint = unrolledPoints[labelPointIndex];
               hiddenPointIndexes.Add(labelPointIndex);
             }
             if (labelUpIndex >= 0 && labelUpIndex < unrolledPoints.Length)
             {
-              labelUp = unrolledPoints[labelUpIndex];
+              if (!labelUp.HasValue)
+                labelUp = unrolledPoints[labelUpIndex];
               hiddenPointIndexes.Add(labelUpIndex);
             }
             for (int p = 0; p < unrolledPoints.Length; p++)
@@ -212,18 +258,24 @@ namespace vTools.Commands
           }
 
           Vector3d unrolledY = Vector3d.YAxis;
+          Vector3d? unrolledX = null;
           if (labelPoint.HasValue && labelUp.HasValue)
             unrolledY = labelUp.Value - labelPoint.Value;
           else if (frame != null)
             unrolledY = frame.Y;
+          if (labelPoint.HasValue && labelRight.HasValue)
+            unrolledX = labelRight.Value - labelPoint.Value;
 
           var unrolledLabelIds = new List<Guid>();
           if (frame != null && labelPoint.HasValue)
           {
             if (addText)
             {
-              var normal = NormalFromOutputBreps(finalBreps, labelPoint.Value);
-              AddValid(unrolledLabelIds, AddFlatText(doc, display, labelPoint.Value, unrolledY, normal, frame.Height, src.Id, _keepProperties));
+              // Keep the raw unrolled up direction as the orientation marker, but do not use
+              // the raw frame normal for flat labels. If the unrolled helper frame lands with
+              // a -Z normal, annotation text becomes mirrored in Top view. World +Z keeps the
+              // text readable while preserving the same unrolled Y/up direction.
+              AddValid(unrolledLabelIds, AddFlatText(doc, display, labelPoint.Value, unrolledY, Vector3d.ZAxis, frame.Height, src.Id, _keepProperties));
             }
             else if (addDots)
             {
@@ -715,22 +767,6 @@ namespace vTools.Commands
       return pts;
     }
 
-    private static Tuple<Vector3d, Vector3d, Vector3d> FrameAxes(RhinoDoc doc, Guid objId, Point3d point)
-    {
-      var brep = BrepFromGeometry(doc.Objects.FindId(objId)?.Geometry);
-      var tol = doc.ModelAbsoluteTolerance;
-      var normal = brep != null
-        ? ClosestNormal(brep, point, Vector3d.ZAxis, tol)
-        : Vector3d.ZAxis;
-      var y = ProjectToPlane(Vector3d.ZAxis, normal, tol)
-              ?? ProjectToPlane(Vector3d.YAxis, normal, tol)
-              ?? Vector3d.YAxis;
-      var x = Unit(Vector3d.CrossProduct(y, normal), tol) ?? Vector3d.XAxis;
-      y = Unit(y, tol) ?? Vector3d.YAxis;
-      normal = Unit(normal, tol) ?? Vector3d.ZAxis;
-      return Tuple.Create(x, y, normal);
-    }
-
     private static LabelFrame? SurfaceLabelFrame(RhinoDoc doc, Guid objId, double height)
     {
       var point = LabelPoint(doc, objId);
@@ -739,26 +775,119 @@ namespace vTools.Commands
 
       var brep = BrepFromGeometry(doc.Objects.FindId(objId)?.Geometry);
       var tol = doc.ModelAbsoluteTolerance;
-      var axes = FrameAxes(doc, objId, point.Value);
-      var y = axes.Item2;
-      var normal = axes.Item3;
+      var faceHit = brep != null ? ClosestFaceHit(brep, point.Value, tol) : null;
+      var normal = faceHit?.Normal ?? (brep != null ? ClosestNormal(brep, point.Value, Vector3d.ZAxis, tol) : Vector3d.ZAxis);
+      var y = ProjectToPlane(Vector3d.ZAxis, normal, tol)
+              ?? ProjectToPlane(Vector3d.YAxis, normal, tol)
+              ?? Vector3d.YAxis;
+      var x = Unit(Vector3d.CrossProduct(y, normal), tol) ?? Vector3d.XAxis;
+      y = Unit(y, tol) ?? Vector3d.YAxis;
+      normal = Unit(normal, tol) ?? Vector3d.ZAxis;
 
       var step = Math.Max(height * TextUpStepRatio, tol * 20.0);
-      var upGuess = point.Value + y * step;
-      var upPoint = upGuess;
-      if (brep != null)
-      {
-        try
-        {
-          var closest = brep.ClosestPoint(upGuess);
-          if (closest != Point3d.Unset && closest.DistanceTo(point.Value) > tol * 2.0)
-            upPoint = closest;
-        }
-        catch { }
-      }
+      var upPoint = faceHit != null
+        ? SameFaceStepPoint(faceHit, y, step, tol)
+        : point.Value + y * step;
+      var rightPoint = faceHit != null
+        ? SameFaceStepPoint(faceHit, x, step, tol)
+        : point.Value + x * step;
 
       var actualY = Unit(upPoint - point.Value, tol) ?? y;
-      return new LabelFrame(point.Value, upPoint, actualY, normal, height);
+      var actualX = Unit(rightPoint - point.Value, tol) ?? x;
+      return new LabelFrame(point.Value, upPoint, rightPoint, actualX, actualY, normal, height);
+    }
+
+    private class FaceHit
+    {
+      public BrepFace Face { get; }
+      public double U { get; }
+      public double V { get; }
+      public Point3d Point { get; }
+      public Vector3d Normal { get; }
+
+      public FaceHit(BrepFace face, double u, double v, Point3d point, Vector3d normal)
+      {
+        Face = face;
+        U = u;
+        V = v;
+        Point = point;
+        Normal = normal;
+      }
+    }
+
+    private static FaceHit? ClosestFaceHit(Brep brep, Point3d point, double tol)
+    {
+      FaceHit? best = null;
+      double bestDistance = double.MaxValue;
+      foreach (var face in brep.Faces)
+      {
+        double u, v;
+        if (!face.ClosestPoint(point, out u, out v))
+          continue;
+        var facePoint = face.PointAt(u, v);
+        var distance = point.DistanceToSquared(facePoint);
+        var normal = Unit(face.NormalAt(u, v), tol) ?? Vector3d.ZAxis;
+        if (distance < bestDistance)
+        {
+          bestDistance = distance;
+          best = new FaceHit(face, u, v, facePoint, normal);
+        }
+      }
+      return best;
+    }
+
+    private static Point3d SameFaceStepPoint(FaceHit hit, Vector3d direction, double step, double tol)
+    {
+      var face = hit.Face;
+      var uDomain = face.Domain(0);
+      var vDomain = face.Domain(1);
+      var epsU = Math.Max(uDomain.Length * 1.0e-6, RhinoMath.ZeroTolerance);
+      var epsV = Math.Max(vDomain.Length * 1.0e-6, RhinoMath.ZeroTolerance);
+      var u0 = Math.Max(uDomain.T0, hit.U - epsU);
+      var u1 = Math.Min(uDomain.T1, hit.U + epsU);
+      var v0 = Math.Max(vDomain.T0, hit.V - epsV);
+      var v1 = Math.Min(vDomain.T1, hit.V + epsV);
+
+      var su = u1 > u0 ? (face.PointAt(u1, hit.V) - face.PointAt(u0, hit.V)) / (u1 - u0) : Vector3d.XAxis;
+      var sv = v1 > v0 ? (face.PointAt(hit.U, v1) - face.PointAt(hit.U, v0)) / (v1 - v0) : Vector3d.YAxis;
+      var target = (Unit(direction, tol) ?? Vector3d.YAxis) * step;
+
+      double a = su * su;
+      double b = su * sv;
+      double c = sv * sv;
+      double d = su * target;
+      double e = sv * target;
+      double det = a * c - b * b;
+      if (Math.Abs(det) <= 1.0e-16)
+        return hit.Point + (Unit(direction, tol) ?? Vector3d.YAxis) * step;
+
+      double du = (d * c - b * e) / det;
+      double dv = (a * e - b * d) / det;
+
+      for (int i = 0; i < 8; i++)
+      {
+        double scale = 1.0 / Math.Pow(2.0, i);
+        double u = Math.Max(uDomain.T0, Math.Min(uDomain.T1, hit.U + du * scale));
+        double v = Math.Max(vDomain.T0, Math.Min(vDomain.T1, hit.V + dv * scale));
+        try
+        {
+          var relation = face.IsPointOnFace(u, v);
+          if (relation != PointFaceRelation.Exterior)
+          {
+            var point = face.PointAt(u, v);
+            if (point.DistanceTo(hit.Point) > tol * 2.0)
+              return point;
+          }
+        }
+        catch
+        {
+          var point = face.PointAt(u, v);
+          if (point.DistanceTo(hit.Point) > tol * 2.0)
+            return point;
+        }
+      }
+
+      return hit.Point + (Unit(direction, tol) ?? Vector3d.YAxis) * step;
     }
 
     private static double CenteredSpan(IEnumerable<double> values)
@@ -787,8 +916,10 @@ namespace vTools.Commands
         return spans.Count > 0 ? spans.Min() * 0.04 : 1.0;
       }
 
-      var axes = FrameAxes(doc, objId, point.Value);
-      var ys = pts.Select(p => (p - point.Value) * axes.Item2);
+      var frame = SurfaceLabelFrame(doc, objId, 1.0);
+      if (frame == null)
+        return 1.0;
+      var ys = pts.Select(p => (p - point.Value) * frame.Y);
       var span = CenteredSpan(ys);
       return span > doc.ModelAbsoluteTolerance ? span * 0.55 : 1.0;
     }
@@ -1160,14 +1291,18 @@ namespace vTools.Commands
     {
       public Point3d Point { get; }
       public Point3d UpPoint { get; }
+      public Point3d RightPoint { get; }
+      public Vector3d X { get; }
       public Vector3d Y { get; }
       public Vector3d Normal { get; }
       public double Height { get; }
 
-      public LabelFrame(Point3d point, Point3d upPoint, Vector3d y, Vector3d normal, double height)
+      public LabelFrame(Point3d point, Point3d upPoint, Point3d rightPoint, Vector3d x, Vector3d y, Vector3d normal, double height)
       {
         Point = point;
         UpPoint = upPoint;
+        RightPoint = rightPoint;
+        X = x;
         Y = y;
         Normal = normal;
         Height = height;
