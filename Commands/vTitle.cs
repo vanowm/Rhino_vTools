@@ -49,7 +49,7 @@ public sealed class vTitle : Command
       gp.AcceptNumber(true, false);   // quick size update
       gp.AcceptNothing(false);
 
-      gp.DynamicDraw += (_, e) => DrawPreview(doc, e, _text, _size, _padding, _box);
+      gp.DynamicDraw += (_, e) => DrawPreview(e, _text, _size, _padding, _box);
 
       var res = gp.Get();
       _box = optBox.CurrentValue;
@@ -137,20 +137,17 @@ public sealed class vTitle : Command
 
   // ── Dynamic preview ───────────────────────────────────────────────────
 
-  private static void DrawPreview(RhinoDoc doc, GetPointDrawEventArgs e,
+  private static void DrawPreview(GetPointDrawEventArgs e,
     string text, double size, double padding, bool box)
   {
     if (string.IsNullOrEmpty(text)) return;
 
     var pt = e.CurrentPoint;
-
-    // Build a plane at the cursor in the viewport's CPlane orientation
     var cpNative = e.Viewport.GetConstructionPlane();
-    var xAxis    = cpNative.Plane.XAxis;
-    var yAxis    = cpNative.Plane.YAxis;
+    var xAxis     = cpNative.Plane.XAxis;
+    var yAxis     = cpNative.Plane.YAxis;
     var textPlane = new Plane(pt, xAxis, yAxis);
 
-    // Text annotation preview
     var te = new TextEntity
     {
       Plane          = textPlane,
@@ -160,20 +157,16 @@ public sealed class vTitle : Command
       DimensionScale = 1.0,
     };
     try { te.DrawForward = false; } catch { }
-    // Attach current DimStyle so GetBoundingBox returns real metrics
-    try { te.DimensionStyleId = doc.DimStyles.Current.Id; } catch { }
-
     try { e.Display.DrawAnnotation(te, Color.FromArgb(220, 255, 255, 80)); }
     catch
     {
       try { e.Display.Draw3dText(new Text3d(text, textPlane, size), Color.Yellow); }
-      catch { e.Display.DrawDot(pt, text); }
+      catch { e.Display.DrawDot(pt, text, Color.FromArgb(200, 60, 60, 60), Color.Yellow); }
     }
 
     if (!box) return;
 
-    // Prefer real bounds; fall back to approximation
-    var (tw, th) = TextBounds(te, text, size);
+    var (tw, th) = ApproxBounds(text, size);
     double bw = tw * (1.0 + padding * 2.0 / 100.0);
     double bh = th * (1.0 + padding * 2.0 / 100.0);
 
@@ -218,15 +211,19 @@ public sealed class vTitle : Command
     var bb = rhObj?.Geometry?.GetBoundingBox(true) ?? BoundingBox.Empty;
     if (bb.IsValid && (bb.Max.X - bb.Min.X) > doc.ModelAbsoluteTolerance)
     {
-      // Project corners onto text plane axes to handle any orientation
-      var toLocal = Transform.ChangeBasis(Plane.WorldXY, textPlane);
+      // Project bounding box corners onto text plane axes (dot product = local coords)
+      var xDir = xAxis; xDir.Unitize();
+      var yDir = yAxis; yDir.Unitize();
+      var origin = textPlane.Origin;
       double minU = double.MaxValue, maxU = double.MinValue;
       double minV = double.MaxValue, maxV = double.MinValue;
       foreach (var corner in bb.GetCorners())
       {
-        var lp = corner; lp.Transform(toLocal);
-        if (lp.X < minU) minU = lp.X; if (lp.X > maxU) maxU = lp.X;
-        if (lp.Y < minV) minV = lp.Y; if (lp.Y > maxV) maxV = lp.Y;
+        var rel = corner - origin;
+        double u = rel * xDir;
+        double v = rel * yDir;
+        if (u < minU) minU = u; if (u > maxU) maxU = u;
+        if (v < minV) minV = v; if (v > maxV) maxV = v;
       }
       tw = maxU - minU;
       th = maxV - minV;
