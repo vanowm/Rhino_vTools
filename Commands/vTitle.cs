@@ -22,9 +22,10 @@ public sealed class vTitle : Command
   private static bool   _box     = true;
 
   // ── Active placement tracking (for live update) ───────────────────────
-  private static Guid _activeTextId  = Guid.Empty;
-  private static Guid _activeBoxId   = Guid.Empty;
-  private static int  _activeGrpIdx  = -1;
+  private static Guid _activeTextId    = Guid.Empty;
+  private static Guid _activeBoxId     = Guid.Empty;
+  private static Guid _activeInnerBoxId = Guid.Empty;
+  private static int  _activeGrpIdx    = -1;
   private static bool _internalReplace = false;
 
   // ── External-edit event subscription ───────────────────────────────
@@ -47,9 +48,10 @@ public sealed class vTitle : Command
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     LoadSettings();
-    _activeTextId = Guid.Empty;
-    _activeBoxId  = Guid.Empty;
-    _activeGrpIdx = -1;
+    _activeTextId     = Guid.Empty;
+    _activeBoxId      = Guid.Empty;
+    _activeInnerBoxId = Guid.Empty;
+    _activeGrpIdx     = -1;
 
     while (true)
     {
@@ -143,9 +145,10 @@ public sealed class vTitle : Command
           if (_activeGrpIdx >= 0 && _activeGrpIdx != hit.Value.grpIdx)
             SelectGroup(doc, _activeGrpIdx, false);
 
-          _activeTextId = hit.Value.textId;
-          _activeBoxId  = hit.Value.boxId;
-          _activeGrpIdx = hit.Value.grpIdx;
+          _activeTextId     = hit.Value.textId;
+          _activeBoxId      = hit.Value.boxId;
+          _activeInnerBoxId = FindInnerBoxId(doc, hit.Value.grpIdx);
+          _activeGrpIdx     = hit.Value.grpIdx;
 
           if (doc.Objects.FindId(_activeTextId)?.Geometry is TextEntity et)
           {
@@ -163,10 +166,10 @@ public sealed class vTitle : Command
           if (string.IsNullOrEmpty(_text)) continue;
           PlaceTitle(doc, pt, _text, _size, _padding, _box);
           // New placement does NOT enter edit mode — reset so UpdateActive is a no-op.
-          // _activeGrpIdx is kept so the newly placed group stays highlighted.
-          _activeTextId = Guid.Empty;
-          _activeBoxId  = Guid.Empty;
-          SelectGroup(doc, _activeGrpIdx, true);
+          _activeTextId     = Guid.Empty;
+          _activeBoxId      = Guid.Empty;
+          _activeInnerBoxId = Guid.Empty;
+          _activeGrpIdx     = -1;
           doc.Views.Redraw();
         }
       }
@@ -207,6 +210,15 @@ public sealed class vTitle : Command
     if (!box) return;
 
     var (tw, th) = ApproxBounds(text, size);
+
+    // Inner box: text bounds without padding
+    var ic = Color.FromArgb(100, 180, 180, 60);
+    e.Display.DrawLine(pt + xAxis*(-tw/2) + yAxis*(-th/2), pt + xAxis*(tw/2) + yAxis*(-th/2), ic, 1);
+    e.Display.DrawLine(pt + xAxis*(tw/2)  + yAxis*(-th/2), pt + xAxis*(tw/2) + yAxis*( th/2), ic, 1);
+    e.Display.DrawLine(pt + xAxis*(tw/2)  + yAxis*( th/2), pt + xAxis*(-tw/2) + yAxis*(th/2), ic, 1);
+    e.Display.DrawLine(pt + xAxis*(-tw/2) + yAxis*( th/2), pt + xAxis*(-tw/2) + yAxis*(-th/2), ic, 1);
+
+    // Outer box: text bounds with padding
     double bw = tw * (1.0 + padding * 2.0 / 100.0);
     double bh = th * (1.0 + padding * 2.0 / 100.0);
 
@@ -249,11 +261,19 @@ public sealed class vTitle : Command
     if (_activeTextId == Guid.Empty) return;
 
     if (box)
+    {
       _activeBoxId = doc.Objects.AddCurve(BoxCurve(center, xAxis, yAxis, text, size, padding));
+      var innerAttr = new ObjectAttributes();
+      innerAttr.SetUserString("vTitle",      "1");
+      innerAttr.SetUserString("vTitleInner", "1");
+      innerAttr.SetUserString("vTitlePadding", padding.ToString(CultureInfo.InvariantCulture));
+      _activeInnerBoxId = doc.Objects.AddCurve(BoxCurve(center, xAxis, yAxis, text, size, 0.0), innerAttr);
+    }
 
-    // Group text + box together
+    // Group text + box + inner-box together
     var toGroup = new System.Collections.Generic.List<Guid> { _activeTextId };
-    if (_activeBoxId != Guid.Empty) toGroup.Add(_activeBoxId);
+    if (_activeBoxId      != Guid.Empty) toGroup.Add(_activeBoxId);
+    if (_activeInnerBoxId != Guid.Empty) toGroup.Add(_activeInnerBoxId);
     if (toGroup.Count > 1)
     {
       _activeGrpIdx = doc.Groups.Add();
@@ -291,7 +311,8 @@ public sealed class vTitle : Command
       {
         foreach (var other in doc.Objects)
         {
-          if (other.Id == obj.Id || other.Geometry is not PolylineCurve) continue;
+      if (other.Id == obj.Id || other.Geometry is not PolylineCurve) continue;
+          if (other.Attributes.GetUserString("vTitleInner") == "1") continue; // skip inner box
           var gl = other.Attributes.GetGroupList();
           if (gl != null && Array.IndexOf(gl, grpIdx) >= 0) { boxId = other.Id; break; }
         }
@@ -317,6 +338,7 @@ public sealed class vTitle : Command
       foreach (var obj in doc.Objects)
       {
         if (obj.Geometry is not PolylineCurve poly) continue;
+        if (obj.Attributes.GetUserString("vTitleInner") == "1") continue; // skip inner box
         var gl = obj.Attributes.GetGroupList();
         if (gl == null || Array.IndexOf(gl, grpIdx) < 0) continue;
         double maxU = 0, maxV = 0;
@@ -426,13 +448,27 @@ public sealed class vTitle : Command
       if (obj.Geometry is not PolylineCurve) continue;
       var gl = obj.Attributes.GetGroupList();
       if (gl == null || Array.IndexOf(gl, grpIdx) < 0) continue;
+      bool isInner = obj.Attributes.GetUserString("vTitleInner") == "1";
+      double p = isInner ? 0.0 : padding;
       var newBox = BoxCurve(te.Plane.Origin, te.Plane.XAxis, te.Plane.YAxis,
-        te.PlainText ?? "", te.TextHeight, padding);
+        te.PlainText ?? "", te.TextHeight, p);
       _internalReplace = true;
       doc.Objects.Replace(obj.Id, newBox);
       _internalReplace = false;
-      break;
     }
+  }
+
+  private static Guid FindInnerBoxId(RhinoDoc doc, int grpIdx)
+  {
+    if (grpIdx < 0) return Guid.Empty;
+    foreach (var obj in doc.Objects)
+    {
+      if (obj.Geometry is not PolylineCurve) continue;
+      if (obj.Attributes.GetUserString("vTitleInner") != "1") continue;
+      var gl = obj.Attributes.GetGroupList();
+      if (gl != null && Array.IndexOf(gl, grpIdx) >= 0) return obj.Id;
+    }
+    return Guid.Empty;
   }
 
   // ── Live update of last placed group ─────────────────────────────────
@@ -462,6 +498,10 @@ public sealed class vTitle : Command
     var center = oldTe.Plane.Origin;
     var xAxis  = oldTe.Plane.XAxis;
     var yAxis  = oldTe.Plane.YAxis;
+
+    // Update inner box (text bounds, no padding)
+    if (_activeInnerBoxId != Guid.Empty)
+      doc.Objects.Replace(_activeInnerBoxId, BoxCurve(center, xAxis, yAxis, _text, _size, 0.0));
 
     if (_box)
     {
