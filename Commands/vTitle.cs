@@ -21,6 +21,11 @@ public sealed class vTitle : Command
   private static double _padding = 10.0;   // percent per side
   private static bool   _box     = true;
 
+  // ── Active placement tracking (for live update) ───────────────────────
+  private static Guid _activeTextId = Guid.Empty;
+  private static Guid _activeBoxId  = Guid.Empty;
+  private static int  _activeGrpIdx = -1;
+
   private const string SectionName = "vTitle";
   private const string KeyText    = "text";
   private const string KeySize    = "size";
@@ -59,14 +64,14 @@ public sealed class vTitle : Command
       if (res == GetResult.String)
       {
         string s = gp.StringResult()?.Trim() ?? "";
-        if (!string.IsNullOrEmpty(s)) { _text = s; SaveSettings(); }
+        if (!string.IsNullOrEmpty(s)) { _text = s; UpdateActive(doc); SaveSettings(); }
         continue;
       }
 
       if (res == GetResult.Number)
       {
         double v = gp.Number();
-        if (v > 0) { _size = v; SaveSettings(); }
+        if (v > 0) { _size = v; UpdateActive(doc); SaveSettings(); }
         continue;
       }
 
@@ -87,7 +92,7 @@ public sealed class vTitle : Command
             string s = gs.StringResult()?.Trim() ?? "";
             if (!string.IsNullOrEmpty(s)) _text = s;
           }
-          SaveSettings();
+          UpdateActive(doc); SaveSettings();
           continue;
         }
 
@@ -101,7 +106,7 @@ public sealed class vTitle : Command
               double.TryParse(gs.StringResult().Trim(),
                 NumberStyles.Any, CultureInfo.InvariantCulture, out double sv) && sv > 0)
             _size = sv;
-          SaveSettings();
+          UpdateActive(doc); SaveSettings();
           continue;
         }
 
@@ -115,12 +120,12 @@ public sealed class vTitle : Command
               double.TryParse(gs.StringResult().Trim(),
                 NumberStyles.Any, CultureInfo.InvariantCulture, out double pv) && pv >= 0)
             _padding = pv;
-          SaveSettings();
+          UpdateActive(doc); SaveSettings();
           continue;
         }
 
         // Box toggle already applied via optBox above
-        SaveSettings();
+        UpdateActive(doc); SaveSettings();
         continue;
       }
 
@@ -182,15 +187,13 @@ public sealed class vTitle : Command
     e.Display.DrawLine(c3, c0, boxColor, 1);
   }
 
-  // ── Placement ─────────────────────────────────────────────────────────
-
   private static void PlaceTitle(RhinoDoc doc, Point3d center,
     string text, double size, double padding, bool box)
   {
     var vp = doc.Views.ActiveView?.ActiveViewport;
-    var cpNative = vp?.GetConstructionPlane();
-    var xAxis = cpNative?.Plane.XAxis ?? Vector3d.XAxis;
-    var yAxis = cpNative?.Plane.YAxis ?? Vector3d.YAxis;
+    var cp = vp?.GetConstructionPlane();
+    var xAxis = cp?.Plane.XAxis ?? Vector3d.XAxis;
+    var yAxis = cp?.Plane.YAxis ?? Vector3d.YAxis;
     var textPlane = new Plane(center, xAxis, yAxis);
 
     var te = new TextEntity
@@ -201,68 +204,105 @@ public sealed class vTitle : Command
       Justification  = TextJustification.MiddleCenter,
       DimensionScale = 1.0,
     };
-    var titleId = doc.Objects.AddText(te);
 
-    if (!box) return;
+    _activeTextId = doc.Objects.AddText(te);
+    _activeBoxId  = Guid.Empty;
+    _activeGrpIdx = -1;
+    if (_activeTextId == Guid.Empty) return;
 
-    // Use actual bounding box of placed text for accurate sizing
-    double tw, th;
-    var rhObj = doc.Objects.FindId(titleId);
-    var bb = rhObj?.Geometry?.GetBoundingBox(true) ?? BoundingBox.Empty;
-    if (bb.IsValid && (bb.Max.X - bb.Min.X) > doc.ModelAbsoluteTolerance)
+    if (box)
+      _activeBoxId = doc.Objects.AddCurve(BoxCurve(center, xAxis, yAxis, text, size, padding));
+
+    // Group text + box together
+    var toGroup = new System.Collections.Generic.List<Guid> { _activeTextId };
+    if (_activeBoxId != Guid.Empty) toGroup.Add(_activeBoxId);
+    if (toGroup.Count > 1)
     {
-      // Project bounding box corners onto text plane axes (dot product = local coords)
-      var xDir = xAxis; xDir.Unitize();
-      var yDir = yAxis; yDir.Unitize();
-      var origin = textPlane.Origin;
-      double minU = double.MaxValue, maxU = double.MinValue;
-      double minV = double.MaxValue, maxV = double.MinValue;
-      foreach (var corner in bb.GetCorners())
+      _activeGrpIdx = doc.Groups.Add();
+      foreach (var id in toGroup)
       {
-        var rel = corner - origin;
-        double u = rel * xDir;
-        double v = rel * yDir;
-        if (u < minU) minU = u; if (u > maxU) maxU = u;
-        if (v < minV) minV = v; if (v > maxV) maxV = v;
+        var obj = doc.Objects.FindId(id);
+        if (obj == null) continue;
+        var attr = obj.Attributes.Duplicate();
+        attr.AddToGroup(_activeGrpIdx);
+        doc.Objects.ModifyAttributes(obj, attr, true);
       }
-      tw = maxU - minU;
-      th = maxV - minV;
     }
-    else
+  }
+
+  // ── Live update of last placed group ─────────────────────────────────
+
+  private static void UpdateActive(RhinoDoc doc)
+  {
+    if (_activeTextId == Guid.Empty) return;
+    var textObj = doc.Objects.FindId(_activeTextId);
+    if (textObj?.Geometry is not TextEntity oldTe) { _activeTextId = Guid.Empty; return; }
+
+    // Update text content and size
+    var newTe = (TextEntity)oldTe.Duplicate();
+    newTe.PlainText  = _text;
+    newTe.TextHeight = _size;
+    doc.Objects.Replace(_activeTextId, newTe);
+
+    var center = oldTe.Plane.Origin;
+    var xAxis  = oldTe.Plane.XAxis;
+    var yAxis  = oldTe.Plane.YAxis;
+
+    if (_box)
     {
-      (tw, th) = TextBounds(te, text, size);
+      var newCurve = BoxCurve(center, xAxis, yAxis, _text, _size, _padding);
+      if (_activeBoxId != Guid.Empty)
+      {
+        doc.Objects.Replace(_activeBoxId, newCurve);
+      }
+      else
+      {
+        // Box was off — create it and add to the existing group
+        _activeBoxId = doc.Objects.AddCurve(newCurve);
+        if (_activeBoxId != Guid.Empty)
+        {
+          if (_activeGrpIdx < 0)
+          {
+            // Promote to a group now that there are two objects
+            _activeGrpIdx = doc.Groups.Add();
+            var tobj = doc.Objects.FindId(_activeTextId);
+            if (tobj != null)
+            {
+              var ta = tobj.Attributes.Duplicate(); ta.AddToGroup(_activeGrpIdx);
+              doc.Objects.ModifyAttributes(tobj, ta, true);
+            }
+          }
+          var bobj = doc.Objects.FindId(_activeBoxId);
+          if (bobj != null)
+          {
+            var ba = bobj.Attributes.Duplicate(); ba.AddToGroup(_activeGrpIdx);
+            doc.Objects.ModifyAttributes(bobj, ba, true);
+          }
+        }
+      }
     }
-    double bw = tw * (1.0 + padding * 2.0 / 100.0);
-    double bh = th * (1.0 + padding * 2.0 / 100.0);
+    else if (_activeBoxId != Guid.Empty)
+    {
+      doc.Objects.Delete(_activeBoxId, true);
+      _activeBoxId = Guid.Empty;
+    }
 
-    var c0 = center + xAxis * (-bw / 2) + yAxis * (-bh / 2);
-    var c1 = center + xAxis * ( bw / 2) + yAxis * (-bh / 2);
-    var c2 = center + xAxis * ( bw / 2) + yAxis * ( bh / 2);
-    var c3 = center + xAxis * (-bw / 2) + yAxis * ( bh / 2);
-
-    doc.Objects.AddCurve(new PolylineCurve(new[] { c0, c1, c2, c3, c0 }));
+    doc.Views.Redraw();
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
 
-  /// <summary>
-  /// Returns text extents from the entity's bounding box if available,
-  /// falling back to a character-count approximation.
-  /// </summary>
-  private static (double w, double h) TextBounds(TextEntity te, string text, double size)
+  private static PolylineCurve BoxCurve(Point3d center,
+    Vector3d xAxis, Vector3d yAxis, string text, double size, double padding)
   {
-    try
-    {
-      var bb = te.GetBoundingBox(true);
-      if (bb.IsValid)
-      {
-        double w = bb.Max.X - bb.Min.X;
-        double h = bb.Max.Y - bb.Min.Y;
-        if (w > 0 && h > 0) return (w, h);
-      }
-    }
-    catch { }
-    return ApproxBounds(text, size);
+    var (tw, th) = ApproxBounds(text, size);
+    double bw = tw * (1.0 + padding * 2.0 / 100.0);
+    double bh = th * (1.0 + padding * 2.0 / 100.0);
+    var c0 = center + xAxis * (-bw / 2) + yAxis * (-bh / 2);
+    var c1 = center + xAxis * ( bw / 2) + yAxis * (-bh / 2);
+    var c2 = center + xAxis * ( bw / 2) + yAxis * ( bh / 2);
+    var c3 = center + xAxis * (-bw / 2) + yAxis * ( bh / 2);
+    return new PolylineCurve(new[] { c0, c1, c2, c3, c0 });
   }
 
   /// <summary>Approximate text extents based on size and character count.</summary>
