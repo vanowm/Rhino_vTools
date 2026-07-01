@@ -72,8 +72,50 @@ namespace vTools.Commands
     private const double EdgeMateDiagFactor  = 1.0e-4;
     private const int    EdgeMateSamples     = 7;
 
+    // ── Debug logging ─────────────────────────────────────────────────────
+    private static string? _dbgPath;
+
+    private static void DbgInit(RhinoDoc doc)
+    {
+      _dbgPath = null;
+      try
+      {
+        var dir = new System.IO.DirectoryInfo(
+          System.IO.Path.GetDirectoryName(typeof(vUnrollSrf).Assembly.Location) ?? ".");
+        while (dir != null)
+        {
+          if (System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "vTools.csproj")))
+          {
+            var logsDir = System.IO.Path.Combine(dir.FullName, "logs");
+            System.IO.Directory.CreateDirectory(logsDir);
+            _dbgPath = System.IO.Path.Combine(logsDir, "vUnrollSrf_debug.log");
+            break;
+          }
+          dir = dir.Parent;
+        }
+        if (_dbgPath == null) return;
+        System.IO.File.WriteAllText(_dbgPath,
+          $"vUnrollSrf debug log\ntime={DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
+          $"model_tol={doc.ModelAbsoluteTolerance:G}\ndoc={doc.Path}\n\n");
+      }
+      catch { _dbgPath = null; }
+    }
+
+    private static void Dbg(string msg)
+    {
+      if (_dbgPath == null) return;
+      try { System.IO.File.AppendAllText(_dbgPath, $"{DateTime.Now:HH:mm:ss} {msg}\n"); }
+      catch { }
+    }
+
+    private static string P(Point3d? p)  => p.HasValue  ? $"({p.Value.X:G6}, {p.Value.Y:G6}, {p.Value.Z:G6})" : "None";
+    private static string P(Point3d p)   => $"({p.X:G6}, {p.Y:G6}, {p.Z:G6})";
+    private static string V(Vector3d? v) => v.HasValue  ? $"({v.Value.X:G6}, {v.Value.Y:G6}, {v.Value.Z:G6})" : "None";
+    private static string V(Vector3d v)  => $"({v.X:G6}, {v.Y:G6}, {v.Z:G6})";
+
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+      DbgInit(doc);
       var startIds = SelectedIds(doc);
       var surfaceIds = GetSurfaceIds(doc, startIds.Where(IsSurfaceLikeId).ToList());
       if (surfaceIds == null || surfaceIds.Count == 0)
@@ -157,6 +199,11 @@ namespace vTools.Commands
             ? SurfaceLabelFrame(doc, src.Id, ItemTextHeight(doc, src.Id, display))
             : null;
 
+          if (frame != null)
+            Dbg($"part={number} original_frame label_height={frame.Height:G6} point={P(frame.Point)} y={V(frame.Y)} x={V(frame.X)} step={frame.Step:G6} up_pt={P(frame.UpPoint)} right_pt={P(frame.RightPoint)}");
+          else
+            Dbg($"part={number} original_frame None");
+
           var surfaceItems = i < assignment.Buckets.Count ? assignment.Buckets[i] : new List<FollowingItem>();
           var curves = surfaceItems.Where(x => x.Kind == FollowingKind.Curve).Select(x => x.Geometry).OfType<Curve>().ToList();
           var points = surfaceItems.Where(x => x.Kind == FollowingKind.Point).Select(x => x.Geometry).OfType<Point>().ToList();
@@ -210,6 +257,8 @@ namespace vTools.Commands
             continue;
           }
 
+          Dbg($"part={number} unroll_output breps={unrolledBreps.Length} curves={unrolledCurves?.Length ?? 0} points={unrolledPoints?.Length ?? 0} dots={unrolledDots?.Length ?? 0}");
+
           done++;
 
           var outputIds = new List<Guid>();
@@ -226,15 +275,22 @@ namespace vTools.Commands
           {
             // Use shared-endpoint + length filter to reliably identify orientation curves
             // regardless of Rhino output reordering.
-            if (frame != null && ResolveOrientationCurves(unrolledCurves, frame, tol,
-                  out int upIdx, out int rightIdx,
-                  out Point3d orientCenter, out Point3d orientUpEnd, out Point3d orientRightEnd))
+            int orientUpIdx = -1, orientRightIdx = -1;
+            Point3d orientCtr = Point3d.Unset, orientUp = Point3d.Unset, orientRt = Point3d.Unset;
+            bool orientOk = frame != null && ResolveOrientationCurves(unrolledCurves, frame, tol,
+                  out orientUpIdx, out orientRightIdx, out orientCtr, out orientUp, out orientRt);
+            if (orientOk)
             {
-              curveLabelPoint = orientCenter;
-              curveLabelUp    = orientUpEnd;
-              curveLabelRight = orientRightEnd;
-              hiddenCurveIndexes.Add(upIdx);
-              hiddenCurveIndexes.Add(rightIdx);
+              Dbg($"part={number} orientation_match up_idx={orientUpIdx} right_idx={orientRightIdx} center={P(orientCtr)} up_end={P(orientUp)} right_end={P(orientRt)}");
+              curveLabelPoint = orientCtr;
+              curveLabelUp    = orientUp;
+              curveLabelRight = orientRt;
+              hiddenCurveIndexes.Add(orientUpIdx);
+              hiddenCurveIndexes.Add(orientRightIdx);
+            }
+            else
+            {
+              Dbg($"part={number} orientation_match FAILED curves={unrolledCurves.Length}");
             }
 
             // Match edge mate curves by length scan (Rhino does not guarantee output order).
@@ -326,6 +382,23 @@ namespace vTools.Commands
           else if (pointY.HasValue && pointY.Value.Length > RhinoMath.ZeroTolerance)
             chosen = pointY.Value;
           unrolledY = chosen;
+
+          // Also capture fallback label pt/up for logging (from unrolled points, before labelPoint override)
+          Point3d? fallbackLabelPt  = (labelPoint.HasValue && !curveLabelPoint.HasValue) ? labelPoint : null;
+          Point3d? fallbackLabelUp  = (labelUp.HasValue   && !curveLabelUp.HasValue)    ? labelUp    : null;
+          if (!fallbackLabelPt.HasValue && unrolledPoints != null &&
+              labelPointIndex >= 0 && labelPointIndex < unrolledPoints.Length)
+            fallbackLabelPt = unrolledPoints[labelPointIndex];
+          if (!fallbackLabelUp.HasValue && unrolledPoints != null &&
+              labelUpIndex >= 0 && labelUpIndex < unrolledPoints.Length)
+            fallbackLabelUp = unrolledPoints[labelUpIndex];
+
+          Dbg($"part={number} label_unrolled" +
+              $" curve_pt={P(curveLabelPoint)} curve_up={P(curveLabelUp)} curve_right={P(curveLabelRight)}" +
+              $" fallback_pt={P(fallbackLabelPt)} fallback_up={P(fallbackLabelUp)}" +
+              $" curve_y={V(curveY)} point_y={V(pointY)} chosen_y={V(unrolledY)}" +
+              $" label_pt={P(labelPoint)}");
+
           if (curveLabelPoint.HasValue && curveLabelRight.HasValue)
             unrolledX = curveLabelRight.Value - curveLabelPoint.Value;
           else if (labelPoint.HasValue && labelRight.HasValue)
