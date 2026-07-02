@@ -357,23 +357,29 @@ namespace vTools.Commands
 
           Vector3d unrolledY = Vector3d.YAxis;
           Vector3d? unrolledX = null;
-          // curveY: from orientation curves, projected onto Z-plane (matches Python)
+          // curveY: from orientation curves, projected onto Z-plane and normalized (matches Python)
           Vector3d? curveY = null;
           if (curveLabelPoint.HasValue && curveLabelUp.HasValue)
           {
-            var raw = curveLabelUp.Value - curveLabelPoint.Value;
-            curveY = new Vector3d(raw.X, raw.Y, 0.0);
+            var raw = new Vector3d(
+              curveLabelUp.Value.X - curveLabelPoint.Value.X,
+              curveLabelUp.Value.Y - curveLabelPoint.Value.Y, 0.0);
+            if (raw.Unitize()) curveY = raw;
           }
-          // pointY: from unrolled frame points, also projected onto Z-plane
+          // pointY: from unrolled frame points, projected onto Z-plane and normalized
           Vector3d? pointY = null;
           if (labelPoint.HasValue && labelUp.HasValue)
           {
-            var raw = labelUp.Value - labelPoint.Value;
-            pointY = new Vector3d(raw.X, raw.Y, 0.0);
+            var raw = new Vector3d(
+              labelUp.Value.X - labelPoint.Value.X,
+              labelUp.Value.Y - labelPoint.Value.Y, 0.0);
+            if (raw.Unitize()) pointY = raw;
           }
           else if (frame != null)
           {
             pointY = new Vector3d(frame.Y.X, frame.Y.Y, 0.0);
+            if (pointY.Value.Length > RhinoMath.ZeroTolerance)
+            { var tmp = pointY.Value; tmp.Unitize(); pointY = tmp; }
           }
           // use curveY if valid, else pointY; final result projected onto Z-plane
           Vector3d chosen = Vector3d.YAxis;
@@ -1478,11 +1484,11 @@ namespace vTools.Commands
       center = upEnd = rightEnd = Point3d.Unset;
       if (curves == null || frame == null) return false;
 
-      // Use the arc-length step as the reference length so curved-surface unrollings
-      // (where the 3D chord differs from the arc length) still match correctly.
-      double expLen = frame.Step > tol ? frame.Step : Math.Max(
-        frame.Point.DistanceTo(frame.UpPoint),
-        frame.Point.DistanceTo(frame.RightPoint));
+      // Use the 3D chord lengths separately for up and right (matches Python's approach).
+      // On curved surfaces the up and right chords can differ substantially, so a single
+      // arc-length step is a poor filter for the shorter curve.
+      double upLen    = frame.Point.DistanceTo(frame.UpPoint);
+      double rightLen = frame.Point.DistanceTo(frame.RightPoint);
       const double lenTol = 0.15;
 
       int    bI = -1, bJ = -1;
@@ -1493,23 +1499,23 @@ namespace vTools.Commands
       {
         var ci = curves[i]; if (ci == null) continue;
         double li = ci.GetLength();
-        if (expLen > tol && Math.Abs(li - expLen) / expLen > lenTol) continue;
+        if (upLen > tol && Math.Abs(li - upLen) / upLen > lenTol) continue;
 
         for (int j = 0; j < curves.Length; j++)
         {
           if (i == j) continue;
           var cj = curves[j]; if (cj == null) continue;
           double lj = cj.GetLength();
-          if (expLen > tol && Math.Abs(lj - expLen) / expLen > lenTol) continue;
+          if (rightLen > tol && Math.Abs(lj - rightLen) / rightLen > lenTol) continue;
 
           var (sd, ctr, ue, re) = EndpointPairDistance(ci, cj);
-          double sharedMax = Math.Max(expLen, tol * 100.0) * 0.01;
+          double sharedMax = Math.Max(Math.Max(upLen, rightLen), tol * 100.0) * 0.01;
           if (sd > sharedMax) continue;
 
-          double lenScore = expLen > tol
-            ? (Math.Abs(li - expLen) + Math.Abs(lj - expLen)) / expLen
-            : 0.0;
-          double scale = Math.Max(expLen, tol * 100.0);
+          double lenScore = 0.0;
+          if (upLen    > tol) lenScore += Math.Abs(li - upLen)    / upLen;
+          if (rightLen > tol) lenScore += Math.Abs(lj - rightLen) / rightLen;
+          double scale = Math.Max(Math.Max(upLen, rightLen), tol * 100.0);
           double score = lenScore + sd / scale * 10.0;
           if (score < bScore)
           {
