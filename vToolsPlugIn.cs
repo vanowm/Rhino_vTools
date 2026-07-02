@@ -2,6 +2,7 @@ using Rhino;
 using Rhino.PlugIns;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 
@@ -46,26 +47,9 @@ public class vToolsPlugIn : PlugIn
       ? System.Diagnostics.FileVersionInfo.GetVersionInfo(asm.Location).FileVersion
       : null) ?? asm.GetName().Version?.ToString() ?? "unknown";
     var commandNames = CollectRegisteredCommandNames();
-    Log.Initialize();
-    Log.Write("OnLoad", $"OK. Version={version}. Assembly={GetType().Assembly.Location}");
-    Commands.vBiminiParts.InitLog();
-
-    // Always-on command diagnostics: log every command run and option change.
-    Rhino.Commands.Command.BeginCommand  += OnBeginCommand;
-    Rhino.Commands.Command.EndCommand    += OnEndCommand;
-
+    TryLog($"OnLoad OK. Version={version}. Assembly={GetType().Assembly.Location}");
     RhinoApp.WriteLine($"vTools v{version} loaded. Commands registered ({commandNames.Count}): {string.Join(", ", commandNames)}");
     return LoadReturnCode.Success;
-  }
-
-  private static void OnBeginCommand(object? sender, Rhino.Commands.CommandEventArgs e)
-  {
-    Log.Write(e.CommandEnglishName, "BEGIN");
-  }
-
-  private static void OnEndCommand(object? sender, Rhino.Commands.CommandEventArgs e)
-  {
-    Log.Write(e.CommandEnglishName, $"END    result={e.CommandResult}");
   }
 
   /// <summary>
@@ -116,4 +100,52 @@ public class vToolsPlugIn : PlugIn
   /// <summary>
   /// Appends one log message to the plug-in log file.
   /// </summary>
+  internal static void TryLog(string message)
+  {
+    try
+    {
+      var logDir = ResolveProjectLogsDir();
+      if (string.IsNullOrWhiteSpace(logDir))
+        return;
+
+      Directory.CreateDirectory(logDir);
+      var path = Path.Combine(logDir, "vTools.log");
+      File.AppendAllText(path, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\n");
+    }
+    catch
+    {
+    }
+  }
+
+  /// <summary>
+  /// Resolves a writable logs directory near the project root with a safe fallback.
+  /// </summary>
+  private static string ResolveProjectLogsDir()
+  {
+    try
+    {
+      var asmDir = Path.GetDirectoryName(typeof(vToolsPlugIn).Assembly.Location) ?? ".";
+      var dir = new DirectoryInfo(asmDir);
+
+      while (dir != null)
+      {
+        if (File.Exists(Path.Combine(dir.FullName, "vTools.csproj")))
+        {
+          var projectLogs = Path.Combine(dir.FullName, "logs");
+          Directory.CreateDirectory(projectLogs);
+          return projectLogs;
+        }
+
+        dir = dir.Parent;
+      }
+
+      var fallbackLogs = Path.Combine(asmDir, "logs");
+      Directory.CreateDirectory(fallbackLogs);
+      return fallbackLogs;
+    }
+    catch
+    {
+      return string.Empty;
+    }
+  }
 }

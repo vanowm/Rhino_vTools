@@ -59,6 +59,7 @@ namespace vTools.Commands
     private static double _layoutSpacing = 1.0;
     private static double _xExtents = 0.0;
     private static bool   _edgeDots = true;
+    private static bool   _splitFaces = false;
 
     // Edge-mate dot constants (match MultiUnroll2.py / vMatch.cs)
     private const string EdgeMateName        = vMatch.EdgeMateName;
@@ -144,6 +145,7 @@ namespace vTools.Commands
       _keepProperties = options.KeepProperties;
       _layoutSpacing = options.LayoutSpacing;
       _xExtents = options.XExtents;
+      _splitFaces = options.SplitFaces;
 
       var sources = new List<SourceSurface>();
       foreach (var id in surfaceIds)
@@ -161,6 +163,23 @@ namespace vTools.Commands
       {
         RestoreSelection(doc, startIds);
         return Result.Nothing;
+      }
+
+      // SplitFaces: explode each multi-face brep into single-face breps so the
+      // unroller handles each face independently, eliminating overlap in output.
+      if (_splitFaces)
+      {
+        var split = new List<SourceSurface>();
+        foreach (var src in sources)
+        {
+          if (src.Brep.Faces.Count <= 1) { split.Add(src); continue; }
+          foreach (var face in src.Brep.Faces)
+          {
+            var fb = face.DuplicateFace(false);
+            if (fb != null) split.Add(new SourceSurface(src.Id, src.Geometry, fb));
+          }
+        }
+        sources = split;
       }
 
       var addText = _labelMode == LabelMode.Text;
@@ -619,14 +638,16 @@ namespace vTools.Commands
       var gp = new GetPoint();
       gp.SetCommandPrompt(prompt);
       var shared = AddSharedOptions(gp);
-      var optExplode = new OptionToggle(_explode, "No", "Yes");
-      var optProps = new OptionToggle(_keepProperties, "No", "Yes");
-      var optSpacing = new OptionDouble(_layoutSpacing, true, 0.0);
-      var optXLimit = new OptionDouble(_xExtents, true, 0.0);
-      gp.AddOptionToggle("Explode", ref optExplode);
+      var optExplode  = new OptionToggle(_explode,     "No",  "Yes");
+      var optSplit    = new OptionToggle(_splitFaces,  "No",  "Yes");
+      var optProps    = new OptionToggle(_keepProperties, "No", "Yes");
+      var optSpacing  = new OptionDouble(_layoutSpacing, true, 0.0);
+      var optXLimit   = new OptionDouble(_xExtents, true, 0.0);
+      gp.AddOptionToggle("Explode",       ref optExplode);
+      gp.AddOptionToggle("SplitFaces",    ref optSplit);
       gp.AddOptionToggle("KeepProperties", ref optProps);
-      gp.AddOptionDouble("LayoutSpacing", ref optSpacing);
-      gp.AddOptionDouble("XExtents", ref optXLimit);
+      gp.AddOptionDouble("LayoutSpacing",  ref optSpacing);
+      gp.AddOptionDouble("XExtents",       ref optXLimit);
       gp.AcceptNothing(true);
 
       var point = Point3d.Origin;
@@ -654,6 +675,7 @@ namespace vTools.Commands
         LabelMode = _labelMode,
         RotateFlatParts = _rotateFlatParts,
         Explode = optExplode.CurrentValue,
+        SplitFaces = optSplit.CurrentValue,
         KeepProperties = optProps.CurrentValue,
         LayoutSpacing = optSpacing.CurrentValue,
         XExtents = optXLimit.CurrentValue
@@ -1853,6 +1875,7 @@ namespace vTools.Commands
       public LabelMode LabelMode;
       public bool RotateFlatParts;
       public bool Explode;
+      public bool SplitFaces;
       public bool KeepProperties;
       public double LayoutSpacing;
       public double XExtents;
