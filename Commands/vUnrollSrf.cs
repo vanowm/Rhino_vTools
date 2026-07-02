@@ -638,16 +638,6 @@ namespace vTools.Commands
       var gp = new GetPoint();
       gp.SetCommandPrompt(prompt);
       var shared = AddSharedOptions(gp);
-      var optExplode  = new OptionToggle(_explode,     "No",  "Yes");
-      var optSplit    = new OptionToggle(_splitFaces,  "No",  "Yes");
-      var optProps    = new OptionToggle(_keepProperties, "No", "Yes");
-      var optSpacing  = new OptionDouble(_layoutSpacing, true, 0.0);
-      var optXLimit   = new OptionDouble(_xExtents, true, 0.0);
-      gp.AddOptionToggle("Explode",       ref optExplode);
-      gp.AddOptionToggle("SplitFaces",    ref optSplit);
-      gp.AddOptionToggle("KeepProperties", ref optProps);
-      gp.AddOptionDouble("LayoutSpacing",  ref optSpacing);
-      gp.AddOptionDouble("XExtents",       ref optXLimit);
       gp.AcceptNothing(true);
 
       var point = Point3d.Origin;
@@ -671,14 +661,14 @@ namespace vTools.Commands
 
       return new LayoutOptions
       {
-        StartPoint = point,
-        LabelMode = _labelMode,
-        RotateFlatParts = _rotateFlatParts,
-        Explode = optExplode.CurrentValue,
-        SplitFaces = optSplit.CurrentValue,
-        KeepProperties = optProps.CurrentValue,
-        LayoutSpacing = optSpacing.CurrentValue,
-        XExtents = optXLimit.CurrentValue
+        StartPoint     = point,
+        LabelMode      = _labelMode,
+        RotateFlatParts= _rotateFlatParts,
+        Explode        = _explode,
+        SplitFaces     = _splitFaces,
+        KeepProperties = _keepProperties,
+        LayoutSpacing  = _layoutSpacing,
+        XExtents       = _xExtents
       };
     }
 
@@ -687,6 +677,11 @@ namespace vTools.Commands
       public int LabelIndex = -1;
       public OptionToggle? RotateOption;
       public OptionToggle? EdgeDotsOption;
+      public OptionToggle? ExplodeOption;
+      public OptionToggle? SplitFacesOption;
+      public OptionToggle? PropsOption;
+      public int SpacingIndex = -1;
+      public int XExtentsIndex = -1;
     }
 
     private static SharedOptions AddSharedOptions(GetBaseClass getter)
@@ -697,23 +692,57 @@ namespace vTools.Commands
       getter.AddOptionToggle("RotateFlatParts", ref state.RotateOption);
       state.EdgeDotsOption = new OptionToggle(_edgeDots, "Off", "On");
       getter.AddOptionToggle("EdgeDots", ref state.EdgeDotsOption);
+      state.ExplodeOption = new OptionToggle(_explode, "No", "Yes");
+      getter.AddOptionToggle("Explode", ref state.ExplodeOption);
+      state.SplitFacesOption = new OptionToggle(_splitFaces, "No", "Yes");
+      getter.AddOptionToggle("SplitFaces", ref state.SplitFacesOption);
+      state.PropsOption = new OptionToggle(_keepProperties, "No", "Yes");
+      getter.AddOptionToggle("KeepProperties", ref state.PropsOption);
+      state.SpacingIndex  = getter.AddOption("Spacing",  $"{_layoutSpacing:G}");
+      state.XExtentsIndex = getter.AddOption("XExtents", $"{_xExtents:G}");
       return state;
     }
 
     private static void HandleSharedOption(GetBaseClass getter, SharedOptions state)
     {
-      if (state == null)
-        return;
-      if (state.RotateOption != null)
-        _rotateFlatParts = state.RotateOption.CurrentValue;
-      if (state.EdgeDotsOption != null)
-        _edgeDots = state.EdgeDotsOption.CurrentValue;
+      if (state == null) return;
+
+      if (state.RotateOption    != null) _rotateFlatParts = state.RotateOption.CurrentValue;
+      if (state.EdgeDotsOption  != null) _edgeDots        = state.EdgeDotsOption.CurrentValue;
+      if (state.ExplodeOption   != null) _explode         = state.ExplodeOption.CurrentValue;
+      if (state.SplitFacesOption!= null) _splitFaces      = state.SplitFacesOption.CurrentValue;
+      if (state.PropsOption     != null) _keepProperties  = state.PropsOption.CurrentValue;
+
       var option = getter.Option();
       if (option != null && option.Index == state.LabelIndex)
       {
         int idx = option.CurrentListOptionIndex;
         if (idx >= 0 && idx < LabelModeNames.Length)
           _labelMode = (LabelMode)idx;
+      }
+      if (option != null && option.Index == state.SpacingIndex)
+      {
+        var gs = new GetString();
+        gs.SetCommandPrompt("Layout spacing");
+        gs.SetDefaultString($"{_layoutSpacing:G}");
+        gs.AcceptNothing(true);
+        if (gs.Get() == GetResult.String &&
+            double.TryParse(gs.StringResult().Trim(),
+              System.Globalization.NumberStyles.Any,
+              System.Globalization.CultureInfo.InvariantCulture, out double sv) && sv >= 0)
+          _layoutSpacing = sv;
+      }
+      if (option != null && option.Index == state.XExtentsIndex)
+      {
+        var gs = new GetString();
+        gs.SetCommandPrompt("X extents limit (0 = unlimited)");
+        gs.SetDefaultString($"{_xExtents:G}");
+        gs.AcceptNothing(true);
+        if (gs.Get() == GetResult.String &&
+            double.TryParse(gs.StringResult().Trim(),
+              System.Globalization.NumberStyles.Any,
+              System.Globalization.CultureInfo.InvariantCulture, out double xv) && xv >= 0)
+          _xExtents = xv;
       }
     }
 
