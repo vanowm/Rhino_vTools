@@ -478,34 +478,46 @@ public sealed class vChamfer : Command
         {
           var pickedPt = get.Point();
 
-          // Closest point on work1 → closest on work2 → gap = new chamfer size.
+          // Project click onto work1; offset _length arc-length toward the corner.
+          // The click is the outer reference — chamfer is placed _length back from it.
           if (!work1.ClosestPoint(pickedPt, out double tPick))
           {
             RhinoApp.WriteLine("vChamfer: cannot project point onto curve.");
             continue;
           }
-          var ptPickA = work1.PointAt(tPick);
-          if (!work2.ClosestPoint(ptPickA, out double tPickB))
-          {
-            RhinoApp.WriteLine("vChamfer: cannot find corresponding point on second curve.");
-            continue;
-          }
-          double newLength = ptPickA.DistanceTo(work2.PointAt(tPickB));
 
-          if (newLength <= RhinoMath.ZeroTolerance)
-          {
-            RhinoApp.WriteLine("vChamfer: curves touch at that point — no chamfer gap.");
-            continue;
-          }
+          double len1        = work1.GetLength();
+          double arcToClick  = c1AtStart
+            ? work1.GetLength(new Interval(work1.Domain.Min, tPick))
+            : work1.GetLength(new Interval(tPick, work1.Domain.Max));
+          double arcToChamfer = arcToClick - _length;
 
-          if (!ComputeChamfer(work1, c1AtStart, work2, newLength,
-                out ptA, out ptB, out tA, out tB))
+          if (arcToChamfer < 0.0)
           {
-            RhinoApp.WriteLine("vChamfer: cannot place chamfer at that point.");
+            RhinoApp.WriteLine($"vChamfer: picked point is closer to corner than Length ({_length:0.##}).");
             continue;
           }
 
-          runLength = newLength;
+          double segA = c1AtStart ? arcToChamfer : (len1 - arcToChamfer);
+          if (!work1.LengthParameter(segA, out double tANew))
+          {
+            RhinoApp.WriteLine("vChamfer: cannot compute offset position.");
+            continue;
+          }
+
+          var ptANew  = work1.PointAt(tANew);
+          var tanANew = work1.TangentAt(tANew);
+          var (newGap, tBNew, ptBNew) = NormalRayHit(ptANew, tanANew, work2);
+
+          if (double.IsNaN(newGap) || !ptBNew.IsValid)
+          {
+            RhinoApp.WriteLine("vChamfer: cannot find chamfer on second curve.");
+            continue;
+          }
+
+          tA = tANew; ptA = ptANew;
+          tB = tBNew; ptB = ptBNew;
+          runLength = newGap;
           pointActive = true;
           UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
           doc.Views.Redraw();
