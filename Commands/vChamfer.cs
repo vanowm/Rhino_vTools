@@ -500,54 +500,56 @@ public sealed class vChamfer : Command
           var pickedPt = get.Point();
           Log.Write("vChamfer", $"PointPick  click={P(pickedPt)}  currentPtA={P(ptA.IsValid?(Point3d?)ptA:null)}");
 
-          // Project click onto whichever working curve is closer ? that becomes ptA.
-          // distance(click, ptA) = distToNearerCurve.
-          // ptB via EquidistantGap from ptA.
-          work1.ClosestPoint(pickedPt, out double ppTPick1);
-          work2.ClosestPoint(pickedPt, out double ppTPick2);
-          var ppNear1 = work1.PointAt(ppTPick1);
-          var ppNear2 = work2.PointAt(ppTPick2);
-          double ppD1 = pickedPt.DistanceTo(ppNear1);
-          double ppD2 = pickedPt.DistanceTo(ppNear2);
-          Log.Write("vChamfer", $"PointPick  distWork1={ppD1:G4}  distWork2={ppD2:G4}");
-
-          Point3d ppPtA; double ppTA; Vector3d ppTanA;
-          if (ppD1 <= ppD2)
+          // Find ptA on c1 at Euclidean distance exactly _length from the click.
+          // Project P onto c1 ? foot F at perpendicular distance d.
+          // Then walk sqrt(_length²-d²) arc-length outward from F along c1.
+          if (!work1.ClosestPoint(pickedPt, out double ppTFoot))
           {
-            ppTA   = ppTPick1;
-            ppPtA  = ppNear1;
-            ppTanA = work1.TangentAt(ppTA);
-            Log.Write("vChamfer", $"PointPick  projOnWork1={P(ppPtA)}  distFromClick={ppD1:G4}");
+            RhinoApp.WriteLine("vChamfer: cannot project point onto curve.");
+            continue;
           }
-          else
+          var ppFoot = work1.PointAt(ppTFoot);
+          double ppDist = pickedPt.DistanceTo(ppFoot);
+          Log.Write("vChamfer", $"PointPick  foot={P(ppFoot)}  distToC1={ppDist:G4}  _length={_length:G4}");
+
+          if (ppDist > _length + 1e-6)
           {
-            // Click is nearer c2 — find corresponding c1 point via equidistant normal.
-            var ppTanB = work2.TangentAt(ppTPick2);
-            var (ppGfromC2, ppTAfromC2, ppPtAfromC2) = EquidistantGap(ppNear2, ppTanB, work1);
-            if (!double.IsNaN(ppGfromC2) && ppPtAfromC2.IsValid)
-            {
-              if (!work1.ClosestPoint(ppPtAfromC2, out ppTA)) ppTA = ppTPick1;
-              ppPtA  = work1.PointAt(ppTA);
-              ppTanA = work1.TangentAt(ppTA);
-              Log.Write("vChamfer", $"PointPick  projViaC2  c1pt={P(ppPtA)}  gap={ppGfromC2:G4}");
-            }
-            else
-            {
-              ppTA   = ppTPick1;
-              ppPtA  = ppNear1;
-              ppTanA = work1.TangentAt(ppTA);
-            }
+            RhinoApp.WriteLine($"vChamfer: click is farther from the curve ({ppDist:0.###}) than Length ({_length:0.###}).");
+            continue;
           }
 
+          // Arc offset from foot so that distance(P, ptA) = _length exactly.
+          double ppArcOffset = Math.Sqrt(Math.Max(_length * _length - ppDist * ppDist, 0.0));
+
+          // Foot arc-position from corner end.
+          double ppFootArc = c1AtStart
+              ? work1.GetLength(new Interval(work1.Domain.Min, ppTFoot))
+              : work1.GetLength(new Interval(ppTFoot, work1.Domain.Max));
+
+          // Walk outward from foot (away from corner).
+          double ppTargetArc = ppFootArc + ppArcOffset;
+          double ppLen1 = work1.GetLength();
+          ppTargetArc = Math.Min(ppTargetArc, ppLen1);
+
+          double ppSegA = c1AtStart ? ppTargetArc : (ppLen1 - ppTargetArc);
+          if (!work1.LengthParameter(ppSegA, out double ppTA))
+          {
+            RhinoApp.WriteLine("vChamfer: cannot compute offset position.");
+            continue;
+          }
+          var ppPtA  = work1.PointAt(ppTA);
+          var ppTanA = work1.TangentAt(ppTA);
           var (ppGap, ppTBfinal, ppPtBfinal) = EquidistantGap(ppPtA, ppTanA, work2);
-          if (double.IsNaN(ppGap) || !ppPtBfinal.IsValid) { RhinoApp.WriteLine("vChamfer: cannot find chamfer at that point."); continue; }
-
-          double ppDistToClick = pickedPt.DistanceTo(ppPtA);
-          Log.Write("vChamfer", $"PointPick  ptA={P(ppPtA)}  gap={ppGap:G4}  distPtoA={ppDistToClick:G4}  target={_length:G4}");
+          if (double.IsNaN(ppGap) || !ppPtBfinal.IsValid)
+          {
+            RhinoApp.WriteLine("vChamfer: cannot find chamfer at that point.");
+            continue;
+          }
+          Log.Write("vChamfer", $"PointPick  ptA={P(ppPtA)}  gap={ppGap:G4}  distPtoA={pickedPt.DistanceTo(ppPtA):G4}");
 
           tA = ppTA; ptA = ppPtA;
           tB = ppTBfinal; ptB = ppPtBfinal;
-          pickedGap = ppGap;  // store equidistant gap for Length-change re-apply
+          pickedGap = ppGap;
           pointActive = true;
           UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
           doc.Views.Redraw();
