@@ -502,10 +502,37 @@ public sealed class vChamfer : Command
 
           // Binary search along c1: find arc-length position where the perpendicular
           // distance from the click to the chamfer line equals _length.
-          // perp_dist decreases monotonically as the chamfer moves away from corner.
+          // Bound: start from the current chamfer's sA (ppLo) and scan outward until
+          // perp_dist drops below _length, then binary-search that range.
           double ppLen1 = work1.GetLength();
           double ppMaxS = Math.Min(ppLen1, work2.GetLength());
-          double ppLo = 0.0, ppHi = ppMaxS;
+
+          // sA of current chamfer (ptA already valid from initial compute)
+          double ppSA_init = ptA.IsValid
+              ? (c1AtStart
+                  ? work1.GetLength(new Interval(work1.Domain.Min, tA))
+                  : work1.GetLength(new Interval(tA, work1.Domain.Max)))
+              : 0.0;
+
+          // Scan outward from current chamfer to find the hi bound where perp < _length
+          double ppHi = ppMaxS;
+          {
+            double step = Math.Max((ppMaxS - ppSA_init) / 8.0, 1e-4);
+            for (double s = ppSA_init + step; s <= ppMaxS; s += step)
+            {
+              double seg = c1AtStart ? s : (ppLen1 - s);
+              if (!work1.LengthParameter(seg, out double tS)) break;
+              var ptS = work1.PointAt(tS);
+              var tanS = work1.TangentAt(tS);
+              var (gS, _, ptBS) = EquidistantGap(ptS, tanS, work2);
+              if (double.IsNaN(gS) || !ptBS.IsValid) continue;
+              var dS = ptBS - ptS; dS.Unitize();
+              var rS = pickedPt - ptS;
+              double pS = Math.Abs(rS.X * dS.Y - rS.Y * dS.X);
+              if (pS < _length) { ppHi = s; break; }
+            }
+          }
+          double ppLo = ppSA_init;
           Point3d ppPtA = Point3d.Unset, ppPtB = Point3d.Unset;
           double ppTA = double.NaN, ppTB = double.NaN;
 
@@ -522,7 +549,6 @@ public sealed class vChamfer : Command
             if (!chamferDir.Unitize()) { ppHi = s; continue; }
             var pRel = pickedPt - ptMid;
             double perp = Math.Abs(pRel.X * chamferDir.Y - pRel.Y * chamferDir.X);
-            // perp > _length: chamfer too close to corner, search farther out
             if (perp > _length) ppLo = s; else ppHi = s;
             if (ppHi - ppLo < 1e-9) break;
           }
