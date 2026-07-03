@@ -232,12 +232,19 @@ public sealed class vChamfer : Command
 
   // Two-step gap measurement perpendicular to the MIDDLE curve (average tangents):
   // step 1 — c1-perp hit gives c2 tangent; step 2 — re-shoot along average tangent.
-  // Used in binary search so it converges where the actual chamfer line = targetGap.
+  // Step 1 uses ClosestPoint fallback so short-curve geometries don't silently fail.
   private static (double Gap, double TB, Point3d PtB) EquidistantGap(
     Point3d ptA, Vector3d tanA, Curve c2)
   {
+    // Step 1: c1-perp, with ClosestPoint fallback for curves where the ray misses c2.
     var (g1, tB1, ptB1) = NormalRayHit(ptA, tanA, c2);
-    if (double.IsNaN(g1) || !ptB1.IsValid) return (double.NaN, double.NaN, Point3d.Unset);
+    if (double.IsNaN(g1) || !ptB1.IsValid)
+    {
+      // Fallback: use ClosestPoint as the initial ptB estimate.
+      if (!c2.ClosestPoint(ptA, out tB1)) return (double.NaN, double.NaN, Point3d.Unset);
+      ptB1 = c2.PointAt(tB1);
+      g1   = ptA.DistanceTo(ptB1);
+    }
 
     var tanB = c2.TangentAt(tB1);
     if (tanB * tanA < 0.0) tanB = -tanB;
