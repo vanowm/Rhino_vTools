@@ -286,82 +286,45 @@ public sealed class vChamfer : Command
   private static bool ComputeChamfer(
     Curve c1, bool c1AtStart,
     Curve c2, bool c2AtStart,
-    Point3d corner, double length, Plane cplane,
+    Point3d corner, double length,
     out Point3d ptA, out Point3d ptB,
     out double  tA,  out double  tB)
   {
     ptA = ptB = Point3d.Unset;
     tA  = tB  = double.NaN;
 
-    if (length < 0.0)
-      return false;
+    if (length < 0.0) return false;
 
     if (length <= RhinoMath.ZeroTolerance)
     {
       if (!c1.ClosestPoint(corner, out tA)) return false;
       if (!c2.ClosestPoint(corner, out tB)) return false;
-
       ptA = c1.PointAt(tA);
       ptB = c2.PointAt(tB);
       return ptA.IsValid && ptB.IsValid;
     }
 
-    // Compute 3-D bisector and chamfer-line directions from the corner tangents.
-    if (!TryBuildChamferDirections(c1, c1AtStart, c2, c2AtStart, cplane, out var bisDir, out var chamferDir))
-    {
-      Dbg("ComputeChamfer  TryBuildChamferDirections failed");
-      return false;
-    }
+    // Cut each curve at arc-length `length` from the corner end.
+    // This gives standard CAD chamfer semantics: length = cut distance along each edge.
+    double len1 = c1.GetLength();
+    double len2 = c2.GetLength();
 
-    // The chamfer line passes through (corner + length*bisDir) perpendicular to the bisector.
-    // Using direct curve-line intersection is exact for any curve shape and immune to the
-    // s1/s2 approximation blowing up when tangents are nearly parallel (det ≈ 0).
-    var foot  = corner + length * bisDir;
-    double span = Math.Max(c1.GetLength() + c2.GetLength() + length * 2.0, 1.0) * 4.0;
-    var chamferLine = new Line(foot - chamferDir * span, foot + chamferDir * span);
+    if (length >= len1) { Dbg($"ComputeChamfer  length={length:G4} >= c1 len={len1:G4}"); return false; }
+    if (length >= len2) { Dbg($"ComputeChamfer  length={length:G4} >= c2 len={len2:G4}"); return false; }
 
-    Dbg($"ComputeChamfer  foot={P(foot)}  bisDir={bisDir:F4}  chamferDir={chamferDir:F4}  span={span:G4}");
+    // LengthParameter(s) gives parameter t where arc-length from domain-start to t equals s.
+    double seg1 = c1AtStart ? length : (len1 - length);
+    double seg2 = c2AtStart ? length : (len2 - length);
 
-    const double isectTol = 1e-6;
-    if (!TryIntersectChamferLine(c1, c1AtStart, corner, chamferLine, isectTol, out tA, out ptA))
-    {
-      Dbg("ComputeChamfer  no intersection on c1");
-      return false;
-    }
-    if (!TryIntersectChamferLine(c2, c2AtStart, corner, chamferLine, isectTol, out tB, out ptB))
-    {
-      Dbg("ComputeChamfer  no intersection on c2");
-      return false;
-    }
+    if (!c1.LengthParameter(seg1, out tA)) { Dbg("ComputeChamfer  LengthParameter failed on c1"); return false; }
+    if (!c2.LengthParameter(seg2, out tB)) { Dbg("ComputeChamfer  LengthParameter failed on c2"); return false; }
 
-    // Validate that the chamfer point lies strictly inside the curve — not at either endpoint.
-    // Use arc-length of the kept region rather than parameter tolerance (NURBS domains vary wildly).
-    const double minKeep = 1e-6; // minimum arc-length of the trimmed-to piece
-    double keep1 = c1AtStart
-      ? c1.GetLength(new Interval(tA, c1.Domain.Max))
-      : c1.GetLength(new Interval(c1.Domain.Min, tA));
-    double keep2 = c2AtStart
-      ? c2.GetLength(new Interval(tB, c2.Domain.Max))
-      : c2.GetLength(new Interval(c2.Domain.Min, tB));
+    ptA = c1.PointAt(tA);
+    ptB = c2.PointAt(tB);
 
-    if (keep1 < minKeep)
-    {
-      Dbg($"ComputeChamfer  c1 trim region empty  keep1={keep1:G4}  tA={tA:G6}  arcLen1={c1.GetLength():G4}");
-      return false;
-    }
-    if (keep2 < minKeep)
-    {
-      Dbg($"ComputeChamfer  c2 trim region empty  keep2={keep2:G4}  tB={tB:G6}  arcLen2={c2.GetLength():G4}");
-      return false;
-    }
-    // Also reject if tA/tB are at the corner end itself (zero chamfer)
-    const double paramTol = 1e-10;
-    if ( c1AtStart && tA <= c1.Domain.Min + paramTol) { Dbg($"ComputeChamfer  tA at corner-start  tA={tA:G6}"); return false; }
-    if (!c1AtStart && tA >= c1.Domain.Max - paramTol) { Dbg($"ComputeChamfer  tA at corner-end  tA={tA:G6}"); return false; }
-    if ( c2AtStart && tB <= c2.Domain.Min + paramTol) { Dbg($"ComputeChamfer  tB at corner-start  tB={tB:G6}"); return false; }
-    if (!c2AtStart && tB >= c2.Domain.Max - paramTol) { Dbg($"ComputeChamfer  tB at corner-end  tB={tB:G6}"); return false; }
+    if (!ptA.IsValid || !ptB.IsValid) return false;
 
-    Dbg($"ComputeChamfer  OK  ptA={P(ptA)}  ptB={P(ptB)}  chamferLen={ptA.DistanceTo(ptB):G4}");
+    Dbg($"ComputeChamfer  OK  length={length:G4}  ptA={P(ptA)}  ptB={P(ptB)}  chamferLen={ptA.DistanceTo(ptB):G4}");
     return true;
   }
 
@@ -631,7 +594,7 @@ public sealed class vChamfer : Command
     // This makes the chamfer angle correct for 3D curves not lying in the active CPlane.
     cplane = InferChamferPlane(work1, c1AtStart, work2, c2AtStart, corner, cplane);
 
-    if (!ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length, cplane,
+    if (!ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length,
           out var ptA, out var ptB, out var tA, out var tB))
     {
       RhinoApp.WriteLine("vChamfer: cannot compute chamfer for these curves.");
@@ -687,34 +650,23 @@ public sealed class vChamfer : Command
             continue;
           }
 
-          // The chamfer line is always perpendicular to the corner bisector, and its
-          // bisector-distance from the corner scales linearly with cut-length.
-          // Derive that scale factor from the current valid chamfer geometry, then
-          // solve for the cut-length that places the chamfer at _length distance
-          // perpendicular to the picked point.
-          var infLine  = new Line(ptA, ptB);
-          var foot     = infLine.ClosestPoint(corner, false);
-          double dCur  = corner.DistanceTo(foot);
-          var bisDir   = foot - corner;
-          if (dCur < 1e-12 || !bisDir.Unitize())
+          // Find arc-length from corner to the closest point on work1 to the picked location.
+          if (!work1.ClosestPoint(pickedPt, out double tPick))
           {
-            RhinoApp.WriteLine("vChamfer: degenerate corner geometry, cannot use point-based placement.");
+            RhinoApp.WriteLine("vChamfer: cannot project point onto curve.");
+            continue;
+          }
+          double newLength = c1AtStart
+            ? work1.GetLength(new Interval(work1.Domain.Min, tPick))
+            : work1.GetLength(new Interval(tPick, work1.Domain.Max));
+
+          if (newLength <= RhinoMath.ZeroTolerance)
+          {
+            RhinoApp.WriteLine("vChamfer: picked point is too close to the corner.");
             continue;
           }
 
-          double d1   = dCur / _length;                   // bisector-dist per unit of cut-length
-          double dP   = (pickedPt - corner) * bisDir;     // projection of point onto bisector
-          double dNew = dP - _length;                     // desired chamfer bisector-dist
-
-          if (dNew <= 1e-12)
-          {
-            RhinoApp.WriteLine($"vChamfer: picked point is closer to corner than Length ({_length:0.##}); move it farther out.");
-            continue;
-          }
-
-          double newCutLength = dNew / d1;
-
-          if (!ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, newCutLength, cplane,
+          if (!ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, newLength,
                 out ptA, out ptB, out tA, out tB))
           {
             RhinoApp.WriteLine("vChamfer: point-based chamfer exceeds available curve length.");
@@ -733,7 +685,7 @@ public sealed class vChamfer : Command
         if (res == GetResult.Option && idxClearPoint >= 0 && get.Option()?.Index == idxClearPoint)
         {
           pointActive = false;
-          if (ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length, cplane,
+          if (ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length,
                 out ptA, out ptB, out tA, out tB))
             UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
           doc.Views.Redraw();
@@ -763,7 +715,7 @@ public sealed class vChamfer : Command
 
         if (res == GetResult.Number || res == GetResult.Option)
         {
-          if (ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length, cplane,
+          if (ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, _length,
                 out ptA, out ptB, out tA, out tB))
             UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
           else
