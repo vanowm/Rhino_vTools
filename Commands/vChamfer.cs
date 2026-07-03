@@ -498,6 +498,7 @@ public sealed class vChamfer : Command
         if (res == GetResult.Point)
         {
           var pickedPt = get.Point();
+          Log.Write("vChamfer", $"PointPick  click={P(pickedPt)}  currentPtA={P(ptA.IsValid?(Point3d?)ptA:null)}");
 
           // Click at P ? measure equidistant gap G_P at P ? place chamfer at G_P.
           // _length (stored size) is unchanged; ClearPoint reverts to it.
@@ -508,7 +509,9 @@ public sealed class vChamfer : Command
           }
           var ptPickA  = work1.PointAt(tPick);
           var tanPickA = work1.TangentAt(tPick);
+          Log.Write("vChamfer", $"PointPick  projOnWork1={P(ptPickA)}  distFromClick={pickedPt.DistanceTo(ptPickA):G4}");
           var (gPick, _, _) = EquidistantGap(ptPickA, tanPickA, work2);
+          Log.Write("vChamfer", $"PointPick  gPick={gPick:G4}  _length={_length:G4}");
           if (double.IsNaN(gPick))
           {
             RhinoApp.WriteLine("vChamfer: cannot measure gap at that point.");
