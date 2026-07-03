@@ -196,25 +196,6 @@ public sealed class vChamfer : Command
 
   // -- Chamfer computation ----------------------------------------------------
 
-  // Step 1: shoot perp to c1 tangent ? get initial ptB on c2.
-  // Step 2: average c1 and c2 tangents ? middle-curve normal direction.
-  // Step 3: re-shoot along middle-curve normal ? refined ptB.
-  // Returns the middle-curve-perpendicular gap (distance ptA?ptB_refined).
-  private static (double Gap, double TB, Point3d PtB) EquidistantGap(
-    Point3d ptA, Vector3d tanA, Curve c2)
-  {
-    var (g1, tB1, ptB1) = NormalRayHit(ptA, tanA, c2);
-    if (double.IsNaN(g1) || !ptB1.IsValid) return (double.NaN, double.NaN, Point3d.Unset);
-
-    var tanB = c2.TangentAt(tB1);
-    if (tanB * tanA < 0.0) tanB = -tanB;
-    var avgTan = tanA + tanB;
-    if (!avgTan.Unitize()) return (g1, tB1, ptB1);
-
-    var (g2, tB2, ptB2) = NormalRayHit(ptA, avgTan, c2);
-    return (!double.IsNaN(g2) && ptB2.IsValid) ? (g2, tB2, ptB2) : (g1, tB1, ptB1);
-  }
-
   // Shoot a ray perpendicular to `tangent` in the XY plane from `pt`.
   // Returns (NaN, NaN, Unset) when c2 doesn't extend to this location.
   private static (double Gap, double TB, Point3d PtB) NormalRayHit(
@@ -249,8 +230,40 @@ public sealed class vChamfer : Command
     return (double.NaN, double.NaN, Point3d.Unset);
   }
 
-  // length = desired chamfer line length (gap), perpendicular to the middle curve.
-  // Binary-searches c1 for where EquidistantGap = targetGap — correct size AND angle.
+  // Given ptA on c1 and initial ptB on c2, compute the middle-curve-perpendicular
+  // direction and return the point on c2 at exactly `targetGap` in that direction.
+  // Falls back to ptB0 if c2 is not reachable along the equidistant normal.
+  private static (double TB, Point3d PtB) EquidistantPtB(
+    Point3d ptA, Vector3d tanA,
+    double tB0, Point3d ptB0,
+    Curve c2, double targetGap)
+  {
+    // Average c1 and c2 tangents at the chamfer points ? middle-curve normal.
+    var tanB = c2.TangentAt(tB0);
+    if (tanB * tanA < 0.0) tanB = -tanB;
+    var avgTan = tanA + tanB;
+    if (!avgTan.Unitize()) return (tB0, ptB0);  // fallback: keep c1-perp result
+
+    // Direction of the equidistant normal.
+    var normal = Vector3d.CrossProduct(Vector3d.ZAxis, avgTan);
+    if (!normal.Unitize()) return (tB0, ptB0);
+    if ((ptB0 - ptA) * normal < 0.0) normal = -normal;
+
+    // Place ptB at exactly targetGap from ptA along the equidistant normal,
+    // then project onto c2 to get the nearest point actually on the curve.
+    var ptBTarget = ptA + normal * targetGap;
+    if (!c2.ClosestPoint(ptBTarget, out double tBnew)) return (tB0, ptB0);
+    var ptBnew = c2.PointAt(tBnew);
+
+    // Only use if the projection landed close to the target (c2 not too curved).
+    return ptBnew.DistanceTo(ptBTarget) <= targetGap * 0.2 + 1e-3
+        ? (tBnew, ptBnew)
+        : (tB0, ptB0);
+  }
+
+  // length = desired chamfer line length.
+  // Binary-searches c1 (c1-perp gap, monotone) for the position where gap ? targetGap,
+  // then places ptB at exactly targetGap in the middle-curve-perpendicular direction.
   private static bool ComputeChamfer(
     Curve c1, bool c1AtStart,
     Curve c2,
@@ -272,6 +285,7 @@ public sealed class vChamfer : Command
       return ptA.IsValid && ptB.IsValid;
     }
 
+    // Binary search on c1-perp gap (monotone from ~0 at corner to max at far end).
     double len1 = c1.GetLength();
     double maxS = Math.Min(len1, c2.GetLength());
     double lo = 0.0, hi = maxS;
@@ -282,7 +296,7 @@ public sealed class vChamfer : Command
       if (!c1.LengthParameter(seg, out double tMid)) break;
       var ptMid  = c1.PointAt(tMid);
       var tanMid = c1.TangentAt(tMid);
-      var (gap, _, _) = EquidistantGap(ptMid, tanMid, c2);
+      var (gap, _, _) = NormalRayHit(ptMid, tanMid, c2);
       if (double.IsNaN(gap)) { hi = s; continue; }
       if (gap < targetGap) lo = s; else hi = s;
       if (hi - lo < 1e-9) break;
@@ -294,21 +308,23 @@ public sealed class vChamfer : Command
     ptA = c1.PointAt(tA);
     if (!ptA.IsValid) return false;
 
+    // Get initial ptB (c1-perp direction) and verify convergence.
     var tanA = c1.TangentAt(tA);
-    var (finalGap, tBfinal, ptBfinal) = EquidistantGap(ptA, tanA, c2);
-    if (double.IsNaN(tBfinal) || !ptBfinal.IsValid)
+    var (g0, tB0, ptB0) = NormalRayHit(ptA, tanA, c2);
+    if (double.IsNaN(g0) || !ptB0.IsValid)
     {
       Log.Write("vChamfer", $"ComputeChamfer  no c2 hit  sA={sA:G4}");
       return false;
     }
-    if (Math.Abs(finalGap - targetGap) > targetGap * 0.1 + 1e-3)
+    if (Math.Abs(g0 - targetGap) > targetGap * 0.1 + 1e-3)
     {
-      Log.Write("vChamfer", $"ComputeChamfer  targetGap={targetGap:G4} not achieved  finalGap={finalGap:G4}");
+      Log.Write("vChamfer", $"ComputeChamfer  targetGap={targetGap:G4} not achieved  g0={g0:G4}");
       return false;
     }
 
-    tB  = tBfinal;
-    ptB = ptBfinal;
+    // Refine ptB to the middle-curve-perpendicular direction at exactly targetGap.
+    (tB, ptB) = EquidistantPtB(ptA, tanA, tB0, ptB0, c2, targetGap);
+
     Log.Write("vChamfer", $"ComputeChamfer  OK  gap={ptA.DistanceTo(ptB):G4}  ptA={P(ptA)}  ptB={P(ptB)}");
     return true;
   }
@@ -526,13 +542,16 @@ public sealed class vChamfer : Command
 
           var ptANew  = work1.PointAt(tANew);
           var tanANew = work1.TangentAt(tANew);
-          var (newGap, tBNew, ptBNew) = EquidistantGap(ptANew, tanANew, work2);
+          var (newGap, tBNew, ptBNew) = NormalRayHit(ptANew, tanANew, work2);
 
           if (double.IsNaN(newGap) || !ptBNew.IsValid)
           {
             RhinoApp.WriteLine("vChamfer: cannot find chamfer on second curve.");
             continue;
           }
+
+          // Refine ptB to equidistant direction.
+          (tBNew, ptBNew) = EquidistantPtB(ptANew, tanANew, tBNew, ptBNew, work2, newGap);
 
           tA = tANew; ptA = ptANew;
           tB = tBNew; ptB = ptBNew;
