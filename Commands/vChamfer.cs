@@ -230,30 +230,21 @@ public sealed class vChamfer : Command
     return (double.NaN, double.NaN, Point3d.Unset);
   }
 
-  // Given ptA on c1 and initial ptB on c2, compute the middle-curve-perpendicular
-  // direction and return the point on c2 at exactly `targetGap` in that direction.
-  // Falls back to ptB0 if c2 is not reachable along the equidistant normal.
+  // Given ptA on c1 with initial c1-perp ptB on c2, refine ptB to be perpendicular
+  // to the middle curve by re-shooting along the average of c1 and c2 tangents.
+  // No guard — always apply when the refined hit is valid.
   private static (double TB, Point3d PtB) EquidistantPtB(
     Point3d ptA, Vector3d tanA,
     double tB0, Point3d ptB0,
     Curve c2, double targetGap)
   {
-    // Average c1 and c2 tangents at the chamfer points ? middle-curve normal.
     var tanB = c2.TangentAt(tB0);
     if (tanB * tanA < 0.0) tanB = -tanB;
     var avgTan = tanA + tanB;
-    if (!avgTan.Unitize()) return (tB0, ptB0);  // fallback: keep c1-perp result
+    if (!avgTan.Unitize()) return (tB0, ptB0);
 
-    // Direction of the equidistant normal.
-    var normal = Vector3d.CrossProduct(Vector3d.ZAxis, avgTan);
-    if (!normal.Unitize()) return (tB0, ptB0);
-    if ((ptB0 - ptA) * normal < 0.0) normal = -normal;
-
-    // Place ptB at exactly targetGap from ptA along the equidistant normal,
-    // then project onto c2 to get the nearest point actually on the curve.
-    var ptBTarget = ptA + normal * targetGap;
-    if (!c2.ClosestPoint(ptBTarget, out double tBnew)) return (tB0, ptB0);
-    return (tBnew, c2.PointAt(tBnew));
+    var (_, tBref, ptBref) = NormalRayHit(ptA, avgTan, c2);
+    return (!double.IsNaN(tBref) && ptBref.IsValid) ? (tBref, ptBref) : (tB0, ptB0);
   }
 
   // length = desired chamfer line length.
