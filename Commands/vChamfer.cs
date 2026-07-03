@@ -526,10 +526,10 @@ public sealed class vChamfer : Command
               ? work1.GetLength(new Interval(work1.Domain.Min, ppTFoot))
               : work1.GetLength(new Interval(ppTFoot, work1.Domain.Max));
 
-          // Walk outward from foot (away from corner).
-          double ppTargetArc = ppFootArc + ppArcOffset;
+          // Walk TOWARD CORNER from foot so that distance(P, ptA) = _length exactly.
+          // "Towards the narrow part" = toward the corner = smaller arc-from-corner.
           double ppLen1 = work1.GetLength();
-          ppTargetArc = Math.Min(ppTargetArc, ppLen1);
+          double ppTargetArc = Math.Max(ppFootArc - ppArcOffset, 0.0);
 
           double ppSegA = c1AtStart ? ppTargetArc : (ppLen1 - ppTargetArc);
           if (!work1.LengthParameter(ppSegA, out double ppTA))
