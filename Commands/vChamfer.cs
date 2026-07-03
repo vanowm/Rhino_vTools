@@ -315,22 +315,25 @@ public sealed class vChamfer : Command
       return false;
     }
 
-    // Refine: re-shoot using the average of c1 and c2 tangents at the chamfer points
-    // so the line is perpendicular to the middle curve, not just to c1.
+    // Refine: re-shoot using the average of c1 and c2 tangents so the chamfer
+    // is perpendicular to the middle curve. Only apply if the gap doesn't change
+    // significantly — a large gap shift means the curves are highly asymmetric
+    // and refinement would give the wrong chamfer size.
     var tanB = c2.TangentAt(tBfinal);
     if (tanB * tanA < 0.0) tanB = -tanB;          // align directions
     var avgTan = tanA + tanB;
     if (avgTan.Unitize())
     {
-      var (_, tBref, ptBref) = NormalRayHit(ptA, avgTan, c2);
-      if (!double.IsNaN(tBref) && ptBref.IsValid)
+      var (refGap, tBref, ptBref) = NormalRayHit(ptA, avgTan, c2);
+      if (!double.IsNaN(refGap) && ptBref.IsValid
+          && Math.Abs(refGap - targetGap) <= targetGap * 0.1 + 1e-3)
         (tBfinal, ptBfinal) = (tBref, ptBref);
     }
 
     tB  = tBfinal;
     ptB = ptBfinal;
 
-    Log.Write("vChamfer", $"ComputeChamfer  OK  gap={finalGap:G4}  ptA={P(ptA)}  ptB={P(ptB)}");
+    Log.Write("vChamfer", $"ComputeChamfer  OK  gap={ptA.DistanceTo(ptB):G4}  ptA={P(ptA)}  ptB={P(ptB)}");
     return true;
   }
 
@@ -555,14 +558,15 @@ public sealed class vChamfer : Command
             continue;
           }
 
-          // Refine using average tangent (same as ComputeChamfer).
+          // Refine using average tangent — only if gap stays within 10% of initial.
           var tanBNew = work2.TangentAt(tBNew);
           if (tanBNew * tanANew < 0.0) tanBNew = -tanBNew;
           var avgTanNew = tanANew + tanBNew;
           if (avgTanNew.Unitize())
           {
-            var (_, tBref, ptBref) = NormalRayHit(ptANew, avgTanNew, work2);
-            if (!double.IsNaN(tBref) && ptBref.IsValid)
+            var (refGapNew, tBref, ptBref) = NormalRayHit(ptANew, avgTanNew, work2);
+            if (!double.IsNaN(refGapNew) && ptBref.IsValid
+                && Math.Abs(refGapNew - newGap) <= newGap * 0.1 + 1e-3)
               (tBNew, ptBNew) = (tBref, ptBref);
           }
 
