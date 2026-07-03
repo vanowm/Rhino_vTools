@@ -338,7 +338,32 @@ public sealed class vChamfer : Command
     ptA = c1.PointAt(tA);
     ptB = c2.PointAt(tB);
 
-    // Cut must lie strictly inside the curve (not at either endpoint).\n    const double tol = 1e-10;\n    // Corner end: zero chamfer\n    if ( c1AtStart && tA <= c1.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tA at corner start  tA={tA:G6}  min={c1.Domain.Min:G6}"); return false; }\n    if (!c1AtStart && tA >= c1.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tA at corner end  tA={tA:G6}  max={c1.Domain.Max:G6}");   return false; }\n    // Far end: chamfer would consume the entire curve (curves too parallel/short)\n    if ( c1AtStart && tA >= c1.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tA at far end — curves too short/parallel  tA={tA:G6}  max={c1.Domain.Max:G6}"); return false; }\n    if (!c1AtStart && tA <= c1.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tA at far end — curves too short/parallel  tA={tA:G6}  min={c1.Domain.Min:G6}"); return false; }\n    if ( c2AtStart && tB <= c2.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tB at corner start  tB={tB:G6}  min={c2.Domain.Min:G6}"); return false; }\n    if (!c2AtStart && tB >= c2.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tB at corner end  tB={tB:G6}  max={c2.Domain.Max:G6}");   return false; }\n    if ( c2AtStart && tB >= c2.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tB at far end — curves too short/parallel  tB={tB:G6}  max={c2.Domain.Max:G6}"); return false; }\n    if (!c2AtStart && tB <= c2.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tB at far end — curves too short/parallel  tB={tB:G6}  min={c2.Domain.Min:G6}"); return false; }
+    // Validate that the chamfer point lies strictly inside the curve — not at either endpoint.
+    // Use arc-length of the kept region rather than parameter tolerance (NURBS domains vary wildly).
+    const double minKeep = 1e-6; // minimum arc-length of the trimmed-to piece
+    double keep1 = c1AtStart
+      ? c1.GetLength(new Interval(tA, c1.Domain.Max))
+      : c1.GetLength(new Interval(c1.Domain.Min, tA));
+    double keep2 = c2AtStart
+      ? c2.GetLength(new Interval(tB, c2.Domain.Max))
+      : c2.GetLength(new Interval(c2.Domain.Min, tB));
+
+    if (keep1 < minKeep)
+    {
+      Log.Write("vChamfer", $"compute  c1 trim region empty  keep1={keep1:G4}  tA={tA:G6}  arcLen1={c1.GetLength():G4}");
+      return false;
+    }
+    if (keep2 < minKeep)
+    {
+      Log.Write("vChamfer", $"compute  c2 trim region empty  keep2={keep2:G4}  tB={tB:G6}  arcLen2={c2.GetLength():G4}");
+      return false;
+    }
+    // Also reject if tA/tB are at the corner end itself (zero chamfer)
+    const double paramTol = 1e-10;
+    if ( c1AtStart && tA <= c1.Domain.Min + paramTol) { Log.Write("vChamfer", $"compute  tA at corner-start  tA={tA:G6}"); return false; }
+    if (!c1AtStart && tA >= c1.Domain.Max - paramTol) { Log.Write("vChamfer", $"compute  tA at corner-end  tA={tA:G6}"); return false; }
+    if ( c2AtStart && tB <= c2.Domain.Min + paramTol) { Log.Write("vChamfer", $"compute  tB at corner-start  tB={tB:G6}"); return false; }
+    if (!c2AtStart && tB >= c2.Domain.Max - paramTol) { Log.Write("vChamfer", $"compute  tB at corner-end  tB={tB:G6}"); return false; }
 
     Log.Write("vChamfer", $"compute  OK  ptA={ptA:F4}  ptB={ptB:F4}  chamferLen={ptA.DistanceTo(ptB):G4}");
     return true;
