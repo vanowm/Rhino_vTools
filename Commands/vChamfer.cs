@@ -45,7 +45,7 @@ public sealed class vChamfer : Command
 
   public override string EnglishName => "vChamfer";
 
-  // â”€â”€ Option persistence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Option persistence ─────────────────────────────────────────────────────
 
   private static void LoadOptions() =>
     ToolsOptionStore.Read<int>(SectionName, section =>
@@ -67,7 +67,7 @@ public sealed class vChamfer : Command
       section[JoinKey]   = _join;
     });
 
-  // â”€â”€ Curve picking with options â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Curve picking with options ─────────────────────────────────────────────
 
   private static (ObjRef? Ref, Curve? Crv) PickCurveWithOptions(string prompt)
   {
@@ -132,7 +132,7 @@ public sealed class vChamfer : Command
     return true;
   }
 
-  // â”€â”€ Corner detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Corner detection ───────────────────────────────────────────────────────
 
   /// <summary>
   /// Finds the closest endpoint pair and computes a virtual corner as the
@@ -140,35 +140,16 @@ public sealed class vChamfer : Command
   /// not share an endpoint (e.g. previously chamfered).
   /// </summary>
   private static (bool C1AtStart, bool C2AtStart, Point3d VirtualCorner) FindCorner(
-    Curve c1, Curve c2, Point3d? click1 = null, Point3d? click2 = null)
+    Curve c1, Curve c2)
   {
     bool bestC1s = true, bestC2s = true;
-
-    if (click1.HasValue && click2.HasValue)
+    double best = double.MaxValue;
+    foreach (bool c1s in new[] { true, false })
+    foreach (bool c2s in new[] { true, false })
     {
-      // Use the endpoint of each curve closest to where the user clicked.
-      // This ensures the "corner end" is the one the user intended, even when
-      // the curves diverge from a shared start and the user clicks near the far ends.
-      double d1s = c1.PointAtStart.DistanceTo(click1.Value);
-      double d1e = c1.PointAtEnd  .DistanceTo(click1.Value);
-      double d2s = c2.PointAtStart.DistanceTo(click2.Value);
-      double d2e = c2.PointAtEnd  .DistanceTo(click2.Value);
-      bestC1s = d1s <= d1e;   // true = start is the corner end
-      bestC2s = d2s <= d2e;
-      Log.Write("vChamfer", $"FindCorner  click1={P(click1)}  click2={P(click2)}");
-      Log.Write("vChamfer", $"FindCorner  d1s={d1s:F4}  d1e={d1e:F4}  c1AtStart={bestC1s}  d2s={d2s:F4}  d2e={d2e:F4}  c2AtStart={bestC2s}");
-    }
-    else
-    {
-      // Fallback: pick the closest endpoint pair.
-      double best = double.MaxValue;
-      foreach (bool c1s in new[] { true, false })
-      foreach (bool c2s in new[] { true, false })
-      {
-        double d = (c1s ? c1.PointAtStart : c1.PointAtEnd)
-                   .DistanceTo(c2s ? c2.PointAtStart : c2.PointAtEnd);
-        if (d < best) { best = d; bestC1s = c1s; bestC2s = c2s; }
-      }
+      double d = (c1s ? c1.PointAtStart : c1.PointAtEnd)
+                 .DistanceTo(c2s ? c2.PointAtStart : c2.PointAtEnd);
+      if (d < best) { best = d; bestC1s = c1s; bestC2s = c2s; }
     }
 
     var ep1 = bestC1s ? c1.PointAtStart : c1.PointAtEnd;
@@ -195,7 +176,7 @@ public sealed class vChamfer : Command
     return (bestC1s, bestC2s, mid);
   }
 
-  // â”€â”€ Extension â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Extension ─────────────────────────────────────────────────────────────
 
   /// <summary>
   /// Extends the corner end of a working-copy curve to the virtual corner point.
@@ -213,17 +194,52 @@ public sealed class vChamfer : Command
     return extended ?? c;
   }
 
-  // â”€â”€ Chamfer computation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Chamfer computation ────────────────────────────────────────────────────
 
   /// <summary>
   /// Computes chamfer endpoints on working curves (already extended to corner).
   /// Returns false when geometry is degenerate.
   /// </summary>
-  // -- Chamfer computation -----------------------------------------------------
-  //
-  // length = desired chamfer line length (gap from ptA on c1 to closest ptB on c2).
-  // Binary-searches c1 from the corner end for where ClosestPoint(c2) == targetGap.
-  // ptB = ClosestPoint(c2, ptA) ? perpendicular to the middle curve by construction.
+  // Shoot a ray perpendicular to `tangent` in the XY plane from `pt` and find the
+  // nearest forward intersection with c2. Falls back to ClosestPoint when no hit.
+  private static (double Gap, double TB, Point3d PtB) NormalRayHit(
+    Point3d pt, Vector3d tangent, Curve c2)
+  {
+    var normal = Vector3d.CrossProduct(Vector3d.ZAxis, tangent);
+    if (!normal.Unitize())
+      return (double.NaN, double.NaN, Point3d.Unset);
+
+    // Orient normal toward c2.
+    if (!c2.ClosestPoint(pt, out double tGuess))
+      return (double.NaN, double.NaN, Point3d.Unset);
+    var ptGuess = c2.PointAt(tGuess);
+    if ((ptGuess - pt) * normal < 0.0) normal = -normal;
+
+    double span = Math.Max(pt.DistanceTo(ptGuess) * 4.0, c2.GetLength() + 1.0);
+    var line   = new Line(pt - normal * 1e-3, pt + normal * span);
+    var events = Intersection.CurveLine(c2, line, 1e-6, 1e-6);
+
+    if (events != null && events.Count > 0)
+    {
+      double bestD = double.MaxValue;
+      double bestTB = tGuess;
+      Point3d bestPt = ptGuess;
+      for (int i = 0; i < events.Count; i++)
+      {
+        if (!events[i].IsPoint) continue;
+        var hitPt = events[i].PointA;
+        if ((hitPt - pt) * normal < -1e-6) continue;  // behind
+        double d = hitPt.DistanceTo(pt);
+        if (d < bestD) { bestD = d; bestTB = events[i].ParameterA; bestPt = hitPt; }
+      }
+      return (bestD < double.MaxValue ? bestD : pt.DistanceTo(ptGuess), bestTB, bestPt);
+    }
+
+    return (pt.DistanceTo(ptGuess), tGuess, ptGuess);  // fallback
+  }
+
+  // length = desired perpendicular gap from c1 to c2.
+  // Binary-searches c1 from the corner end; ptB via normal-ray → perpendicular to middle curve.
   private static bool ComputeChamfer(
     Curve c1, bool c1AtStart,
     Curve c2,
@@ -245,28 +261,29 @@ public sealed class vChamfer : Command
       return ptA.IsValid && ptB.IsValid;
     }
 
-    // Verify target gap is reachable somewhere on c1.
-    double tFar  = c1AtStart ? c1.Domain.Max : c1.Domain.Min;
-    var    ptFar = c1.PointAt(tFar);
-    if (!c2.ClosestPoint(ptFar, out double tBFar)) return false;
-    double gapAtFar = ptFar.DistanceTo(c2.PointAt(tBFar));
-    if (gapAtFar < targetGap)
+    // Verify target gap is reachable at the far end of c1.
+    double tFar = c1AtStart ? c1.Domain.Max : c1.Domain.Min;
+    var ptFar   = c1.PointAt(tFar);
+    var tanFar  = c1.TangentAt(tFar);
+    var (gapAtFar, _, _) = NormalRayHit(ptFar, tanFar, c2);
+    if (double.IsNaN(gapAtFar) || gapAtFar < targetGap)
     {
       Log.Write("vChamfer", $"ComputeChamfer  targetGap={targetGap:G4} > maxGap={gapAtFar:G4}");
       return false;
     }
 
-    // Binary search on arc-length s from corner end: find s where gap(s) = targetGap.
+    // Binary search on arc-length s from corner end: find s where NormalRayGap = targetGap.
     double len1 = c1.GetLength();
     double lo = 0.0, hi = len1;
-    for (int i = 0; i < 52; i++)
+    for (int i = 0; i < 48; i++)
     {
       double s   = 0.5 * (lo + hi);
       double seg = c1AtStart ? s : (len1 - s);
       if (!c1.LengthParameter(seg, out double tMid)) break;
-      var ptMid = c1.PointAt(tMid);
-      if (!c2.ClosestPoint(ptMid, out double tBMid)) break;
-      double gap = ptMid.DistanceTo(c2.PointAt(tBMid));
+      var ptMid  = c1.PointAt(tMid);
+      var tanMid = c1.TangentAt(tMid);
+      var (gap, _, _) = NormalRayHit(ptMid, tanMid, c2);
+      if (double.IsNaN(gap)) { lo = s; continue; }
       if (gap < targetGap) lo = s; else hi = s;
       if (hi - lo < 1e-9) break;
     }
@@ -276,16 +293,19 @@ public sealed class vChamfer : Command
     if (!c1.LengthParameter(segA, out tA)) return false;
     ptA = c1.PointAt(tA);
     if (!ptA.IsValid) return false;
-    if (!c2.ClosestPoint(ptA, out tB)) return false;
-    ptB = c2.PointAt(tB);
-    if (!ptB.IsValid) return false;
 
-    Log.Write("vChamfer", $"ComputeChamfer  OK  gap={ptA.DistanceTo(ptB):G4}  ptA={P(ptA)}  ptB={P(ptB)}");
+    var tanA = c1.TangentAt(tA);
+    var (finalGap, tBfinal, ptBfinal) = NormalRayHit(ptA, tanA, c2);
+    if (double.IsNaN(tBfinal) || !ptBfinal.IsValid) return false;
+    tB  = tBfinal;
+    ptB = ptBfinal;
+
+    Log.Write("vChamfer", $"ComputeChamfer  OK  gap={finalGap:G4}  ptA={P(ptA)}  ptB={P(ptB)}");
     return true;
   }
 
 
-  // â”€â”€ Preview conduit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Preview conduit ────────────────────────────────────────────────────────
 
   private sealed class ChamferPreviewConduit : DisplayConduit
   {
@@ -390,7 +410,7 @@ public sealed class vChamfer : Command
     conduit.ChamferLine = ptA.DistanceTo(ptB) > 1e-10 ? new Line(ptA, ptB) : (Line?)null;
     conduit.ShowTrim    = _trim;
   }
-  // â”€â”€ Command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Command ────────────────────────────────────────────────────────────────
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
@@ -411,9 +431,7 @@ public sealed class vChamfer : Command
     var click1 = ref1.SelectionPoint();
     var click2 = ref2.SelectionPoint();
     Log.Write("vChamfer", $"RunCommand  click1={P(click1.IsValid ? (Point3d?)click1 : null)}  click2={P(click2.IsValid ? (Point3d?)click2 : null)}");
-    var (c1AtStart, c2AtStart, corner) = FindCorner(crv1, crv2,
-      click1.IsValid ? (Point3d?)click1 : null,
-      click2.IsValid ? (Point3d?)click2 : null);
+    var (c1AtStart, c2AtStart, corner) = FindCorner(crv1, crv2);
     Log.Write("vChamfer", $"RunCommand  corner={P(corner)}  c1AtStart={c1AtStart}  c2AtStart={c2AtStart}");
 
     // Extend working copies to the virtual corner so chamfering always works
