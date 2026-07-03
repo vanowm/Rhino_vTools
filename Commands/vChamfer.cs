@@ -39,31 +39,9 @@ public sealed class vChamfer : Command
   private static bool   _trim   = true;   // true = trim curves; false = add line only
   private static bool   _join   = true;   // only used when _trim = true
 
-  // ── Per-command log ─────────────────────────────────────────────────────
-  private static string? _dbgPath;
+  // ── Formatting helpers ───────────────────────────────────────────────────
   private static string P(Point3d p)  => $"({p.X:F4},{p.Y:F4},{p.Z:F4})";
   private static string P(Point3d? p) => p.HasValue ? P(p.Value) : "null";
-
-  private static void DbgInit(RhinoDoc doc)
-  {
-    try
-    {
-      var logsDir = System.IO.Path.GetDirectoryName(Log.FilePath);
-      if (string.IsNullOrEmpty(logsDir)) { _dbgPath = null; return; }
-      _dbgPath = System.IO.Path.Combine(logsDir, "vChamfer_debug.log");
-      System.IO.File.WriteAllText(_dbgPath,
-        $"vChamfer debug log\ntime={DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
-        $"model_tol={doc.ModelAbsoluteTolerance:G}\n\n");
-    }
-    catch { _dbgPath = null; }
-  }
-
-  private static void Dbg(string msg)
-  {
-    if (_dbgPath == null) return;
-    try { System.IO.File.AppendAllText(_dbgPath, $"{DateTime.Now:HH:mm:ss.fff} {msg}\n"); }
-    catch { }
-  }
 
   public override string EnglishName => "vChamfer";
 
@@ -177,8 +155,8 @@ public sealed class vChamfer : Command
       double d2e = c2.PointAtEnd  .DistanceTo(click2.Value);
       bestC1s = d1s <= d1e;   // true = start is the corner end
       bestC2s = d2s <= d2e;
-      Dbg($"FindCorner  click1={P(click1)}  click2={P(click2)}");
-      Dbg($"FindCorner  d1s={d1s:F4}  d1e={d1e:F4}  c1AtStart={bestC1s}  d2s={d2s:F4}  d2e={d2e:F4}  c2AtStart={bestC2s}");
+      Log.Write("vChamfer", $"FindCorner  click1={P(click1)}  click2={P(click2)}");
+      Log.Write("vChamfer", $"FindCorner  d1s={d1s:F4}  d1e={d1e:F4}  c1AtStart={bestC1s}  d2s={d2s:F4}  d2e={d2e:F4}  c2AtStart={bestC2s}");
     }
     else
     {
@@ -207,13 +185,13 @@ public sealed class vChamfer : Command
     if (Intersection.LineLine(lineA, lineB, out double a, out double b, 1e-6, false))
     {
       var vc = (lineA.PointAt(a) + lineB.PointAt(b)) * 0.5;
-      Dbg($"FindCorner  ep1={P(ep1)}  ep2={P(ep2)}  corner={P(vc)}");
+      Log.Write("vChamfer", $"FindCorner  ep1={P(ep1)}  ep2={P(ep2)}  corner={P(vc)}");
       return (bestC1s, bestC2s, vc);
     }
 
     // Parallel tangents — fall back to endpoint midpoint.
     var mid = (ep1 + ep2) * 0.5;
-    Dbg($"FindCorner  parallel tangents fallback  ep1={P(ep1)}  ep2={P(ep2)}  mid={P(mid)}");
+    Log.Write("vChamfer", $"FindCorner  parallel tangents fallback  ep1={P(ep1)}  ep2={P(ep2)}  mid={P(mid)}");
     return (bestC1s, bestC2s, mid);
   }
 
@@ -259,7 +237,7 @@ public sealed class vChamfer : Command
     var zAxis = Vector3d.CrossProduct(t1, t2);
     if (zAxis.Length < 1e-6)
     {
-      Dbg($"InferChamferPlane  parallel tangents — using CPlane fallback  t1={t1:F4}  t2={t2:F4}");
+      Log.Write("vChamfer", $"InferChamferPlane  parallel tangents — using CPlane fallback  t1={t1:F4}  t2={t2:F4}");
       return fallback;
     }
     zAxis.Unitize();
@@ -268,12 +246,12 @@ public sealed class vChamfer : Command
     var yAxis = Vector3d.CrossProduct(zAxis, xAxis);
     if (!yAxis.Unitize())
     {
-      Dbg($"InferChamferPlane  yAxis degenerate — using CPlane fallback");
+      Log.Write("vChamfer", $"InferChamferPlane  yAxis degenerate — using CPlane fallback");
       return fallback;
     }
 
     var inferred = new Plane(corner, xAxis, yAxis);
-    Dbg($"InferChamferPlane  t1={t1:F4}  t2={t2:F4}  normal={zAxis:F4}  xAxis={xAxis:F4}  yAxis={yAxis:F4}");
+    Log.Write("vChamfer", $"InferChamferPlane  t1={t1:F4}  t2={t2:F4}  normal={zAxis:F4}  xAxis={xAxis:F4}  yAxis={yAxis:F4}");
     return inferred;
   }
 
@@ -308,22 +286,22 @@ public sealed class vChamfer : Command
     double len1 = c1.GetLength();
     double len2 = c2.GetLength();
 
-    if (length >= len1) { Dbg($"ComputeChamfer  length={length:G4} >= c1 len={len1:G4}"); return false; }
-    if (length >= len2) { Dbg($"ComputeChamfer  length={length:G4} >= c2 len={len2:G4}"); return false; }
+    if (length >= len1) { Log.Write("vChamfer", $"ComputeChamfer  length={length:G4} >= c1 len={len1:G4}"); return false; }
+    if (length >= len2) { Log.Write("vChamfer", $"ComputeChamfer  length={length:G4} >= c2 len={len2:G4}"); return false; }
 
     // LengthParameter(s) gives parameter t where arc-length from domain-start to t equals s.
     double seg1 = c1AtStart ? length : (len1 - length);
     double seg2 = c2AtStart ? length : (len2 - length);
 
-    if (!c1.LengthParameter(seg1, out tA)) { Dbg("ComputeChamfer  LengthParameter failed on c1"); return false; }
-    if (!c2.LengthParameter(seg2, out tB)) { Dbg("ComputeChamfer  LengthParameter failed on c2"); return false; }
+    if (!c1.LengthParameter(seg1, out tA)) { Log.Write("vChamfer", "ComputeChamfer  LengthParameter failed on c1"); return false; }
+    if (!c2.LengthParameter(seg2, out tB)) { Log.Write("vChamfer", "ComputeChamfer  LengthParameter failed on c2"); return false; }
 
     ptA = c1.PointAt(tA);
     ptB = c2.PointAt(tB);
 
     if (!ptA.IsValid || !ptB.IsValid) return false;
 
-    Dbg($"ComputeChamfer  OK  length={length:G4}  ptA={P(ptA)}  ptB={P(ptB)}  chamferLen={ptA.DistanceTo(ptB):G4}");
+    Log.Write("vChamfer", $"ComputeChamfer  OK  length={length:G4}  ptA={P(ptA)}  ptB={P(ptB)}  chamferLen={ptA.DistanceTo(ptB):G4}");
     return true;
   }
 
@@ -574,14 +552,13 @@ public sealed class vChamfer : Command
       return Result.Failure;
     }
 
-    DbgInit(doc);
     var click1 = ref1.SelectionPoint();
     var click2 = ref2.SelectionPoint();
-    Dbg($"RunCommand  click1={P(click1.IsValid ? (Point3d?)click1 : null)}  click2={P(click2.IsValid ? (Point3d?)click2 : null)}");
+    Log.Write("vChamfer", $"RunCommand  click1={P(click1.IsValid ? (Point3d?)click1 : null)}  click2={P(click2.IsValid ? (Point3d?)click2 : null)}");
     var (c1AtStart, c2AtStart, corner) = FindCorner(crv1, crv2,
       click1.IsValid ? (Point3d?)click1 : null,
       click2.IsValid ? (Point3d?)click2 : null);
-    Dbg($"RunCommand  corner={P(corner)}  c1AtStart={c1AtStart}  c2AtStart={c2AtStart}");
+    Log.Write("vChamfer", $"RunCommand  corner={P(corner)}  c1AtStart={c1AtStart}  c2AtStart={c2AtStart}");
     var cplane = doc.Views.ActiveView?.ActiveViewport.ConstructionPlane() ?? Plane.WorldXY;
 
     // Extend working copies to the virtual corner so chamfering always works
@@ -603,7 +580,7 @@ public sealed class vChamfer : Command
         : work1.GetLength(new Interval(tClickInit, work1.Domain.Max));
       if (arcFromCorner > RhinoMath.ZeroTolerance)
         runLength = arcFromCorner;
-      Dbg($"RunCommand  click arc-from-corner={arcFromCorner:G4}  runLength={runLength:G4}");
+      Log.Write("vChamfer", $"RunCommand  click arc-from-corner={arcFromCorner:G4}  runLength={runLength:G4}");
     }
 
     if (!ComputeChamfer(work1, c1AtStart, work2, c2AtStart, corner, runLength,
