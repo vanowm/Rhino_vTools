@@ -499,7 +499,8 @@ public sealed class vChamfer : Command
         {
           var pickedPt = get.Point();
 
-          // Compute equidistant gap at click ? chamfer at G_pick - _length (toward corner).
+          // Click at P ? measure equidistant gap G_P at P ? place chamfer at G_P.
+          // _length (stored size) is unchanged; ClearPoint reverts to it.
           if (!work1.ClosestPoint(pickedPt, out double tPick))
           {
             RhinoApp.WriteLine("vChamfer: cannot project point onto curve.");
@@ -513,16 +514,10 @@ public sealed class vChamfer : Command
             RhinoApp.WriteLine("vChamfer: cannot measure gap at that point.");
             continue;
           }
-          double newTargetGap = gPick - _length;
-          if (newTargetGap <= RhinoMath.ZeroTolerance)
-          {
-            RhinoApp.WriteLine($"vChamfer: clicked gap ({gPick:0.##}) ? Length ({_length:0.##}) — pick further out.");
-            continue;
-          }
-          if (!ComputeChamfer(work1, c1AtStart, work2, newTargetGap,
+          if (!ComputeChamfer(work1, c1AtStart, work2, gPick,
                 out var ptANew, out var ptBNew, out var tANew, out var tBNew))
           {
-            RhinoApp.WriteLine("vChamfer: cannot place chamfer at that offset.");
+            RhinoApp.WriteLine("vChamfer: cannot place chamfer at that point.");
             continue;
           }
           tA = tANew; ptA = ptANew;
@@ -584,10 +579,8 @@ public sealed class vChamfer : Command
           // If offset point is active, re-apply it with the new _length.
           if (pointActive && !double.IsNaN(pickedGap))
           {
-            double newTargetGap = pickedGap - _length;
-            if (newTargetGap > RhinoMath.ZeroTolerance
-                && ComputeChamfer(work1, c1AtStart, work2, newTargetGap,
-                                  out ptA, out ptB, out tA, out tB))
+            if (ComputeChamfer(work1, c1AtStart, work2, pickedGap,
+                               out ptA, out ptB, out tA, out tB))
             {
               UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
               recomputed = true;
