@@ -514,13 +514,15 @@ public sealed class vChamfer : Command
                   : work1.GetLength(new Interval(tA, work1.Domain.Max)))
               : 0.0;
 
-          // Scan outward from current chamfer to find the hi bound where perp < _length
+          // Scan outward from current chamfer to find the hi bound where perp < _length.
+          // Use a step ? _length/4 so we don't skip the narrow perp-drop region.
           double ppHi = ppMaxS;
           {
-            double step = Math.Max((ppMaxS - ppSA_init) / 8.0, 1e-4);
-            for (double s = ppSA_init + step; s <= ppMaxS; s += step)
+            double step = Math.Max(Math.Min(_length * 0.25, (ppMaxS - ppSA_init) / 2.0), 1e-4);
+            for (double s = ppSA_init + step; s <= ppMaxS + step * 0.5; s += step)
             {
-              double seg = c1AtStart ? s : (ppLen1 - s);
+              double sc = Math.Min(s, ppMaxS);
+              double seg = c1AtStart ? sc : (ppLen1 - sc);
               if (!work1.LengthParameter(seg, out double tS)) break;
               var ptS = work1.PointAt(tS);
               var tanS = work1.TangentAt(tS);
@@ -529,7 +531,7 @@ public sealed class vChamfer : Command
               var dS = ptBS - ptS; dS.Unitize();
               var rS = pickedPt - ptS;
               double pS = Math.Abs(rS.X * dS.Y - rS.Y * dS.X);
-              if (pS < _length) { ppHi = s; break; }
+              if (pS < _length) { ppHi = sc; break; }
             }
           }
           double ppLo = ppSA_init;
