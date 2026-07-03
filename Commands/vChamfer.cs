@@ -512,38 +512,6 @@ public sealed class vChamfer : Command
             RhinoApp.WriteLine("vChamfer: cannot project onto curve.");
             continue;
           }
-
-          // Refine: binary-search c1 until |click - ptA| = _length exactly.
-          // At ppTA (projection): dist may be ? _length. Find nearest c1 point
-          // at radius _length from click by searching toward/from the foot.
-          work1.ClosestPoint(pickedPt, out double ppTFoot);
-          double ppSinit = c1AtStart
-              ? work1.GetLength(new Interval(work1.Domain.Min, ppTA))
-              : work1.GetLength(new Interval(ppTA, work1.Domain.Max));
-          double ppSfoot = c1AtStart
-              ? work1.GetLength(new Interval(work1.Domain.Min, ppTFoot))
-              : work1.GetLength(new Interval(ppTFoot, work1.Domain.Max));
-          double ppLen1R = work1.GetLength();
-          double ppDistAtInit = pickedPt.DistanceTo(work1.PointAt(ppTA));
-
-          double ppLo = Math.Min(ppSinit, ppSfoot);
-          double ppHi = Math.Max(ppSinit, ppSfoot);
-
-          for (int i = 0; i < 52; i++)
-          {
-            double s = 0.5 * (ppLo + ppHi);
-            double seg = c1AtStart ? s : (ppLen1R - s);
-            if (!work1.LengthParameter(seg, out double tS)) break;
-            double d = pickedPt.DistanceTo(work1.PointAt(tS));
-            // dist decreases from corner side to foot side
-            if (d > _length) ppLo = s; else ppHi = s;
-            if (ppHi - ppLo < 1e-9) break;
-          }
-          double ppSfinal = 0.5 * (ppLo + ppHi);
-          double ppSegFinal = c1AtStart ? ppSfinal : (ppLen1R - ppSfinal);
-          if (work1.LengthParameter(ppSegFinal, out double ppTArefined))
-            ppTA = ppTArefined;
-
           var ppPtA  = work1.PointAt(ppTA);
           var ppTanA = work1.TangentAt(ppTA);
           double ppDistPtoA = pickedPt.DistanceTo(ppPtA);
