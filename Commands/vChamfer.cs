@@ -421,20 +421,9 @@ public sealed class vChamfer : Command
     Curve work1 = ExtendToCorner(crv1, c1AtStart, corner);
     Curve work2 = ExtendToCorner(crv2, c2AtStart, corner);
 
-    // Initial length: gap (closest-point distance) at the selection click on work1.
-    // Gives the correct placement and angle (perpendicular to middle curve) immediately.
+    // Initial length: use stored _length. Click positions are only used for corner detection above.
     double runLength = _length;
-    if (click1.IsValid && work1.ClosestPoint(click1, out double tClickInit))
-    {
-      var ptClickA = work1.PointAt(tClickInit);
-      if (work2.ClosestPoint(ptClickA, out double tClickB))
-      {
-        double clickGap = ptClickA.DistanceTo(work2.PointAt(tClickB));
-        if (clickGap > RhinoMath.ZeroTolerance)
-          runLength = clickGap;
-        Log.Write("vChamfer", $"RunCommand  click gap={clickGap:G4}  runLength={runLength:G4}");
-      }
-    }
+    Log.Write("vChamfer", $"RunCommand  runLength={runLength:G4}");
 
     if (!ComputeChamfer(work1, c1AtStart, work2, runLength,
           out var ptA, out var ptB, out var tA, out var tB))
