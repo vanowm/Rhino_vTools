@@ -338,12 +338,7 @@ public sealed class vChamfer : Command
     ptA = c1.PointAt(tA);
     ptB = c2.PointAt(tB);
 
-    // Cut must lie strictly inside the curve (not at the corner endpoint).
-    const double tol = 1e-10;
-    if ( c1AtStart && tA <= c1.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tA at domain start  tA={tA:G6}  min={c1.Domain.Min:G6}"); return false; }
-    if (!c1AtStart && tA >= c1.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tA at domain end  tA={tA:G6}  max={c1.Domain.Max:G6}");   return false; }
-    if ( c2AtStart && tB <= c2.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tB at domain start  tB={tB:G6}  min={c2.Domain.Min:G6}"); return false; }
-    if (!c2AtStart && tB >= c2.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tB at domain end  tB={tB:G6}  max={c2.Domain.Max:G6}");   return false; }
+    // Cut must lie strictly inside the curve (not at either endpoint).\n    const double tol = 1e-10;\n    // Corner end: zero chamfer\n    if ( c1AtStart && tA <= c1.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tA at corner start  tA={tA:G6}  min={c1.Domain.Min:G6}"); return false; }\n    if (!c1AtStart && tA >= c1.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tA at corner end  tA={tA:G6}  max={c1.Domain.Max:G6}");   return false; }\n    // Far end: chamfer would consume the entire curve (curves too parallel/short)\n    if ( c1AtStart && tA >= c1.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tA at far end — curves too short/parallel  tA={tA:G6}  max={c1.Domain.Max:G6}"); return false; }\n    if (!c1AtStart && tA <= c1.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tA at far end — curves too short/parallel  tA={tA:G6}  min={c1.Domain.Min:G6}"); return false; }\n    if ( c2AtStart && tB <= c2.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tB at corner start  tB={tB:G6}  min={c2.Domain.Min:G6}"); return false; }\n    if (!c2AtStart && tB >= c2.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tB at corner end  tB={tB:G6}  max={c2.Domain.Max:G6}");   return false; }\n    if ( c2AtStart && tB >= c2.Domain.Max - tol) { Log.Write("vChamfer", $"compute  tB at far end — curves too short/parallel  tB={tB:G6}  max={c2.Domain.Max:G6}"); return false; }\n    if (!c2AtStart && tB <= c2.Domain.Min + tol) { Log.Write("vChamfer", $"compute  tB at far end — curves too short/parallel  tB={tB:G6}  min={c2.Domain.Min:G6}"); return false; }
 
     Log.Write("vChamfer", $"compute  OK  ptA={ptA:F4}  ptB={ptB:F4}  chamferLen={ptA.DistanceTo(ptB):G4}");
     return true;
