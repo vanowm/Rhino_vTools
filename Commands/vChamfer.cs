@@ -457,15 +457,17 @@ public sealed class vChamfer : Command
     double runLength = _length;
     Log.Write("vChamfer", $"RunCommand  runLength={runLength:G4}");
 
-    if (!ComputeChamfer(work1, c1AtStart, work2, runLength,
-          out var ptA, out var ptB, out var tA, out var tB))
-    {
-      RhinoApp.WriteLine("vChamfer: cannot compute chamfer for these curves.");
-      return Result.Failure;
-    }
+    ComputeChamfer(work1, c1AtStart, work2, runLength,
+      out var ptA, out var ptB, out var tA, out var tB);
 
     var conduit = new ChamferPreviewConduit();
-    UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
+    if (ptA.IsValid && ptB.IsValid)
+      UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
+    else
+    {
+      conduit.ShowTrim = _trim;
+      RhinoApp.WriteLine("vChamfer: length too large — adjust the Length option.");
+    }
     conduit.Enabled = true;
     doc.Views.Redraw();
 
@@ -557,7 +559,14 @@ public sealed class vChamfer : Command
         }
 
         if (res == GetResult.Nothing)
+        {
+          if (!ptA.IsValid || !ptB.IsValid)
+          {
+            RhinoApp.WriteLine("vChamfer: no valid chamfer — adjust Length first.");
+            continue;
+          }
           break;
+        }
 
         if (res == GetResult.Option && idxClearPoint >= 0 && get.Option()?.Index == idxClearPoint)
         {
@@ -656,6 +665,7 @@ public sealed class vChamfer : Command
     }
 
     // Apply.
+    if (!ptA.IsValid || !ptB.IsValid) return Result.Cancel;
     var hasChamferLine = ptA.DistanceTo(ptB) > doc.ModelAbsoluteTolerance;
     var chamferLineId = hasChamferLine ? doc.Objects.AddLine(ptA, ptB) : Guid.Empty;
 
