@@ -500,79 +500,54 @@ public sealed class vChamfer : Command
           var pickedPt = get.Point();
           Log.Write("vChamfer", $"PointPick  click={P(pickedPt)}  currentPtA={P(ptA.IsValid?(Point3d?)ptA:null)}");
 
-          // Binary search along c1: find arc-length position where the perpendicular
-          // distance from the click to the chamfer line equals _length.
-          // Bound: start from the current chamfer's sA (ppLo) and scan outward until
-          // perp_dist drops below _length, then binary-search that range.
-          double ppLen1 = work1.GetLength();
-          double ppMaxS = Math.Min(ppLen1, work2.GetLength());
+          // Project click onto whichever working curve is closer ? that becomes ptA.
+          // distance(click, ptA) = distToNearerCurve.
+          // ptB via EquidistantGap from ptA.
+          work1.ClosestPoint(pickedPt, out double ppTPick1);
+          work2.ClosestPoint(pickedPt, out double ppTPick2);
+          var ppNear1 = work1.PointAt(ppTPick1);
+          var ppNear2 = work2.PointAt(ppTPick2);
+          double ppD1 = pickedPt.DistanceTo(ppNear1);
+          double ppD2 = pickedPt.DistanceTo(ppNear2);
+          Log.Write("vChamfer", $"PointPick  distWork1={ppD1:G4}  distWork2={ppD2:G4}");
 
-          // sA of current chamfer (ptA already valid from initial compute)
-          double ppSA_init = ptA.IsValid
-              ? (c1AtStart
-                  ? work1.GetLength(new Interval(work1.Domain.Min, tA))
-                  : work1.GetLength(new Interval(tA, work1.Domain.Max)))
-              : 0.0;
-
-          // Scan outward from current chamfer to find the hi bound where perp < _length.
-          // Use a step ? _length/4 so we don't skip the narrow perp-drop region.
-          double ppHi = ppMaxS;
+          Point3d ppPtA; double ppTA; Vector3d ppTanA;
+          if (ppD1 <= ppD2)
           {
-            double step = Math.Max(Math.Min(_length * 0.25, (ppMaxS - ppSA_init) / 2.0), 1e-4);
-            for (double s = ppSA_init + step; s <= ppMaxS + step * 0.5; s += step)
+            ppTA   = ppTPick1;
+            ppPtA  = ppNear1;
+            ppTanA = work1.TangentAt(ppTA);
+            Log.Write("vChamfer", $"PointPick  projOnWork1={P(ppPtA)}  distFromClick={ppD1:G4}");
+          }
+          else
+          {
+            // Click is nearer c2 — find corresponding c1 point via equidistant normal.
+            var ppTanB = work2.TangentAt(ppTPick2);
+            var (ppGfromC2, ppTAfromC2, ppPtAfromC2) = EquidistantGap(ppNear2, ppTanB, work1);
+            if (!double.IsNaN(ppGfromC2) && ppPtAfromC2.IsValid)
             {
-              double sc = Math.Min(s, ppMaxS);
-              double seg = c1AtStart ? sc : (ppLen1 - sc);
-              if (!work1.LengthParameter(seg, out double tS)) break;
-              var ptS = work1.PointAt(tS);
-              var tanS = work1.TangentAt(tS);
-              var (gS, _, ptBS) = EquidistantGap(ptS, tanS, work2);
-              if (double.IsNaN(gS) || !ptBS.IsValid) continue;
-              var dS = ptBS - ptS; dS.Unitize();
-              var rS = pickedPt - ptS;
-              double pS = Math.Abs(rS.X * dS.Y - rS.Y * dS.X);
-              if (pS < _length) { ppHi = sc; break; }
+              if (!work1.ClosestPoint(ppPtAfromC2, out ppTA)) ppTA = ppTPick1;
+              ppPtA  = work1.PointAt(ppTA);
+              ppTanA = work1.TangentAt(ppTA);
+              Log.Write("vChamfer", $"PointPick  projViaC2  c1pt={P(ppPtA)}  gap={ppGfromC2:G4}");
+            }
+            else
+            {
+              ppTA   = ppTPick1;
+              ppPtA  = ppNear1;
+              ppTanA = work1.TangentAt(ppTA);
             }
           }
-          double ppLo = ppSA_init;
-          Point3d ppPtA = Point3d.Unset, ppPtB = Point3d.Unset;
-          double ppTA = double.NaN, ppTB = double.NaN;
 
-          for (int i = 0; i < 52; i++)
-          {
-            double s   = 0.5 * (ppLo + ppHi);
-            double seg = c1AtStart ? s : (ppLen1 - s);
-            if (!work1.LengthParameter(seg, out double tMid)) break;
-            var ptMid  = work1.PointAt(tMid);
-            var tanMid = work1.TangentAt(tMid);
-            var (gMid, _, ptBMid) = EquidistantGap(ptMid, tanMid, work2);
-            if (double.IsNaN(gMid) || !ptBMid.IsValid) { ppHi = s; continue; }
-            var chamferDir = ptBMid - ptMid;
-            if (!chamferDir.Unitize()) { ppHi = s; continue; }
-            var pRel = pickedPt - ptMid;
-            double perp = Math.Abs(pRel.X * chamferDir.Y - pRel.Y * chamferDir.X);
-            if (perp > _length) ppLo = s; else ppHi = s;
-            if (ppHi - ppLo < 1e-9) break;
-          }
-
-          double ppSA   = 0.5 * (ppLo + ppHi);
-          double ppSegA = c1AtStart ? ppSA : (ppLen1 - ppSA);
-          if (!work1.LengthParameter(ppSegA, out ppTA)) { RhinoApp.WriteLine("vChamfer: cannot compute offset."); continue; }
-          ppPtA = work1.PointAt(ppTA);
-          var ppTanA = work1.TangentAt(ppTA);
           var (ppGap, ppTBfinal, ppPtBfinal) = EquidistantGap(ppPtA, ppTanA, work2);
-          if (double.IsNaN(ppGap) || !ppPtBfinal.IsValid) { RhinoApp.WriteLine("vChamfer: cannot find chamfer at offset."); continue; }
-          ppTB = ppTBfinal; ppPtB = ppPtBfinal;
+          if (double.IsNaN(ppGap) || !ppPtBfinal.IsValid) { RhinoApp.WriteLine("vChamfer: cannot find chamfer at that point."); continue; }
 
-          // Verify convergence
-          var ppDir = ppPtB - ppPtA; ppDir.Unitize();
-          var ppRel = pickedPt - ppPtA;
-          double ppPerp = Math.Abs(ppRel.X * ppDir.Y - ppRel.Y * ppDir.X);
-          Log.Write("vChamfer", $"PointPick  sA={ppSA:G4}  gap={ppGap:G4}  perpDist={ppPerp:G4}  target={_length:G4}");
+          double ppDistToClick = pickedPt.DistanceTo(ppPtA);
+          Log.Write("vChamfer", $"PointPick  ptA={P(ppPtA)}  gap={ppGap:G4}  distPtoA={ppDistToClick:G4}  target={_length:G4}");
 
           tA = ppTA; ptA = ppPtA;
-          tB = ppTB; ptB = ppPtB;
-          pickedGap = ppSA;  // store arc-from-corner for Length-change re-apply
+          tB = ppTBfinal; ptB = ppPtBfinal;
+          pickedGap = ppGap;  // store equidistant gap for Length-change re-apply
           pointActive = true;
           UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
           doc.Views.Redraw();
@@ -628,28 +603,16 @@ public sealed class vChamfer : Command
           // If an offset point is active, recompute from the same reference arc position.
           // If offset point is active, Length changed ? perp-dist target changed.
           // Re-run the full perp-dist binary search isn't stored; just recompute
-          // If offset point is active, Length changed ? perp-dist target changed.
-          // Re-run the full perp-dist binary search isn't stored; just recompute
-          // initial placement with new _length (offset point is cleared).
+          // If offset point is active, Length changed ? re-place chamfer at same ptA with new gap.
           if (pointActive && !double.IsNaN(pickedGap))
           {
-            // pickedGap stores the arc-from-corner of the last offset position.
-            // Re-evaluate equidistant gap there and use it.
-            double ppSeg = c1AtStart ? pickedGap : (work1.GetLength() - pickedGap);
-            if (work1.LengthParameter(ppSeg, out double ppTAchg))
+            if (ComputeChamfer(work1, c1AtStart, work2, pickedGap,
+                               out ptA, out ptB, out tA, out tB))
             {
-              var ppPtAchg  = work1.PointAt(ppTAchg);
-              var ppTanAchg = work1.TangentAt(ppTAchg);
-              var (ppGchg, ppTBchg, ppPtBchg) = EquidistantGap(ppPtAchg, ppTanAchg, work2);
-              if (!double.IsNaN(ppGchg) && ppPtBchg.IsValid
-                  && ComputeChamfer(work1, c1AtStart, work2, ppGchg,
-                                    out ptA, out ptB, out tA, out tB))
-              {
-                UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
-                recomputed = true;
-              }
+              UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
+              recomputed = true;
             }
-            if (!recomputed) { conduit.ShowTrim = _trim; }
+            else { conduit.ShowTrim = _trim; }
           }
 
           if (!recomputed)
