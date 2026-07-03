@@ -298,9 +298,10 @@ public sealed class vChamfer : Command
 
     // Solve for arc-length distances s1, s2 from corner to each chamfer point.
     double det = t1x * t2y - t1y * t2x;
-    if (Math.Abs(det) < 1e-12)
+    // Near-parallel tangents (|det| < 0.01 ≈ < ~0.6°): s1/s2 blow up to huge values.
+    if (Math.Abs(det) < 0.01)
     {
-      Log.Write("vChamfer", $"compute  det~0 (anti-parallel in plane)  det={det:G4}");
+      Log.Write("vChamfer", $"compute  nearly-parallel tangents  det={det:G4}  (threshold 0.01)");
       return false;
     }
 
@@ -316,17 +317,28 @@ public sealed class vChamfer : Command
       return false;
     }
 
-    // Walk arc-length s1/s2 from each corner endpoint — more robust than ClosestPoint
-    // for wavy curves where the projected target may have multiple close candidates.
+    // Walk arc-length s1/s2 from each corner endpoint.
+    // Also guard against s1/s2 exceeding curve length: when that happens
+    // d1=0 or d2=0, LengthParameter returns the far-end parameter (wrong side).
     {
       double arcLen1 = c1.GetLength();
-      double d1      = c1AtStart ? s1 : Math.Max(0.0, arcLen1 - s1);
+      if (s1 >= arcLen1)
+      {
+        Log.Write("vChamfer", $"compute  s1={s1:G4} exceeds arcLen1={arcLen1:G4}  c1AtStart={c1AtStart}");
+        return false;
+      }
+      double d1 = c1AtStart ? s1 : arcLen1 - s1;
       if (!c1.LengthParameter(d1, out tA))
         if (!c1.ClosestPoint(corner + s1 * rawT1, out tA)) return false;
     }
     {
       double arcLen2 = c2.GetLength();
-      double d2      = c2AtStart ? s2 : Math.Max(0.0, arcLen2 - s2);
+      if (s2 >= arcLen2)
+      {
+        Log.Write("vChamfer", $"compute  s2={s2:G4} exceeds arcLen2={arcLen2:G4}  c2AtStart={c2AtStart}");
+        return false;
+      }
+      double d2 = c2AtStart ? s2 : arcLen2 - s2;
       if (!c2.LengthParameter(d2, out tB))
         if (!c2.ClosestPoint(corner + s2 * rawT2, out tB)) return false;
     }
