@@ -535,7 +535,16 @@ public sealed class vChamfer : Command
             RhinoApp.WriteLine("vChamfer: cannot measure gap at that point.");
             continue;
           }
-          if (!ComputeChamfer(work1, c1AtStart, work2, gPick,
+
+          // Chamfer is placed _length toward the corner from the click reference.
+          double newTargetGap = gPick - _length;
+          Log.Write("vChamfer", $"PointPick  newTargetGap={newTargetGap:G4}");
+          if (newTargetGap <= RhinoMath.ZeroTolerance)
+          {
+            RhinoApp.WriteLine($"vChamfer: reference too close to corner (gap {gPick:0.###} \u2264 Length {_length:0.###}) \u2014 pick farther out.");
+            continue;
+          }
+          if (!ComputeChamfer(work1, c1AtStart, work2, newTargetGap,
                 out var ptANew, out var ptBNew, out var tANew, out var tBNew))
           {
             RhinoApp.WriteLine("vChamfer: cannot place chamfer at that point.");
@@ -543,7 +552,7 @@ public sealed class vChamfer : Command
           }
           tA = tANew; ptA = ptANew;
           tB = tBNew; ptB = ptBNew;
-          pickedGap = gPick;
+          pickedGap = gPick;       // store G_click so Length-change can re-apply: G_click - new_length
           pointActive = true;
           UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
           doc.Views.Redraw();
@@ -600,8 +609,10 @@ public sealed class vChamfer : Command
           // If offset point is active, re-apply it with the new _length.
           if (pointActive && !double.IsNaN(pickedGap))
           {
-            if (ComputeChamfer(work1, c1AtStart, work2, pickedGap,
-                               out ptA, out ptB, out tA, out tB))
+            double newTargetGap = pickedGap - _length;
+            if (newTargetGap > RhinoMath.ZeroTolerance
+                && ComputeChamfer(work1, c1AtStart, work2, newTargetGap,
+                                  out ptA, out ptB, out tA, out tB))
             {
               UpdateConduit(conduit, crv1, work1, c1AtStart, crv2, work2, c2AtStart, tA, tB, ptA, ptB);
               recomputed = true;
