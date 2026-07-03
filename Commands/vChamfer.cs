@@ -392,7 +392,7 @@ public sealed class vChamfer : Command
     var work1End = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
     conduit.Ext1 = crv1End.DistanceTo(work1End) > 1e-6
       ? !_trim
-          ? new Line(crv1End, work1End)
+          ? crv1End.DistanceTo(ptA) > 1e-6 ? new Line(crv1End, ptA) : (Line?)null
           : conduit.CutOff1 == null && crv1End.DistanceTo(ptA) > 1e-6
               ? new Line(crv1End, ptA)
               : (Line?)null
@@ -402,7 +402,7 @@ public sealed class vChamfer : Command
     var work2End = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
     conduit.Ext2 = crv2End.DistanceTo(work2End) > 1e-6
       ? !_trim
-          ? new Line(crv2End, work2End)
+          ? crv2End.DistanceTo(ptB) > 1e-6 ? new Line(crv2End, ptB) : (Line?)null
           : conduit.CutOff2 == null && crv2End.DistanceTo(ptB) > 1e-6
               ? new Line(crv2End, ptB)
               : (Line?)null
@@ -599,13 +599,15 @@ public sealed class vChamfer : Command
     {
       var c1CornerEnd = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
       var w1CornerEnd = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
-      if (c1CornerEnd.DistanceTo(w1CornerEnd) > doc.ModelAbsoluteTolerance)
-        doc.Objects.AddLine(c1CornerEnd, w1CornerEnd);
+      if (c1CornerEnd.DistanceTo(w1CornerEnd) > doc.ModelAbsoluteTolerance
+          && c1CornerEnd.DistanceTo(ptA) > doc.ModelAbsoluteTolerance)
+        doc.Objects.AddLine(c1CornerEnd, ptA);
 
       var c2CornerEnd = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
       var w2CornerEnd = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
-      if (c2CornerEnd.DistanceTo(w2CornerEnd) > doc.ModelAbsoluteTolerance)
-        doc.Objects.AddLine(c2CornerEnd, w2CornerEnd);
+      if (c2CornerEnd.DistanceTo(w2CornerEnd) > doc.ModelAbsoluteTolerance
+          && c2CornerEnd.DistanceTo(ptB) > doc.ModelAbsoluteTolerance)
+        doc.Objects.AddLine(c2CornerEnd, ptB);
     }
 
     if (_trim)
