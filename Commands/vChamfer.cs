@@ -645,23 +645,34 @@ public sealed class vChamfer : Command
 
     // Apply.
     if (!ptA.IsValid || !ptB.IsValid) return Result.Cancel;
+
+    // If input curves share a group, new geometry (chamfer line, extension stubs) inherits it.
+    var groupList1 = ref1.Object()?.Attributes.GetGroupList() ?? Array.Empty<int>();
+    var groupList2 = ref2.Object()?.Attributes.GetGroupList() ?? Array.Empty<int>();
+    int sharedGroup = -1;
+    foreach (var g in groupList1)
+      if (Array.IndexOf(groupList2, g) >= 0) { sharedGroup = g; break; }
+    if (sharedGroup < 0 && groupList1.Length > 0) sharedGroup = groupList1[0];
+
     var hasChamferLine = ptA.DistanceTo(ptB) > doc.ModelAbsoluteTolerance;
     var chamferLineId = hasChamferLine ? doc.Objects.AddLine(ptA, ptB) : Guid.Empty;
 
     // With Trim=No, add extension lines for any gap between curve ends and virtual corner.
+    var ext1Id = Guid.Empty;
+    var ext2Id = Guid.Empty;
     if (!_trim)
     {
       var c1CornerEnd = c1AtStart ? crv1.PointAtStart : crv1.PointAtEnd;
       var w1CornerEnd = c1AtStart ? work1.PointAtStart : work1.PointAtEnd;
       if (c1CornerEnd.DistanceTo(w1CornerEnd) > doc.ModelAbsoluteTolerance
           && c1CornerEnd.DistanceTo(ptA) > doc.ModelAbsoluteTolerance)
-        doc.Objects.AddLine(c1CornerEnd, ptA);
+        ext1Id = doc.Objects.AddLine(c1CornerEnd, ptA);
 
       var c2CornerEnd = c2AtStart ? crv2.PointAtStart : crv2.PointAtEnd;
       var w2CornerEnd = c2AtStart ? work2.PointAtStart : work2.PointAtEnd;
       if (c2CornerEnd.DistanceTo(w2CornerEnd) > doc.ModelAbsoluteTolerance
           && c2CornerEnd.DistanceTo(ptB) > doc.ModelAbsoluteTolerance)
-        doc.Objects.AddLine(c2CornerEnd, ptB);
+        ext2Id = doc.Objects.AddLine(c2CornerEnd, ptB);
     }
 
     if (_trim)
@@ -697,9 +708,19 @@ public sealed class vChamfer : Command
             doc.Objects.Delete(chamferLineId, quiet: true);
           doc.Objects.Replace(ref1.ObjectId, joined[0]);
           doc.Objects.Delete(ref2.ObjectId, quiet: true);
+          chamferLineId = Guid.Empty;  // consumed by join
         }
         // If join failed (not contiguous), leave the three separate objects.
       }
+    }
+
+    // If input curves were in a group, add any new standalone geometry to the same group.
+    if (sharedGroup >= 0)
+    {
+      if (chamferLineId != Guid.Empty)
+        doc.Groups.AddToGroup(sharedGroup, chamferLineId);
+      if (ext1Id != Guid.Empty) doc.Groups.AddToGroup(sharedGroup, ext1Id);
+      if (ext2Id != Guid.Empty) doc.Groups.AddToGroup(sharedGroup, ext2Id);
     }
 
     SaveOptions();
