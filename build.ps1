@@ -100,6 +100,20 @@ if ($configSnap -ne $null -and (Test-Path $configDst)) {
     }
 }
 
+# Update README.md version header to match the built DLL.
+if (Test-Path $dllPath) {
+    $builtVer = (Get-Item $dllPath).VersionInfo.FileVersion
+    $readmePath = 'README.md'
+    if ($builtVer -and (Test-Path $readmePath)) {
+        $rmContent = Get-Content $readmePath -Raw -Encoding utf8
+        $rmUpdated = $rmContent -replace '(?m)^(# vTools\s+\u00b7\s+v)[\d.]+', "`${1}$builtVer"
+        if ($rmUpdated -ne $rmContent) {
+            Set-Content -Path $readmePath -Value $rmUpdated -NoNewline -Encoding utf8
+            Write-Host "README version updated to v$builtVer." -ForegroundColor Cyan
+        }
+    }
+}
+
 # Commit only when build succeeded and DLL was actually updated
 $dllTimeAfter = if (Test-Path $dllPath) { (Get-Item $dllPath).LastWriteTime } else { $null }
 $dllUpdated = ($dllTimeAfter -ne $null) -and ($dllTimeAfter -ne $dllTimeBefore)
