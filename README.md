@@ -6,40 +6,41 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 
 - Rhino plug-in entry point: vToolsPlugIn
 - Native commands:
-  - [vBiminiParts](#vbiminiparts-flow) *(26.5.23.106)* — builds bimini cover pocket parts (facings, main pocket, secondary pockets, center reference line) from a selected boundary curve; pipe size configures pocket depths
-  - [vChamfer](#vchamfer-flow) *(26.5.7.723)* — cuts a corner formed by two curves with a straight line perpendicular to the angle bisector at a specified cut length
+  - [vAxesToggle](#vaxestoggle-flow) *(26.6.22.1811)* — toggles visible viewport axes (grid/construction axes plus display-mode Z axis)
+  - [vBiminiParts](#vbiminiparts-flow) *(26.5.21.1827)* — builds bimini cover pocket parts (facings, main pocket, secondary pockets, center reference line) from a selected boundary curve; pipe size configures pocket depths
+  - [vChamfer](#vchamfer-flow) *(26.5.7.723)* — adds a chamfer line perpendicular to the middle curve at an equidistant gap; places the chamfer where the gap between two diverging curves equals the specified length
   - [vCurveToSpline](#vcurvetospline-flow) *(26.4.24.934)* — converts selected curves to interpolated splines with join modes
   - [vDiamonds](#vdiamonds-flow) *(26.5.14.928)* — draws an argyle diamond pattern with optional bounding rectangle and size/count labels; supports BySize centering mode
   - [vFacing](#vfacing-flow) *(26.5.29.1333)* — builds a four-piece closed facing boundary from a base curve and two side curves by offsetting the base inward by a specified size; collects inside objects and places the result with a DynamicDraw preview
   - [vFitBox](#vfitbox-flow) *(26.4.24.934)* — finds the minimum bounding box for selected objects by optimizing rotation angle
-  - [vGroup](#vgroup-flow) *(26.5.27.1525)* — groups selected objects by closed-curve boundaries; each boundary is grouped with the objects inside it
+  - [vGroup](#vgroup-flow) *(26.5.27.1300)* — groups selected objects by closed-curve boundaries; each boundary is grouped with the objects inside it
   - [vLine](#vline-flow) *(26.4.27.2125)* — draws lines with chain modes, angle lock, length constraint, and perp/tangent endpoint solving
   - [vLineLength](#vlinelength-flow) *(26.4.27.2125)* — resizes an open curve to a target total, additive, or subtractive length
-  - [vMatch](#vmatch-flow) *(26.6.-)* — click near an edge-mate dot produced by vUnrollSrf to align the neighbouring flat part; Auto mode assembles a whole BFS selection with optional randomisation
-  - [vMiddleCurve](#vmiddlecurve-flow) *(26.4.27.2125)* — creates an interpolated curve equidistant between two selected curves
-  - [vNotches](#vnotches-flow) *(26.6.1.1725)* — places perpendicular notch marks along one or two selected curves at clicked positions; a floating panel controls notch type, dimensions, optional label, and per-curve side/reverse settings
-  - [vOffset](#voffset-flow) *(26.4.27.2125)* — runs built-in Offset in a continuous loop, clearing selection after each run
+  - [vMatch](#vmatch-flow) *(26.7.1.1535)* — click near an edge-mate dot produced by vUnrollSrf to align the neighbouring flat part; Auto mode assembles a whole BFS selection with optional randomisation
+  - [vMiddleCurve](#vmiddlecurve-flow) *(26.4.27.2243)* — creates an interpolated curve equidistant between two selected curves
+  - [vNotches](#vnotches-flow) *(26.6.1.1529)* — places perpendicular notch marks along one or two selected curves at clicked positions; a floating panel controls notch type, dimensions, optional label, and per-curve side/reverse settings
+  - [vOffset](#voffset-flow) *(26.4.27.2243)* — runs built-in Offset in a continuous loop, clearing selection after each run
   - [vOrient2pt](#vorient2pt-flow) *(26.4.24.934)* — orients objects from a source two-point frame to a target two-point frame
   - [vOrient3pt](#vorient3pt-flow) *(26.4.24.934)* — orients objects from a source three-point frame to a target three-point frame; intermediate points are optional (Enter at src2 = 1-point translate, Enter at src3 = 2-point orient)
-  - [vPart](#vpart-flow) *(26.5.19.1928)* — captures a closed perimeter from selected curves (gaps are bridged automatically), collects all visible objects inside the perimeter (curves trimmed at the boundary; other types included whole), and lets the user place the resulting Part with a full preview
+  - [vPart](#vpart-flow) *(26.5.18.1742)* — captures a closed perimeter from selected curves (gaps are bridged automatically), collects all visible objects inside the perimeter (curves trimmed at the boundary; other types included whole), and lets the user place the resulting Part with a full preview
   - [vPerpendicularTo](#vperpendicularto-flow) *(26.5.5.757)* — rotates curve A about its nearest endpoint so it is perpendicular to curve B in the active CPlane
   - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.4.27.2109)* — places points projected onto the closest surface normal evaluation point
-  - [vPointTrace](#vpointtrace-flow) *(26.4.24.934)* — maps arc-length positions from a source curve onto a destination curve: pick points along the source and a corresponding point is placed on the destination at the same proportional arc-length position
-  - [vRectangle](#vrectangle-flow) *(26.4.27.2125)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
+  - [vPointTrace](#vpointtrace-flow) *(26.4.30.1044)* — maps arc-length positions from a source curve onto a destination curve: pick points along the source and a corresponding point is placed on the destination at the same proportional arc-length position
+  - [vRectangle](#vrectangle-flow) *(26.4.27.2259)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
   - [vSetPt](#vsetpt-flow) *(26.5.28.1145)* — aligns the closest-together endpoints of selected open curves to a user-specified location using the built-in SetPt
   - [vSplitAtCorners](#vsplitatcorners-flow) *(26.4.27.2125)* — splits curves at detected corners with interactive per-corner toggle preview
   - [vTangent](#vtangent-flow) *(26.5.5.757)* — moves a curve rigidly so one or both endpoints align tangentially to selected driver curves
   - [vTextAligned](#vtextaligned-flow) *(26.4.27.2125)* — places or repositions annotation text aligned and offset along a selected curve
   - [vTextFlip](#vtextflip-flow) *(26.4.27.2125)* — flips or rotates annotation text around its object plane
-  - [vTitle](#vtitle-flow) *(26.6.-)* — places or edits a titled annotation text box with optional bounding rectangle; hover to highlight, click existing to edit
+  - [vTitle](#vtitle-flow) *(26.7.1.1755)* — places or edits a titled annotation text box with optional bounding rectangle; hover to highlight, click existing to edit
   - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.4.24.1712)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
   - [vTrim](#vtrim-flow) *(26.4.24.1633)* — trims and extends curves with auto-cutter detection and join
-  - [vTrimOff](#vtrimoff-flow) *(26.5.19.1928)* — trims selected curves to the outer boundary of the enclosed region they collectively form; protruding ends are removed automatically
-  - [vUnrollSrf](#vunrollsrf-flow) *(26.5.19.1937)* — runs the built-in UnrollSrf command and automatically selects all newly created flat objects on completion; TextDot labels are included only when their position touches a newly created flat object (3D-surface correspondence labels are excluded)
+  - [vTrimOff](#vtrimoff-flow) *(26.5.18.849)* — trims selected curves to the outer boundary of the enclosed region they collectively form; protruding ends are removed automatically
+  - [vUnrollSrf](#vunrollsrf-flow) *(26.5.19.1918)* — runs the built-in UnrollSrf command and automatically selects all newly created flat objects on completion; TextDot labels are included only when their position touches a newly created flat object (3D-surface correspondence labels are excluded)
   - [vUzip](#vuzip-flow) *(26.4.24.934)* — full U-zip workflow in one command: selects three U-shape arm curves, computes the inward-offset center curve with fillet, and optionally produces glass, vis, and parts output with label and tail settings
-  - [vUzipCenter](#vuzipcenter-flow) *(26.5.1.2200)* — offsets a U-shape's three curves inward, fillets the inside corners, and produces a single joined open curve
-  - [vUzipParts](#vuzipparts-flow) *(26.4.24.934)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
+  - [vUzipCenter](#vuzipcenter-flow) *(26.5.1.1903)* — offsets a U-shape's three curves inward, fillets the inside corners, and produces a single joined open curve
+  - [vUzipParts](#vuzipparts-flow) *(26.5.8.1249)* — creates U-zip parts from a center curve into labeled reference, plot, and cut output groups
 - Shared command configuration file: vTools.config.json
 - Runtime command diagnostics in a local logs folder
 
