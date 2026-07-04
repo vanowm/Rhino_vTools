@@ -100,16 +100,71 @@ if ($configSnap -ne $null -and (Test-Path $configDst)) {
     }
 }
 
-# Update README.md version header to match the built DLL.
+# ── README maintenance ────────────────────────────────────────────────────────
+# Helper: write text without BOM (PowerShell Set-Content always adds BOM for utf8).
+function Write-Utf8NoBom([string]$path, [string]$text) {
+    $enc = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $enc)
+}
+
 if (Test-Path $dllPath) {
-    $builtVer = (Get-Item $dllPath).VersionInfo.FileVersion
+    $builtVer  = (Get-Item $dllPath).VersionInfo.FileVersion
     $readmePath = 'README.md'
     if ($builtVer -and (Test-Path $readmePath)) {
-        $rmContent = Get-Content $readmePath -Raw -Encoding utf8
+        $rmContent = [System.IO.File]::ReadAllText((Resolve-Path $readmePath))
+
+        # 1. Update version header.
         $rmUpdated = $rmContent -replace '(?m)^(# vTools\s+\u00b7\s+v)[\d.]+', "`${1}$builtVer"
+
+        # 2. Auto-insert newly added Commands\v*.cs files into README lists.
+        #    Detect files added since the last commit (git status --porcelain).
+        $newCmds = git diff --cached --name-only --diff-filter=A -- 'Commands/v*.cs' 2>$null
+        if (-not $newCmds) {
+            # Also check unstaged new files.
+            $newCmds = git status --porcelain -- 'Commands/v*.cs' 2>$null |
+                       Where-Object { $_ -match '^\?\?' } |
+                       ForEach-Object { ($_ -replace '^\?\?\s+','') }
+        }
+        foreach ($f in $newCmds) {
+            $cmdName = [System.IO.Path]::GetFileNameWithoutExtension($f)
+            if (-not $cmdName -or -not $cmdName.StartsWith('v')) { continue }
+            $anchor = $cmdName.ToLower()
+            $entry  = "  - [$cmdName](#$anchor-flow) *($builtVer)* — TODO: add description"
+            $link   = "[$cmdName](#$anchor-flow)"
+
+            # Bullet list: insert alphabetically inside the "- Native commands:" block.
+            if ($rmUpdated -notmatch [regex]::Escape($link)) {
+                $rmUpdated = $rmUpdated -replace '(?m)(^  - \[v[A-Za-z]+\].*\n)(  - \[v[A-Za-z]+\])' , {
+                    param($m)
+                    $before = $m.Groups[1].Value
+                    $next   = $m.Groups[2].Value
+                    $prevCmd = ([regex]::Match($before, '\[v([A-Za-z]+)\]')).Groups[1].Value
+                    $nextCmd = ([regex]::Match($next,   '\[v([A-Za-z]+)\]')).Groups[1].Value
+                    if ([string]::Compare($prevCmd, $cmdName.Substring(1), $true) -lt 0 -and
+                        [string]::Compare($cmdName.Substring(1), $nextCmd, $true) -le 0) {
+                        "$before$entry`n$next"
+                    } else { $m.Value }
+                }
+                # Inline link list: insert alphabetically.
+                $rmUpdated = $rmUpdated -replace "(?<=\[$cmdName.+?\], )\[v" , "[$cmdName](#$anchor-flow), [v" # noop if not matched
+                $rmUpdated = $rmUpdated -replace '(\[v[A-Za-z]+\]\(#[^)]+\))(, \[v[A-Za-z]+\]\(#[^)]+\))' , {
+                    param($m)
+                    $prevCmd = ([regex]::Match($m.Groups[1].Value, '\[v([A-Za-z]+)\]')).Groups[1].Value
+                    $nextCmd = ([regex]::Match($m.Groups[2].Value, '\[v([A-Za-z]+)\]')).Groups[1].Value
+                    if ([string]::Compare($prevCmd, $cmdName.Substring(1), $true) -lt 0 -and
+                        [string]::Compare($cmdName.Substring(1), $nextCmd, $true) -le 0) {
+                        "$($m.Groups[1].Value), $link$($m.Groups[2].Value)"
+                    } else { $m.Value }
+                }
+                Write-Host "README: inserted placeholder for $cmdName." -ForegroundColor Cyan
+            }
+        }
+
         if ($rmUpdated -ne $rmContent) {
-            Set-Content -Path $readmePath -Value $rmUpdated -NoNewline -Encoding utf8
-            Write-Host "README version updated to v$builtVer." -ForegroundColor Cyan
+            Write-Utf8NoBom $readmePath $rmUpdated
+            if ($rmUpdated -match "v$([regex]::Escape($builtVer))") {
+                Write-Host "README updated (v$builtVer)." -ForegroundColor Cyan
+            }
         }
     }
 }
