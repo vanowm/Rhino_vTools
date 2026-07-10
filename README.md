@@ -26,7 +26,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vPart](#vpart-flow) *(26.5.18.1742)* — captures a closed perimeter from selected curves (gaps are bridged automatically), collects all visible objects inside the perimeter (curves trimmed at the boundary; other types included whole), and lets the user place the resulting Part with a full preview
   - [vPerpendicularTo](#vperpendicularto-flow) *(26.5.5.757)* — rotates curve A about its nearest endpoint so it is perpendicular to curve B in the active CPlane
   - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.4.27.2109)* — places points projected onto the closest surface normal evaluation point
-  - [vPointTrace](#vpointtrace-flow) *(26.4.30.1044)* — maps arc-length positions from a source curve onto a destination curve: pick points along the source and a corresponding point is placed on the destination at the same proportional arc-length position
+  - [vPointTrace](#vpointtrace-flow) *(26.7.10.1332)* — maps arc-length positions from a source curve onto a destination curve: pick points along the source and a corresponding point is placed on the destination at the same proportional arc-length position
   - [vRectangle](#vrectangle-flow) *(26.4.27.2259)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
   - [vSetPt](#vsetpt-flow) *(26.5.28.1145)* — aligns the closest-together endpoints of selected open curves to a user-specified location using the built-in SetPt
@@ -390,6 +390,7 @@ Behavior:
 1. Run `vPointTrace`.
 1. Click the source curve near the end you want to treat as the start.
 1. Click the destination curve near the end you want to treat as the start.
+1. Source and destination curves are highlighted but left unselected.
 1. Pick points constrained to the source curve; a corresponding point is added on the destination at the same arc-length fraction.
 1. A green dot previews the destination point while moving along the source.
 1. Press Enter to finish.

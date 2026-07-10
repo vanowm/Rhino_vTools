@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Rhino;
 using Rhino.Commands;
 using Rhino.DocObjects;
@@ -26,6 +27,8 @@ public sealed class vPointTrace : Command
   /// </summary>
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
+    var highlightedIds = new HashSet<Guid>();
+
     // ── Pick source curve ────────────────────────────────────────────────────
     var goSource = new GetObject();
     goSource.SetCommandPrompt("Select source curve at starting end");
@@ -36,11 +39,14 @@ public sealed class vPointTrace : Command
     if (goSource.Get() != GetResult.Object || goSource.CommandResult() != Result.Success)
       return Result.Cancel;
 
-    var sourceCurve = goSource.Object(0).Curve();
+    var sourceRef = goSource.Object(0);
+    var sourceCurve = sourceRef.Curve();
     if (sourceCurve == null)
       return Result.Failure;
 
-    var sourceSelPt = goSource.Object(0).SelectionPoint();
+    HighlightPickedObject(doc, sourceRef, highlightedIds);
+
+    var sourceSelPt = sourceRef.SelectionPoint();
     sourceCurve = OrientFromSelectionPoint(sourceCurve, sourceSelPt);
 
     // ── Pick destination curve ───────────────────────────────────────────────
@@ -51,16 +57,25 @@ public sealed class vPointTrace : Command
     goDest.EnablePreSelect(false, true);
 
     if (goDest.Get() != GetResult.Object || goDest.CommandResult() != Result.Success)
+    {
+      HighlightObjects(doc, highlightedIds, false);
       return Result.Cancel;
+    }
 
-    var destCurve = goDest.Object(0).Curve();
+    var destRef = goDest.Object(0);
+    var destCurve = destRef.Curve();
     if (destCurve == null)
+    {
+      HighlightObjects(doc, highlightedIds, false);
       return Result.Failure;
+    }
+
+    HighlightPickedObject(doc, destRef, highlightedIds);
 
     // Inherit the destination curve's group so added points join it.
-    var destGroupList = goDest.Object(0).Object()?.Attributes.GetGroupList() ?? Array.Empty<int>();
+    var destGroupList = destRef.Object()?.Attributes.GetGroupList() ?? Array.Empty<int>();
 
-    var destSelPt = goDest.Object(0).SelectionPoint();
+    var destSelPt = destRef.SelectionPoint();
     destCurve = OrientFromSelectionPoint(destCurve, destSelPt);
 
     var destLength = destCurve.GetLength();
@@ -110,8 +125,28 @@ public sealed class vPointTrace : Command
         doc.Objects.AddPoint(destPt.Value);
     }
 
-    doc.Views.Redraw();
+    HighlightObjects(doc, highlightedIds, false);
     return Result.Success;
+  }
+
+  private static void HighlightPickedObject(RhinoDoc doc, ObjRef objRef, ISet<Guid> highlightedIds)
+  {
+    var obj = objRef.Object();
+    if (obj == null)
+      return;
+
+    obj.Select(false);
+    obj.Highlight(true);
+    highlightedIds.Add(obj.Id);
+    doc.Views.Redraw();
+  }
+
+  private static void HighlightObjects(RhinoDoc doc, IEnumerable<Guid> ids, bool state)
+  {
+    foreach (var id in ids)
+      doc.Objects.FindId(id)?.Highlight(state);
+
+    doc.Views.Redraw();
   }
 
   /// <summary>
