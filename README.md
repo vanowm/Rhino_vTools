@@ -30,7 +30,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vRectangle](#vrectangle-flow) *(26.4.27.2259)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
   - [vSetPt](#vsetpt-flow) *(26.5.28.1145)* — aligns the closest-together endpoints of selected open curves to a user-specified location using the built-in SetPt
-  - [vSplit](#vsplit-flow) *(26.7.9.1645)* — interactively splits selected curves at picked points with red point preview and Undo/Redo
+  - [vSplit](#vsplit-flow) *(26.7.10.1531)* — interactively splits selected curves at picked points with red point preview, cyan remove preview, point snapping, and Undo/Redo
   - [vSplitAtCorners](#vsplitatcorners-flow) *(26.4.27.2125)* — splits curves at detected corners with interactive per-corner toggle preview
   - [vTangent](#vtangent-flow) *(26.5.5.757)* — moves a curve rigidly so one or both endpoints align tangentially to selected driver curves
   - [vTextAligned](#vtextaligned-flow) *(26.4.27.2125)* — places or repositions annotation text aligned and offset along a selected curve
@@ -428,7 +428,8 @@ Behavior:
 
 1. Run `vSplit`.
 1. Select curves to split.
-1. Click near selected curves to add red split-point markers; click an existing marker to remove it.
+1. Click near selected curves to add red split-point markers; point picking is constrained to the chosen curves.
+1. Existing split markers are snap points; hover one to preview it in cyan, then click to remove it.
 1. Press Enter to apply splitting and replace the original curves with split pieces.
 1. Options:
 
