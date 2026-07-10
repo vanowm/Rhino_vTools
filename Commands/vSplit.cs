@@ -827,14 +827,11 @@ public sealed class vSplit : Command
         {
           foreach (var parameter in target.Parameters)
           {
-            if (!IsRemovePreview(target, parameter))
-              continue;
-
             e.Display.DrawPoint(
               target.Curve.PointAt(parameter),
               PointStyle.RoundSimple,
               PointSize,
-              RemovePointColor);
+              IsRemovePreview(target, parameter) ? RemovePointColor : SetPointColor);
           }
         }
       }
