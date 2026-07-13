@@ -13,13 +13,14 @@ using Rhino.Input.Custom;
 namespace vTools.Commands;
 
 /// <summary>
-/// Native interactive split-at-picked-points command ported from splitAt.py.
+/// Native interactive split-at-picked-points command.
 /// </summary>
 public sealed class vSplit : Command
 {
   private const string OptionsSectionName = "vSplit";
   private const string GripsKey = "grips";
-  private const int PointSize = 3;
+  private const int DefaultPointRadius = 5;
+  private const int PointOutlineWidth = 1;
 
   private static readonly Color SetPointColor = Color.Red;
   private static readonly Color RemovePointColor = Color.Cyan;
@@ -30,8 +31,9 @@ public sealed class vSplit : Command
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     var showGrips = LoadPersistedGrips();
+    var gripSnapshot = CurveGripSnapshot(doc);
 
-    var targets = GetTargetCurves(doc);
+    var targets = GetTargetCurves(doc, gripSnapshot);
     if (targets == null || targets.Count == 0)
       return Result.Cancel;
 
@@ -78,10 +80,35 @@ public sealed class vSplit : Command
     return doc.Objects.AddPoint(point, SplitPointAttributes(SetPointColor));
   }
 
+  private static (int OutlineRadius, int FillRadius) DisplayPointRadii(DisplayPipeline display)
+  {
+    var radius = DefaultPointRadius;
+    try
+    {
+      var attributes = display.DisplayPipelineAttributes;
+      radius = (int)Math.Round(attributes.PointRadius);
+    }
+    catch
+    {
+    }
+
+    var outlineRadius = Math.Max(radius, 1);
+    return (outlineRadius, Math.Max(outlineRadius - PointOutlineWidth, 1));
+  }
+
   private static void DrawSplitPoint(DisplayPipeline display, Point3d point, Color fillColor)
   {
-    display.DrawPoint(point, PointStyle.RoundSimple, PointSize, PointOutlineColor);
-    display.DrawPoint(point, PointStyle.RoundSimple, Math.Max(1, PointSize - 1), fillColor);
+    DrawSplitPoint(display, point, fillColor, DisplayPointRadii(display));
+  }
+
+  private static void DrawSplitPoint(
+    DisplayPipeline display,
+    Point3d point,
+    Color fillColor,
+    (int OutlineRadius, int FillRadius) radii)
+  {
+    display.DrawPoint(point, PointStyle.RoundSimple, radii.OutlineRadius, PointOutlineColor);
+    display.DrawPoint(point, PointStyle.RoundSimple, radii.FillRadius, fillColor);
   }
 
   private static void DeleteSplitPointObjects(RhinoDoc doc, IEnumerable<SplitTarget> targets)
@@ -115,6 +142,29 @@ public sealed class vSplit : Command
     catch { /* ignored */ }
 
     return Math.Max(Math.Max(ModelTolerance(doc) * 4.0, length * 1e-8), 1e-6);
+  }
+
+  private static Dictionary<Guid, bool> CurveGripSnapshot(RhinoDoc doc)
+  {
+    var states = new Dictionary<Guid, bool>();
+    try
+    {
+      var settings = new ObjectEnumeratorSettings
+      {
+        ObjectTypeFilter = ObjectType.Curve
+      };
+
+      foreach (var rhObj in doc.Objects.GetObjectList(settings))
+      {
+        try { states[rhObj.Id] = rhObj.GripsOn; }
+        catch { }
+      }
+    }
+    catch
+    {
+    }
+
+    return states;
   }
 
   private static List<Curve> SplitClosedCurveForConstraint(Curve curve)
@@ -257,6 +307,24 @@ public sealed class vSplit : Command
     }
   }
 
+  private static Point3d? CurrentPickPoint(GetPoint? source, Point3d fallbackPoint)
+  {
+    if (source != null)
+    {
+      try
+      {
+        var point = source.Point();
+        if (point.IsValid)
+          return point;
+      }
+      catch
+      {
+      }
+    }
+
+    return fallbackPoint.IsValid ? fallbackPoint : null;
+  }
+
   private static void AddSplitPointSnaps(GetPoint gp, IEnumerable<SplitTarget> targets)
   {
     var addSnapPoint = typeof(GetPoint).GetMethod("AddSnapPoint", new[] { typeof(Point3d) });
@@ -299,7 +367,7 @@ public sealed class vSplit : Command
     }
   }
 
-  private static List<SplitTarget>? GetTargetCurves(RhinoDoc doc)
+  private static List<SplitTarget>? GetTargetCurves(RhinoDoc doc, IReadOnlyDictionary<Guid, bool> gripSnapshot)
   {
     var go = new GetObject();
     go.SetCommandPrompt("Select curves to split");
@@ -328,12 +396,16 @@ public sealed class vSplit : Command
       if (duplicate == null)
         continue;
 
+      var initialGrips = gripSnapshot.TryGetValue(rhObj.Id, out var snapshotGrips)
+        ? snapshotGrips
+        : rhObj.GripsOn;
+
       targets.Add(new SplitTarget(
         doc,
         rhObj.Id,
         duplicate,
         rhObj.Attributes?.Duplicate(),
-        rhObj.GripsOn));
+        initialGrips));
     }
 
     if (targets.Count == 0)
@@ -550,24 +622,33 @@ public sealed class vSplit : Command
 
         var gripsOption = new OptionToggle(showGrips, "Hide", "Show");
         gp.AddOptionToggle("Grips", ref gripsOption);
-        var undoOptionIndex = gp.AddOption("Undo", string.Empty, true);
-        var redoOptionIndex = gp.AddOption("Redo", string.Empty, true);
+        var undoOptionIndex = undoStack.Count > 0 ? gp.AddOption("Undo", string.Empty, true) : -1;
+        var redoOptionIndex = redoStack.Count > 0 ? gp.AddOption("Redo", string.Empty, true) : -1;
 
         gp.DynamicDraw += (_, e) =>
         {
-          var previewItems = SplitPointsNearTargets(targets, e.CurrentPoint);
+          var point = CurrentPickPoint(e.Source, e.CurrentPoint);
+          if (point == null)
+          {
+            conduit.SetRemoveAction(null);
+            return;
+          }
+
+          var previewItems = SplitPointsNearTargets(targets, point.Value);
           var previewAction = previewItems.Count > 0
             ? new SplitAction(SplitActionKind.Remove, previewItems)
             : null;
 
           conduit.SetRemoveAction(previewAction);
 
+          var radii = DisplayPointRadii(e.Display);
           foreach (var item in previewItems)
           {
             DrawSplitPoint(
               e.Display,
               item.Target.Curve.PointAt(item.Parameter),
-              RemovePointColor);
+              RemovePointColor,
+              radii);
           }
         };
 
@@ -841,6 +922,7 @@ public sealed class vSplit : Command
       e.Display.EnableDepthWriting(false);
       try
       {
+        var radii = DisplayPointRadii(e.Display);
         foreach (var target in _targets)
         {
           foreach (var parameter in target.Parameters)
@@ -848,7 +930,8 @@ public sealed class vSplit : Command
             DrawSplitPoint(
               e.Display,
               target.Curve.PointAt(parameter),
-              IsRemovePreview(target, parameter) ? RemovePointColor : SetPointColor);
+              IsRemovePreview(target, parameter) ? RemovePointColor : SetPointColor,
+              radii);
           }
         }
       }
