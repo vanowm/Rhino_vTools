@@ -84,20 +84,24 @@ public sealed class vSplit : Command
   {
     switch (value.Trim().Replace(" ", string.Empty).Replace("_", string.Empty).ToLowerInvariant())
     {
+      case "d":
       case "default":
         pointDisplayMode = PointDisplayMode.Default;
         return true;
+      case "c":
       case "cp":
       case "controlpoint":
       case "controlpoints":
         pointDisplayMode = PointDisplayMode.ControlPoints;
         return true;
+      case "g":
       case "grip":
       case "grips":
       case "editpoint":
       case "editpoints":
         pointDisplayMode = PointDisplayMode.Grips;
         return true;
+      case "h":
       case "hidden":
       case "hide":
       case "off":
@@ -145,9 +149,13 @@ public sealed class vSplit : Command
   private static Dictionary<int, PointDisplayMode> AddHiddenPointDisplayOptions(GetPoint gp)
   {
     var options = new Dictionary<int, PointDisplayMode>();
+    AddHiddenPointDisplayOption(gp, options, "D", PointDisplayMode.Default);
     AddHiddenPointDisplayOption(gp, options, "Default", PointDisplayMode.Default);
+    AddHiddenPointDisplayOption(gp, options, "C", PointDisplayMode.ControlPoints);
     AddHiddenPointDisplayOption(gp, options, "CP", PointDisplayMode.ControlPoints);
+    AddHiddenPointDisplayOption(gp, options, "G", PointDisplayMode.Grips);
     AddHiddenPointDisplayOption(gp, options, "Grips", PointDisplayMode.Grips);
+    AddHiddenPointDisplayOption(gp, options, "H", PointDisplayMode.Hidden);
     AddHiddenPointDisplayOption(gp, options, "Hidden", PointDisplayMode.Hidden);
     return options;
   }
@@ -823,6 +831,7 @@ public sealed class vSplit : Command
       RunPointCommand("_PointsOff");
 
       var gripTargets = new List<SplitTarget>();
+      var objectSelectionTargets = new List<SplitTarget>();
       foreach (var target in targets)
       {
         var rhObj = doc.Objects.FindId(target.ObjectId);
@@ -834,6 +843,7 @@ public sealed class vSplit : Command
           case PointDisplayMode.ControlPoints:
             rhObj.GripsOn = true;
             rhObj.CommitChanges();
+            objectSelectionTargets.Add(target);
             break;
           case PointDisplayMode.Grips:
             rhObj.GripsOn = false;
@@ -843,6 +853,7 @@ public sealed class vSplit : Command
           default:
             rhObj.GripsOn = false;
             rhObj.CommitChanges();
+            objectSelectionTargets.Add(target);
             break;
         }
       }
@@ -852,6 +863,8 @@ public sealed class vSplit : Command
         SelectExistingTargets(doc, gripTargets);
         if (!RunPointCommand("_EditPtOn _Enter"))
           RhinoApp.WriteLine("vSplit: could not restore original grips.");
+
+        SelectTargets(doc, objectSelectionTargets);
       }
       else
       {
