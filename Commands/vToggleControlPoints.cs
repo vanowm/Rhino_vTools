@@ -369,16 +369,33 @@ public sealed class vToggleControlPoints : Command
 
   private static bool RunCommand(string command)
   {
-    var result = RhinoApp.RunScript(command, false);
-    Log.Write(Tag, $"command '{command}' result={result}");
-    if (!result && !command.StartsWith("'", StringComparison.Ordinal))
+    var nestedCommand = IsNestedTransparentRun();
+    var primaryCommand = nestedCommand && !command.StartsWith("'", StringComparison.Ordinal)
+      ? "'" + command
+      : command;
+
+    var result = RhinoApp.RunScript(primaryCommand, false);
+    Log.Write(Tag, $"command '{primaryCommand}' result={result} nested={nestedCommand}");
+    if (!result && !nestedCommand && !command.StartsWith("'", StringComparison.Ordinal))
     {
       var transparentCommand = "'" + command;
       result = RhinoApp.RunScript(transparentCommand, false);
-      Log.Write(Tag, $"command '{transparentCommand}' result={result}");
+      Log.Write(Tag, $"command '{transparentCommand}' result={result} nested={nestedCommand}");
     }
 
     return result;
+  }
+
+  private static bool IsNestedTransparentRun()
+  {
+    try
+    {
+      return Command.GetCommandStack().Length > 1;
+    }
+    catch
+    {
+      return false;
+    }
   }
 
   private static Dictionary<Guid, bool> CaptureGripStates(RhinoDoc doc, IEnumerable<Guid> objectIds)
