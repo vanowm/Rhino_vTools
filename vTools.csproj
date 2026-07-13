@@ -148,6 +148,13 @@
     </Exec>
 
     <Exec
+      Command="git -C &quot;$(MSBuildProjectDirectory)&quot; push origin main"
+      IgnoreExitCode="true"
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0'">
+      <Output TaskParameter="ExitCode" PropertyName="VersionPushExitCode" />
+    </Exec>
+
+    <Exec
       Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse -q --verify &quot;refs/tags/$(ShortTagVersion)&quot;"
       IgnoreExitCode="true"
       Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != ''">
@@ -165,6 +172,16 @@
       Importance="high"
       Text="vTools version commit created: $(Version)"
       Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0'" />
+
+    <Message
+      Importance="high"
+      Text="vTools version commit pushed to origin/main."
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(VersionPushExitCode)' == '0'" />
+
+    <Message
+      Importance="high"
+      Text="vTools version commit push failed; commit remains local."
+      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(VersionPushExitCode)' != '0'" />
 
     <Message
       Importance="high"
