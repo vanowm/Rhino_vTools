@@ -53,7 +53,7 @@ public sealed class vToggleControlPoints : Command
 
     foreach (var record in context.PointRecords)
     {
-      var mode = PointLocationMode(doc, record.OwnerId, record.Point);
+      var mode = PointRecordMode(doc, record);
       if (mode == SelectionPointDisplayMode.ControlPoints)
         return mode;
       if (mode == SelectionPointDisplayMode.EditPoints)
@@ -89,7 +89,7 @@ public sealed class vToggleControlPoints : Command
 
     foreach (var index in SampleIndices(grips.Count))
     {
-      var mode = PointLocationMode(doc, objectId, grips[index].CurrentLocation);
+      var mode = GripPointMode(doc, objectId, grips[index]);
       if (mode == SelectionPointDisplayMode.ControlPoints)
         return mode;
       if (mode == SelectionPointDisplayMode.EditPoints)
@@ -97,6 +97,62 @@ public sealed class vToggleControlPoints : Command
     }
 
     return foundEditPoints ? SelectionPointDisplayMode.EditPoints : SelectionPointDisplayMode.None;
+  }
+
+  private static SelectionPointDisplayMode PointRecordMode(RhinoDoc doc, PointRecord record)
+  {
+    var grip = GripAtIndex(doc, record.OwnerId, record.Index);
+    if (grip != null)
+    {
+      var mode = GripMetadataMode(grip);
+      if (mode != SelectionPointDisplayMode.None)
+        return mode;
+    }
+
+    return PointLocationMode(doc, record.OwnerId, record.Point);
+  }
+
+  private static SelectionPointDisplayMode GripPointMode(RhinoDoc doc, Guid objectId, GripObject grip)
+  {
+    var mode = GripMetadataMode(grip);
+    return mode != SelectionPointDisplayMode.None
+      ? mode
+      : PointLocationMode(doc, objectId, grip.CurrentLocation);
+  }
+
+  private static SelectionPointDisplayMode GripMetadataMode(GripObject grip)
+  {
+    if (IsCurveControlPointGrip(grip))
+      return SelectionPointDisplayMode.ControlPoints;
+
+    if (IsCurveEditPointGrip(grip))
+      return SelectionPointDisplayMode.EditPoints;
+
+    return SelectionPointDisplayMode.None;
+  }
+
+  private static bool IsCurveControlPointGrip(GripObject grip)
+  {
+    try
+    {
+      return grip.GetCurveCVIndices(out var indices) > 0 && indices != null && indices.Length > 0;
+    }
+    catch
+    {
+      return false;
+    }
+  }
+
+  private static bool IsCurveEditPointGrip(GripObject grip)
+  {
+    try
+    {
+      return grip.GetCurveParameters(out _);
+    }
+    catch
+    {
+      return false;
+    }
   }
 
   private static SelectionPointDisplayMode PointLocationMode(RhinoDoc doc, Guid objectId, Point3d point)

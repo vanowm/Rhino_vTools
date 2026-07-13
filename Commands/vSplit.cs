@@ -285,22 +285,15 @@ public sealed class vSplit : Command
       return PointDisplayMode.Hidden;
 
     var foundEditPoints = false;
-    var foundControlPoints = false;
     foreach (var grip in grips)
     {
       var gripMode = GripPointDisplayMode(doc, rhObj.Id, grip);
       if (gripMode == PointDisplayMode.ControlPoints)
-      {
-        foundControlPoints = true;
-        continue;
-      }
+        return PointDisplayMode.ControlPoints;
 
       if (gripMode == PointDisplayMode.EditPoints)
         foundEditPoints = true;
     }
-
-    if (foundControlPoints && rhObj.GripsOn)
-      return PointDisplayMode.ControlPoints;
 
     if (foundEditPoints)
       return PointDisplayMode.EditPoints;
@@ -310,6 +303,12 @@ public sealed class vSplit : Command
 
   private static PointDisplayMode GripPointDisplayMode(RhinoDoc doc, Guid objectId, GripObject grip)
   {
+    if (IsCurveControlPointGrip(grip))
+      return PointDisplayMode.ControlPoints;
+
+    if (IsCurveEditPointGrip(grip))
+      return PointDisplayMode.EditPoints;
+
     var distance = DistanceToCurve(doc, objectId, grip.CurrentLocation);
     if (distance.HasValue)
     {
@@ -317,12 +316,6 @@ public sealed class vSplit : Command
         ? PointDisplayMode.EditPoints
         : PointDisplayMode.ControlPoints;
     }
-
-    if (IsCurveEditPointGrip(grip))
-      return PointDisplayMode.EditPoints;
-
-    if (IsCurveControlPointGrip(grip))
-      return PointDisplayMode.ControlPoints;
 
     return PointDisplayMode.Hidden;
   }
