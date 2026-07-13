@@ -1,4 +1,4 @@
-Tools  ·  v26.7.13.1330
+Tools  ·  v26.7.13.1428
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -36,7 +36,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vTextFlip](#vtextflip-flow) *(26.4.27.2125)* — flips or rotates annotation text around its object plane
   - [vTitle](#vtitle-flow) *(26.7.1.1755)* — places or edits a titled annotation text box with optional bounding rectangle; hover to highlight, click existing to edit
   - [vToggleAxes](#vtoggleaxes-flow) *(26.6.22.1811)* — toggles visible viewport axes (grid/construction axes plus display-mode Z axis)
-  - [vToggleControlPoints](#vtogglecontrolpoints-flow) *(26.7.13.1046)* — toggles selected objects between edit grips on the curve and off-curve control points
+  - [vToggleControlPoints](#vtogglecontrolpoints-flow) *(26.7.13.1046)* — toggles selected objects between edit points on the curve and off-curve control points
   - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.4.24.1712)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
   - [vTrim](#vtrim-flow) *(26.4.24.1633)* — trims and extends curves with auto-cutter detection and join
   - [vTrimOff](#vtrimoff-flow) *(26.5.18.849)* — trims selected curves to the outer boundary of the enclosed region they collectively form; protruding ends are removed automatically
@@ -424,7 +424,7 @@ Behavior:
 1. Press Enter to apply splitting and replace the original curves with split pieces.
 1. Options:
 
-    - `Points`: choose `Default`, `CP`, `Grips`, or `Hidden` while choosing split points. `Default` leaves the original point visibility untouched on start and restores each selected curve's original hidden/CP/grips state when switched back.
+    - `Points`: choose `Default`, `CP`, `EditPoints`, or `Hidden` while choosing split points. `Default` leaves the original point visibility untouched on start and restores each selected curve's original hidden/CP/edit-point state when switched back.
 
 ### vSplitAtCorners flow
 
@@ -503,12 +503,12 @@ Notes:
 
 ### vToggleControlPoints flow
 
-1. Select objects or selected point grips.
+1. Select objects or selected points.
 1. Run `vToggleControlPoints`.
 1. The command is transparent, so it can be run while another Rhino command is active.
-1. If off-curve control points are visible, the command switches the selection to edit grips on the curve.
-1. If edit grips are visible or selected, the command switches the selection to off-curve control points where supported.
-1. If no points are visible on the selected curves, the command shows edit grips first.
+1. If off-curve control points are visible, the command switches the selection to edit points on the curve.
+1. If edit points are visible or selected, the command switches the selection to off-curve control points where supported.
+1. If no points are visible on the selected curves, the command shows edit points first.
 1. Run with nothing selected to turn points off.
 
 ### vTogglePerpGumball flow

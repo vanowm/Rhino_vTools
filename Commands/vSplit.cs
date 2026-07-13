@@ -23,7 +23,7 @@ public sealed class vSplit : Command
   private const int DefaultPointRadius = 5;
   private const int PointOutlineWidth = 1;
 
-  private static readonly string[] PointDisplayModeNames = ["Default", "CP", "Grips", "Hidden"];
+  private static readonly string[] PointDisplayModeNames = ["Default", "CP", "EditPoints", "Hidden"];
   private static readonly Color SetPointColor = Color.Red;
   private static readonly Color RemovePointColor = Color.Cyan;
   private static readonly Color PointOutlineColor = Color.Pink;
@@ -94,12 +94,16 @@ public sealed class vSplit : Command
       case "controlpoints":
         pointDisplayMode = PointDisplayMode.ControlPoints;
         return true;
+      case "e":
+      case "ep":
+      case "editpoint":
+      case "editpoints":
+        pointDisplayMode = PointDisplayMode.EditPoints;
+        return true;
       case "g":
       case "grip":
       case "grips":
-      case "editpoint":
-      case "editpoints":
-        pointDisplayMode = PointDisplayMode.Grips;
+        pointDisplayMode = PointDisplayMode.EditPoints;
         return true;
       case "h":
       case "hidden":
@@ -119,7 +123,7 @@ public sealed class vSplit : Command
     return pointDisplayMode switch
     {
       PointDisplayMode.ControlPoints => "CP",
-      PointDisplayMode.Grips => "Grips",
+      PointDisplayMode.EditPoints => "EditPoints",
       PointDisplayMode.Hidden => "Hidden",
       _ => "Default"
     };
@@ -153,8 +157,9 @@ public sealed class vSplit : Command
     AddHiddenPointDisplayOption(gp, options, "Default", PointDisplayMode.Default);
     AddHiddenPointDisplayOption(gp, options, "C", PointDisplayMode.ControlPoints);
     AddHiddenPointDisplayOption(gp, options, "CP", PointDisplayMode.ControlPoints);
-    AddHiddenPointDisplayOption(gp, options, "G", PointDisplayMode.Grips);
-    AddHiddenPointDisplayOption(gp, options, "Grips", PointDisplayMode.Grips);
+    AddHiddenPointDisplayOption(gp, options, "E", PointDisplayMode.EditPoints);
+    AddHiddenPointDisplayOption(gp, options, "EP", PointDisplayMode.EditPoints);
+    AddHiddenPointDisplayOption(gp, options, "EditPoints", PointDisplayMode.EditPoints);
     AddHiddenPointDisplayOption(gp, options, "H", PointDisplayMode.Hidden);
     AddHiddenPointDisplayOption(gp, options, "Hidden", PointDisplayMode.Hidden);
     return options;
@@ -279,7 +284,7 @@ public sealed class vSplit : Command
     if (grips.Count == 0)
       return PointDisplayMode.Hidden;
 
-    var foundGrips = false;
+    var foundEditPoints = false;
     var foundControlPoints = false;
     foreach (var grip in grips)
     {
@@ -290,15 +295,15 @@ public sealed class vSplit : Command
         continue;
       }
 
-      if (gripMode == PointDisplayMode.Grips)
-        foundGrips = true;
+      if (gripMode == PointDisplayMode.EditPoints)
+        foundEditPoints = true;
     }
 
     if (foundControlPoints && rhObj.GripsOn)
       return PointDisplayMode.ControlPoints;
 
-    if (foundGrips)
-      return PointDisplayMode.Grips;
+    if (foundEditPoints)
+      return PointDisplayMode.EditPoints;
 
     return rhObj.GripsOn ? PointDisplayMode.ControlPoints : PointDisplayMode.Hidden;
   }
@@ -309,12 +314,12 @@ public sealed class vSplit : Command
     if (distance.HasValue)
     {
       return distance.Value <= ModelTolerance(doc)
-        ? PointDisplayMode.Grips
+        ? PointDisplayMode.EditPoints
         : PointDisplayMode.ControlPoints;
     }
 
     if (IsCurveEditPointGrip(grip))
-      return PointDisplayMode.Grips;
+      return PointDisplayMode.EditPoints;
 
     if (IsCurveControlPointGrip(grip))
       return PointDisplayMode.ControlPoints;
@@ -794,11 +799,11 @@ public sealed class vSplit : Command
         case PointDisplayMode.ControlPoints:
           SetTargetControlPoints(doc, targets, enabled: true, redraw: false);
           break;
-        case PointDisplayMode.Grips:
+        case PointDisplayMode.EditPoints:
           SetTargetControlPoints(doc, targets, enabled: false, redraw: false);
           SelectExistingTargets(doc, targets);
           if (!RunPointCommand("_EditPtOn _Enter"))
-            RhinoApp.WriteLine("vSplit: could not show grips.");
+            RhinoApp.WriteLine("vSplit: could not show edit points.");
           pointCommandHandledSelection = true;
           break;
         case PointDisplayMode.Hidden:
@@ -830,7 +835,7 @@ public sealed class vSplit : Command
       SelectExistingTargets(doc, targets);
       RunPointCommand("_PointsOff");
 
-      var gripTargets = new List<SplitTarget>();
+      var editPointTargets = new List<SplitTarget>();
       var objectSelectionTargets = new List<SplitTarget>();
       foreach (var target in targets)
       {
@@ -845,10 +850,10 @@ public sealed class vSplit : Command
             rhObj.CommitChanges();
             objectSelectionTargets.Add(target);
             break;
-          case PointDisplayMode.Grips:
+          case PointDisplayMode.EditPoints:
             rhObj.GripsOn = false;
             rhObj.CommitChanges();
-            gripTargets.Add(target);
+            editPointTargets.Add(target);
             break;
           default:
             rhObj.GripsOn = false;
@@ -858,11 +863,11 @@ public sealed class vSplit : Command
         }
       }
 
-      if (gripTargets.Count > 0)
+      if (editPointTargets.Count > 0)
       {
-        SelectExistingTargets(doc, gripTargets);
+        SelectExistingTargets(doc, editPointTargets);
         if (!RunPointCommand("_EditPtOn _Enter"))
-          RhinoApp.WriteLine("vSplit: could not restore original grips.");
+          RhinoApp.WriteLine("vSplit: could not restore original edit points.");
 
         SelectTargets(doc, objectSelectionTargets);
       }
@@ -1250,7 +1255,7 @@ public sealed class vSplit : Command
   {
     Default,
     ControlPoints,
-    Grips,
+    EditPoints,
     Hidden
   }
 

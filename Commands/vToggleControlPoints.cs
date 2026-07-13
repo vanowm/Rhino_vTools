@@ -49,15 +49,15 @@ public sealed class vToggleControlPoints : Command
 
   private static SelectionPointDisplayMode SelectionPointMode(RhinoDoc doc, SelectionContext context)
   {
-    var foundEditGrips = false;
+    var foundEditPoints = false;
 
     foreach (var record in context.PointRecords)
     {
       var mode = PointLocationMode(doc, record.OwnerId, record.Point);
       if (mode == SelectionPointDisplayMode.ControlPoints)
         return mode;
-      if (mode == SelectionPointDisplayMode.EditGrips)
-        foundEditGrips = true;
+      if (mode == SelectionPointDisplayMode.EditPoints)
+        foundEditPoints = true;
     }
 
     foreach (var id in context.ObjectIds)
@@ -73,11 +73,11 @@ public sealed class vToggleControlPoints : Command
       var mode = GripLocationMode(doc, id, grips);
       if (mode == SelectionPointDisplayMode.ControlPoints)
         return mode;
-      if (mode == SelectionPointDisplayMode.EditGrips)
-        foundEditGrips = true;
+      if (mode == SelectionPointDisplayMode.EditPoints)
+        foundEditPoints = true;
     }
 
-    return foundEditGrips ? SelectionPointDisplayMode.EditGrips : SelectionPointDisplayMode.None;
+    return foundEditPoints ? SelectionPointDisplayMode.EditPoints : SelectionPointDisplayMode.None;
   }
 
   private static SelectionPointDisplayMode GripLocationMode(
@@ -85,18 +85,18 @@ public sealed class vToggleControlPoints : Command
     Guid objectId,
     IReadOnlyList<GripObject> grips)
   {
-    var foundEditGrips = false;
+    var foundEditPoints = false;
 
     foreach (var index in SampleIndices(grips.Count))
     {
       var mode = PointLocationMode(doc, objectId, grips[index].CurrentLocation);
       if (mode == SelectionPointDisplayMode.ControlPoints)
         return mode;
-      if (mode == SelectionPointDisplayMode.EditGrips)
-        foundEditGrips = true;
+      if (mode == SelectionPointDisplayMode.EditPoints)
+        foundEditPoints = true;
     }
 
-    return foundEditGrips ? SelectionPointDisplayMode.EditGrips : SelectionPointDisplayMode.None;
+    return foundEditPoints ? SelectionPointDisplayMode.EditPoints : SelectionPointDisplayMode.None;
   }
 
   private static SelectionPointDisplayMode PointLocationMode(RhinoDoc doc, Guid objectId, Point3d point)
@@ -106,7 +106,7 @@ public sealed class vToggleControlPoints : Command
       return SelectionPointDisplayMode.None;
 
     return distance.Value <= OnGeometryTolerance(doc)
-      ? SelectionPointDisplayMode.EditGrips
+      ? SelectionPointDisplayMode.EditPoints
       : SelectionPointDisplayMode.ControlPoints;
   }
 
@@ -260,7 +260,7 @@ public sealed class vToggleControlPoints : Command
 
   private static void ShowEditPoints(RhinoDoc doc, SelectionContext context)
   {
-    var gripStates = CaptureGripStates(doc, context.ObjectIds);
+    var controlPointStates = CaptureControlPointStates(doc, context.ObjectIds);
     var previousRedraw = doc.Views.RedrawEnabled;
     doc.Views.RedrawEnabled = false;
     var editPointsOn = false;
@@ -276,7 +276,7 @@ public sealed class vToggleControlPoints : Command
       }
       else
       {
-        RestoreGripStates(doc, gripStates);
+        RestoreControlPointStates(doc, controlPointStates);
       }
     }
     finally
@@ -284,7 +284,7 @@ public sealed class vToggleControlPoints : Command
       doc.Views.RedrawEnabled = previousRedraw;
     }
 
-    RhinoApp.WriteLine(editPointsOn ? "Grips: On" : "Grips: failed to turn on");
+    RhinoApp.WriteLine(editPointsOn ? "Edit points: On" : "Edit points: failed to turn on");
     doc.Views.ActiveView?.Redraw();
   }
 
@@ -354,7 +354,7 @@ public sealed class vToggleControlPoints : Command
     }
   }
 
-  private static Dictionary<Guid, bool> CaptureGripStates(RhinoDoc doc, IEnumerable<Guid> objectIds)
+  private static Dictionary<Guid, bool> CaptureControlPointStates(RhinoDoc doc, IEnumerable<Guid> objectIds)
   {
     var states = new Dictionary<Guid, bool>();
     foreach (var id in objectIds)
@@ -369,7 +369,7 @@ public sealed class vToggleControlPoints : Command
     return states;
   }
 
-  private static void RestoreGripStates(RhinoDoc doc, IReadOnlyDictionary<Guid, bool> states)
+  private static void RestoreControlPointStates(RhinoDoc doc, IReadOnlyDictionary<Guid, bool> states)
   {
     foreach (var (id, gripsOn) in states)
     {
@@ -459,7 +459,7 @@ public sealed class vToggleControlPoints : Command
   private enum SelectionPointDisplayMode
   {
     None,
-    EditGrips,
+    EditPoints,
     ControlPoints
   }
 
