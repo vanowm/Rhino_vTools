@@ -15,13 +15,15 @@ namespace vTools.Commands;
 /// <summary>
 /// Native interactive split-at-picked-points command.
 /// </summary>
+[CommandStyle(Style.ScriptRunner)]
 public sealed class vSplit : Command
 {
   private const string OptionsSectionName = "vSplit";
-  private const string GripsKey = "grips";
+  private const string PointDisplayKey = "pointDisplay";
   private const int DefaultPointRadius = 5;
   private const int PointOutlineWidth = 1;
 
+  private static readonly string[] PointDisplayModeNames = ["Default", "CP", "Grips", "Hidden"];
   private static readonly Color SetPointColor = Color.Red;
   private static readonly Color RemovePointColor = Color.Cyan;
   private static readonly Color PointOutlineColor = Color.Pink;
@@ -30,18 +32,18 @@ public sealed class vSplit : Command
 
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
-    var showGrips = LoadPersistedGrips();
-    var gripSnapshot = CurveGripSnapshot(doc);
+    var pointDisplayMode = LoadPersistedPointDisplayMode();
+    var controlPointSnapshot = CurveControlPointSnapshot(doc);
 
-    var targets = GetTargetCurves(doc, gripSnapshot);
+    var targets = GetTargetCurves(doc, controlPointSnapshot);
     if (targets == null || targets.Count == 0)
       return Result.Cancel;
 
-    var completed = CollectSplitPoints(doc, targets, showGrips);
+    var completed = CollectSplitPoints(doc, targets, pointDisplayMode);
     if (!completed)
     {
       DeleteSplitPointObjects(doc, targets);
-      RestoreTargetGrips(doc, targets);
+      RestoreTargetControlPoints(doc, targets);
       SelectExistingTargets(doc, targets);
       return Result.Cancel;
     }
@@ -53,16 +55,91 @@ public sealed class vSplit : Command
     return Result.Success;
   }
 
-  private static bool LoadPersistedGrips()
+  private static PointDisplayMode LoadPersistedPointDisplayMode()
   {
     return ToolsOptionStore.Read(
       OptionsSectionName,
-      section => ToolsOptionStore.TryGetBool(section, GripsKey, out var grips) ? grips : true);
+      section =>
+      {
+        if (ToolsOptionStore.TryGetString(section, PointDisplayKey, out var value) &&
+            TryParsePointDisplayMode(value, out var pointDisplayMode))
+        {
+          return pointDisplayMode;
+        }
+
+        return PointDisplayMode.Default;
+      });
   }
 
-  private static void SavePersistedOptions(bool showGrips)
+  private static void SavePersistedOptions(PointDisplayMode pointDisplayMode)
   {
-    _ = ToolsOptionStore.Update(OptionsSectionName, section => section[GripsKey] = showGrips);
+    _ = ToolsOptionStore.Update(OptionsSectionName, section =>
+    {
+      section[PointDisplayKey] = PointDisplayLabel(pointDisplayMode);
+      section.Remove("grips");
+    });
+  }
+
+  private static bool TryParsePointDisplayMode(string value, out PointDisplayMode pointDisplayMode)
+  {
+    switch (value.Trim().Replace(" ", string.Empty).Replace("_", string.Empty).ToLowerInvariant())
+    {
+      case "default":
+        pointDisplayMode = PointDisplayMode.Default;
+        return true;
+      case "cp":
+      case "controlpoint":
+      case "controlpoints":
+        pointDisplayMode = PointDisplayMode.ControlPoints;
+        return true;
+      case "grip":
+      case "grips":
+      case "editpoint":
+      case "editpoints":
+        pointDisplayMode = PointDisplayMode.Grips;
+        return true;
+      case "hidden":
+      case "hide":
+      case "off":
+      case "none":
+        pointDisplayMode = PointDisplayMode.Hidden;
+        return true;
+      default:
+        pointDisplayMode = PointDisplayMode.Default;
+        return false;
+    }
+  }
+
+  private static string PointDisplayLabel(PointDisplayMode pointDisplayMode)
+  {
+    return pointDisplayMode switch
+    {
+      PointDisplayMode.ControlPoints => "CP",
+      PointDisplayMode.Grips => "Grips",
+      PointDisplayMode.Hidden => "Hidden",
+      _ => "Default"
+    };
+  }
+
+  private static int PointDisplayIndex(PointDisplayMode pointDisplayMode)
+  {
+    for (var i = 0; i < PointDisplayModeNames.Length; i++)
+    {
+      if (string.Equals(PointDisplayModeNames[i], PointDisplayLabel(pointDisplayMode), StringComparison.OrdinalIgnoreCase))
+        return i;
+    }
+
+    return 0;
+  }
+
+  private static PointDisplayMode PointDisplayFromIndex(int index)
+  {
+    if (index < 0 || index >= PointDisplayModeNames.Length)
+      return PointDisplayMode.Default;
+
+    return TryParsePointDisplayMode(PointDisplayModeNames[index], out var pointDisplayMode)
+      ? pointDisplayMode
+      : PointDisplayMode.Default;
   }
 
   private static ObjectAttributes SplitPointAttributes(Color color)
@@ -144,7 +221,7 @@ public sealed class vSplit : Command
     return Math.Max(Math.Max(ModelTolerance(doc) * 4.0, length * 1e-8), 1e-6);
   }
 
-  private static Dictionary<Guid, bool> CurveGripSnapshot(RhinoDoc doc)
+  private static Dictionary<Guid, bool> CurveControlPointSnapshot(RhinoDoc doc)
   {
     var states = new Dictionary<Guid, bool>();
     try
@@ -367,7 +444,7 @@ public sealed class vSplit : Command
     }
   }
 
-  private static List<SplitTarget>? GetTargetCurves(RhinoDoc doc, IReadOnlyDictionary<Guid, bool> gripSnapshot)
+  private static List<SplitTarget>? GetTargetCurves(RhinoDoc doc, IReadOnlyDictionary<Guid, bool> controlPointSnapshot)
   {
     var go = new GetObject();
     go.SetCommandPrompt("Select curves to split");
@@ -397,8 +474,8 @@ public sealed class vSplit : Command
       if (duplicate == null)
         continue;
 
-      var initialGrips = gripSnapshot.TryGetValue(rhObj.Id, out var snapshotGrips)
-        ? snapshotGrips
+      var initialControlPoints = controlPointSnapshot.TryGetValue(rhObj.Id, out var snapshotControlPoints)
+        ? snapshotControlPoints
         : rhObj.GripsOn;
 
       targets.Add(new SplitTarget(
@@ -406,7 +483,7 @@ public sealed class vSplit : Command
         rhObj.Id,
         duplicate,
         rhObj.Attributes?.Duplicate(),
-        initialGrips));
+        initialControlPoints));
     }
 
     if (targets.Count == 0)
@@ -512,25 +589,107 @@ public sealed class vSplit : Command
     doc.Views.Redraw();
   }
 
-  private static void SetTargetGrips(RhinoDoc doc, IEnumerable<SplitTarget> targets, bool enabled)
+  private static bool RunPointCommand(string command)
+  {
+    try
+    {
+      return RhinoApp.RunScript(command, false);
+    }
+    catch
+    {
+      return false;
+    }
+  }
+
+  private static void SetTargetControlPoints(
+    RhinoDoc doc,
+    IEnumerable<SplitTarget> targets,
+    bool enabled,
+    bool redraw = true)
   {
     foreach (var target in targets)
     {
       var rhObj = doc.Objects.FindId(target.ObjectId);
       if (rhObj != null)
+      {
         rhObj.GripsOn = enabled;
+        rhObj.CommitChanges();
+      }
     }
+
+    if (redraw)
+      doc.Views.Redraw();
+  }
+
+  private static void RestoreTargetControlPoints(RhinoDoc doc, IEnumerable<SplitTarget> targets)
+  {
+    var targetList = targets.ToList();
+    if (targetList.Count == 0)
+      return;
+
+    SelectExistingTargets(doc, targetList);
+    RunPointCommand("_PointsOff");
+
+    foreach (var target in targetList)
+    {
+      var rhObj = doc.Objects.FindId(target.ObjectId);
+      if (rhObj != null)
+      {
+        rhObj.GripsOn = target.InitialControlPoints;
+        rhObj.CommitChanges();
+      }
+    }
+
     doc.Views.Redraw();
   }
 
-  private static void RestoreTargetGrips(RhinoDoc doc, IEnumerable<SplitTarget> targets)
+  private static void ApplyPointDisplayMode(RhinoDoc doc, IReadOnlyList<SplitTarget> targets, PointDisplayMode mode)
   {
-    foreach (var target in targets)
+    if (targets.Count == 0)
+      return;
+
+    var previousRedraw = doc.Views.RedrawEnabled;
+    doc.Views.RedrawEnabled = false;
+
+    try
     {
-      var rhObj = doc.Objects.FindId(target.ObjectId);
-      if (rhObj != null)
-        rhObj.GripsOn = target.InitialGrips;
+      SelectExistingTargets(doc, targets);
+      RunPointCommand("_PointsOff");
+
+      switch (mode)
+      {
+        case PointDisplayMode.ControlPoints:
+          SetTargetControlPoints(doc, targets, enabled: true, redraw: false);
+          break;
+        case PointDisplayMode.Grips:
+          SetTargetControlPoints(doc, targets, enabled: false, redraw: false);
+          SelectExistingTargets(doc, targets);
+          if (!RunPointCommand("_EditPtOn _Enter"))
+            RhinoApp.WriteLine("vSplit: could not show grips.");
+          break;
+        case PointDisplayMode.Hidden:
+          SetTargetControlPoints(doc, targets, enabled: false, redraw: false);
+          break;
+        default:
+          foreach (var target in targets)
+          {
+            var rhObj = doc.Objects.FindId(target.ObjectId);
+            if (rhObj == null)
+              continue;
+
+            rhObj.GripsOn = target.InitialControlPoints;
+            rhObj.CommitChanges();
+          }
+          break;
+      }
+
+      SelectExistingTargets(doc, targets);
     }
+    finally
+    {
+      doc.Views.RedrawEnabled = previousRedraw;
+    }
+
     doc.Views.Redraw();
   }
 
@@ -594,7 +753,7 @@ public sealed class vSplit : Command
     return completed.Count > 0 ? new SplitAction(action.Kind, completed) : null;
   }
 
-  private static bool CollectSplitPoints(RhinoDoc doc, List<SplitTarget> targets, bool showGrips)
+  private static bool CollectSplitPoints(RhinoDoc doc, List<SplitTarget> targets, PointDisplayMode pointDisplayMode)
   {
     var conduit = new SplitPointConduit(targets)
     {
@@ -603,7 +762,7 @@ public sealed class vSplit : Command
 
     SelectExistingTargets(doc, targets);
 
-    SetTargetGrips(doc, targets, showGrips);
+    ApplyPointDisplayMode(doc, targets, pointDisplayMode);
 
     var undoStack = new Stack<SplitAction>();
     var redoStack = new Stack<SplitAction>();
@@ -622,8 +781,10 @@ public sealed class vSplit : Command
         ConfigurePointGetter(gp, targets, constraintCurve);
         AddSplitPointSnaps(gp, targets);
 
-        var gripsOption = new OptionToggle(showGrips, "Hide", "Show");
-        gp.AddOptionToggle("Grips", ref gripsOption);
+        var pointDisplayOptionIndex = gp.AddOptionList(
+          "Points",
+          PointDisplayModeNames,
+          PointDisplayIndex(pointDisplayMode));
         var undoOptionIndex = undoStack.Count > 0 ? gp.AddOption("Undo", string.Empty, true) : -1;
         var redoOptionIndex = redoStack.Count > 0 ? gp.AddOption("Redo", string.Empty, true) : -1;
 
@@ -696,9 +857,14 @@ public sealed class vSplit : Command
             continue;
           }
 
-          showGrips = gripsOption.CurrentValue;
-          SavePersistedOptions(showGrips);
-          SetTargetGrips(doc, targets, showGrips);
+          var option = gp.Option();
+          if (option != null && option.Index == pointDisplayOptionIndex)
+          {
+            pointDisplayMode = PointDisplayFromIndex(option.CurrentListOptionIndex);
+            SavePersistedOptions(pointDisplayMode);
+            ApplyPointDisplayMode(doc, targets, pointDisplayMode);
+          }
+
           continue;
         }
 
@@ -790,7 +956,10 @@ public sealed class vSplit : Command
 
       var rhObj = doc.Objects.FindId(objectId);
       if (rhObj != null)
-        rhObj.GripsOn = target.InitialGrips;
+      {
+        rhObj.GripsOn = target.InitialControlPoints;
+        rhObj.CommitChanges();
+      }
 
       newIds.Add(objectId);
     }
@@ -805,7 +974,7 @@ public sealed class vSplit : Command
     {
       RhinoApp.WriteLine("vSplit: no split points were added.");
       DeleteSplitPointObjects(doc, targets);
-      RestoreTargetGrips(doc, targets);
+      RestoreTargetControlPoints(doc, targets);
       SelectExistingTargets(doc, targets);
       return new List<Guid>();
     }
@@ -844,7 +1013,7 @@ public sealed class vSplit : Command
         doc.EndUndoRecord(undoRecord);
     }
 
-    RestoreTargetGrips(doc, targets);
+    RestoreTargetControlPoints(doc, targets);
     DeleteSplitPointObjects(doc, targets);
     SelectFinalObjects(doc, targets, newIds);
     return newIds;
@@ -852,12 +1021,12 @@ public sealed class vSplit : Command
 
   private sealed class SplitTarget
   {
-    public SplitTarget(RhinoDoc doc, Guid objectId, Curve curve, ObjectAttributes? attributes, bool initialGrips)
+    public SplitTarget(RhinoDoc doc, Guid objectId, Curve curve, ObjectAttributes? attributes, bool initialControlPoints)
     {
       ObjectId = objectId;
       Curve = curve;
       Attributes = attributes;
-      InitialGrips = initialGrips;
+      InitialControlPoints = initialControlPoints;
       ParameterTolerance = vSplit.ParameterTolerance(curve);
       HitTolerance = vSplit.PointHitTolerance(doc, curve);
     }
@@ -865,7 +1034,7 @@ public sealed class vSplit : Command
     public Guid ObjectId { get; }
     public Curve Curve { get; }
     public ObjectAttributes? Attributes { get; }
-    public bool InitialGrips { get; }
+    public bool InitialControlPoints { get; }
     public double ParameterTolerance { get; }
     public double HitTolerance { get; }
     public List<SplitPointMarker> SplitPoints { get; } = new();
@@ -875,6 +1044,14 @@ public sealed class vSplit : Command
   private readonly record struct SplitPointItem(SplitTarget Target, double Parameter);
 
   private readonly record struct SplitPointMarker(double Parameter, Guid PointObjectId);
+
+  private enum PointDisplayMode
+  {
+    Default,
+    ControlPoints,
+    Grips,
+    Hidden
+  }
 
   private enum SplitActionKind
   {

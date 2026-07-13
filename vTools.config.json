@@ -95,7 +95,7 @@
     "sizePercent": 5.0
   },
   "vSplit": {
-    "grips": true
+    "pointDisplay": "Default"
   },
   "vSplitAtCorners": {
     "angle": 45,
