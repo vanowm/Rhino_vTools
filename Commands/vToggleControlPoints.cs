@@ -12,7 +12,7 @@ namespace vTools.Commands;
 /// <summary>
 /// Toggles selected objects between edit points and control points.
 /// </summary>
-[CommandStyle(Style.Transparent)]
+[CommandStyle(Style.Transparent | Style.ScriptRunner)]
 public sealed class vToggleControlPoints : Command
 {
   private const string Tag = "vToggleControlPoints";
@@ -304,22 +304,31 @@ public sealed class vToggleControlPoints : Command
 
   private static void ShowEditPoints(RhinoDoc doc, SelectionContext context)
   {
+    var gripStates = CaptureGripStates(doc, context.ObjectIds);
     var previousRedraw = doc.Views.RedrawEnabled;
     doc.Views.RedrawEnabled = false;
+    var editPointsOn = false;
 
     try
     {
       PointsOff(doc, context.ObjectIds);
       SelectObjects(doc, context.ObjectIds);
-      RunCommand("_EditPtOn _Enter");
-      RestorePointSelection(doc, context, useNearest: true);
+      editPointsOn = RunCommand("_EditPtOn _Enter");
+      if (editPointsOn)
+      {
+        RestorePointSelection(doc, context, useNearest: true);
+      }
+      else
+      {
+        RestoreGripStates(doc, gripStates);
+      }
     }
     finally
     {
       doc.Views.RedrawEnabled = previousRedraw;
     }
 
-    RhinoApp.WriteLine("Grips: On");
+    RhinoApp.WriteLine(editPointsOn ? "Grips: On" : "Grips: failed to turn on");
     doc.Views.ActiveView?.Redraw();
   }
 
@@ -362,7 +371,42 @@ public sealed class vToggleControlPoints : Command
   {
     var result = RhinoApp.RunScript(command, false);
     Log.Write(Tag, $"command '{command}' result={result}");
+    if (!result && !command.StartsWith("'", StringComparison.Ordinal))
+    {
+      var transparentCommand = "'" + command;
+      result = RhinoApp.RunScript(transparentCommand, false);
+      Log.Write(Tag, $"command '{transparentCommand}' result={result}");
+    }
+
     return result;
+  }
+
+  private static Dictionary<Guid, bool> CaptureGripStates(RhinoDoc doc, IEnumerable<Guid> objectIds)
+  {
+    var states = new Dictionary<Guid, bool>();
+    foreach (var id in objectIds)
+    {
+      var obj = doc.Objects.FindId(id);
+      if (obj == null)
+        continue;
+
+      states[id] = obj.GripsOn;
+    }
+
+    return states;
+  }
+
+  private static void RestoreGripStates(RhinoDoc doc, IReadOnlyDictionary<Guid, bool> states)
+  {
+    foreach (var (id, gripsOn) in states)
+    {
+      var obj = doc.Objects.FindId(id);
+      if (obj == null)
+        continue;
+
+      obj.GripsOn = gripsOn;
+      obj.CommitChanges();
+    }
   }
 
   private static void RestorePointSelection(RhinoDoc doc, SelectionContext context, bool useNearest)
