@@ -101,122 +101,134 @@
     </PropertyGroup>
 
     <Exec
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$changed=@(git -C '$(MSBuildProjectDirectory)' status --porcelain -- 'bin/Release/net7.0-windows/vTools.dll'); if ($changed.Count -gt 0) { exit 1 }; exit 0&quot;"
+      IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="VersionDllStatusExitCode" />
+    </Exec>
+
+    <Exec
       Command="git -C &quot;$(MSBuildProjectDirectory)&quot; add -A -- ."
-      IgnoreExitCode="true" />
+      IgnoreExitCode="true"
+      Condition="'$(VersionDllStatusExitCode)' == '1'" />
 
     <Exec
       Command="git -C &quot;$(MSBuildProjectDirectory)&quot; diff --cached --quiet -- ."
-      IgnoreExitCode="true">
+      IgnoreExitCode="true"
+      Condition="'$(VersionDllStatusExitCode)' == '1'">
       <Output TaskParameter="ExitCode" PropertyName="VersionCommitDiffExitCode" />
     </Exec>
 
     <Exec
       Command="git -C &quot;$(MSBuildProjectDirectory)&quot; diff --cached --quiet -- &quot;bin/Release/net7.0-windows/vTools.dll&quot;"
       IgnoreExitCode="true"
-      Condition="'$(VersionCommitDiffExitCode)' != '0'">
+      Condition="'$(VersionDllStatusExitCode)' == '1' and '$(VersionCommitDiffExitCode)' != '0'">
       <Output TaskParameter="ExitCode" PropertyName="VersionDllDiffExitCode" />
     </Exec>
 
+    <PropertyGroup Condition="'$(VersionDllDiffExitCode)' == '1'">
+      <ShouldVersionCommit>true</ShouldVersionCommit>
+    </PropertyGroup>
+
     <!-- If a pending message was written by Copilot before this build, use it directly. -->
-    <PropertyGroup Condition="'$(VersionCommitDiffExitCode)' != '0'">
+    <PropertyGroup Condition="'$(ShouldVersionCommit)' == 'true'">
       <PendingMessageFile>$(MSBuildProjectDirectory)\.git\vtools-pending-message.txt</PendingMessageFile>
       <HasPendingMessage Condition="Exists('$(PendingMessageFile)')">true</HasPendingMessage>
     </PropertyGroup>
 
     <Error
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(HasPendingMessage)' != 'true'"
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(HasPendingMessage)' != 'true'"
       Text="Missing $(MSBuildProjectDirectory)\.git\vtools-pending-message.txt. Commit message required before committing version changes." />
 
     <Exec
       Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$body=[System.IO.File]::ReadAllText('$(PendingMessageFile)').Trim(); $msg='$(Version): ' + $body; $enc=New-Object System.Text.UTF8Encoding($false); [System.IO.File]::WriteAllText('$(MSBuildProjectDirectory)\.git\vtools-autocommit-message.txt',$msg,$enc)&quot;"
-      Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0'"
+      Condition="'$(HasPendingMessage)' == 'true' and '$(ShouldVersionCommit)' == 'true'"
       IgnoreExitCode="true" />
 
     <Delete
       Files="$(PendingMessageFile)"
-      Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0'" />
+      Condition="'$(HasPendingMessage)' == 'true' and '$(ShouldVersionCommit)' == 'true'" />
 
-    <PropertyGroup Condition="'$(HasPendingMessage)' == 'true' and '$(VersionCommitDiffExitCode)' != '0'">
+    <PropertyGroup Condition="'$(HasPendingMessage)' == 'true' and '$(ShouldVersionCommit)' == 'true'">
       <VersionCommitMessageExitCode>0</VersionCommitMessageExitCode>
     </PropertyGroup>
 
     <Exec
       Command="git -C &quot;$(MSBuildProjectDirectory)&quot; commit -F &quot;.git/vtools-autocommit-message.txt&quot;"
       IgnoreExitCode="true"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' == '0'">
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitMessageExitCode)' == '0'">
       <Output TaskParameter="ExitCode" PropertyName="VersionCommitExitCode" />
     </Exec>
 
     <Exec
       Command="git -C &quot;$(MSBuildProjectDirectory)&quot; push origin main"
       IgnoreExitCode="true"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0'">
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitExitCode)' == '0'">
       <Output TaskParameter="ExitCode" PropertyName="VersionPushExitCode" />
     </Exec>
 
     <Exec
       Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse -q --verify &quot;refs/tags/$(ShortTagVersion)&quot;"
       IgnoreExitCode="true"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != ''">
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != ''">
       <Output TaskParameter="ExitCode" PropertyName="ShortTagExistsExitCode" />
     </Exec>
 
     <Exec
       Command="git -C &quot;$(MSBuildProjectDirectory)&quot; tag &quot;$(ShortTagVersion)&quot;"
       IgnoreExitCode="true"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExitCode)' != '0'">
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExitCode)' != '0'">
       <Output TaskParameter="ExitCode" PropertyName="ShortTagCreateExitCode" />
     </Exec>
 
     <Message
       Importance="high"
       Text="vTools version commit created: $(Version)"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0'" />
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitExitCode)' == '0'" />
 
     <Message
       Importance="high"
       Text="vTools version commit pushed to origin/main."
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(VersionPushExitCode)' == '0'" />
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitExitCode)' == '0' and '$(VersionPushExitCode)' == '0'" />
 
     <Message
       Importance="high"
       Text="vTools version commit push failed; commit remains local."
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(VersionPushExitCode)' != '0'" />
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitExitCode)' == '0' and '$(VersionPushExitCode)' != '0'" />
 
     <Message
       Importance="high"
       Text="vTools short tag created: $(ShortTagVersion)"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExitCode)' != '0' and '$(ShortTagCreateExitCode)' == '0'" />
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExitCode)' != '0' and '$(ShortTagCreateExitCode)' == '0'" />
 
     <Message
       Importance="high"
       Text="vTools short tag skipped (already exists): $(ShortTagVersion)"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExitCode)' == '0'" />
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExitCode)' == '0'" />
 
     <Message
       Importance="high"
       Text="vTools short tag skipped (tag creation failed): $(ShortTagVersion)"
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExitCode)' != '0' and '$(ShortTagCreateExitCode)' != '0'" />
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitExitCode)' == '0' and '$(ShortTagVersion)' != '' and '$(ShortTagExistsExitCode)' != '0' and '$(ShortTagCreateExitCode)' != '0'" />
 
     <Message
       Importance="high"
-      Text="vTools version commit skipped (release DLL unchanged or locked)."
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitExitCode)' != '0' and '$(VersionDllDiffExitCode)' == '0'" />
+      Text="vTools version commit skipped (release DLL unchanged)."
+      Condition="'$(VersionDllStatusExitCode)' == '0'" />
 
     <Message
       Importance="high"
       Text="vTools version commit skipped (failed to build auto commit message)."
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' != '0'" />
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitMessageExitCode)' != '0'" />
 
     <Message
       Importance="high"
       Text="vTools version commit skipped (git commit failed; check git identity, branch, or repo state)."
-      Condition="'$(VersionCommitDiffExitCode)' != '0' and '$(VersionCommitMessageExitCode)' == '0' and '$(VersionCommitExitCode)' != '0'" />
+      Condition="'$(ShouldVersionCommit)' == 'true' and '$(VersionCommitMessageExitCode)' == '0' and '$(VersionCommitExitCode)' != '0'" />
 
     <Message
       Importance="high"
       Text="vTools version commit skipped (no staged changes)."
-      Condition="'$(VersionCommitDiffExitCode)' == '0'" />
+      Condition="'$(VersionDllStatusExitCode)' == '1' and '$(VersionCommitDiffExitCode)' == '0'" />
   </Target>
 
   <Target Name="ShowOutputVersionAfterBuild" AfterTargets="Build" Condition="Exists('$(TargetPath)')">
