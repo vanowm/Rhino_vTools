@@ -1,4 +1,4 @@
-Tools  ·  v26.7.13.1037
+Tools  ·  v26.7.13.1054
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -36,6 +36,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vTextAligned](#vtextaligned-flow) *(26.4.27.2125)* — places or repositions annotation text aligned and offset along a selected curve
   - [vTextFlip](#vtextflip-flow) *(26.4.27.2125)* — flips or rotates annotation text around its object plane
   - [vTitle](#vtitle-flow) *(26.7.1.1755)* — places or edits a titled annotation text box with optional bounding rectangle; hover to highlight, click existing to edit
+  - [vToggleControlPoints](#vtogglecontrolpoints-flow) *(26.7.13.1046)* — toggles selected objects between edit points and control points based on currently visible point mode
   - [vTogglePerpGumball](#vtoggleperpgumball-flow) *(26.4.24.1712)* — toggles a monitor that auto-orients the gumball perpendicular to selected control point grips
   - [vTrim](#vtrim-flow) *(26.4.24.1633)* — trims and extends curves with auto-cutter detection and join
   - [vTrimOff](#vtrimoff-flow) *(26.5.18.849)* — trims selected curves to the outer boundary of the enclosed region they collectively form; protruding ends are removed automatically
@@ -85,7 +86,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vAxesToggle](#vaxestoggle-flow), [vBiminiParts](#vbiminiparts-flow), [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFacing](#vfacing-flow), [vFitBox](#vfitbox-flow), [vGroup](#vgroup-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMatch](#vmatch-flow), [vMiddleCurve](#vmiddlecurve-flow), [vNotches](#vnotches-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vOverlaps](#voverlaps-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSetPt](#vsetpt-flow), [vSplit](#vsplit-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTitle](#vtitle-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
+Native commands: [vAxesToggle](#vaxestoggle-flow), [vBiminiParts](#vbiminiparts-flow), [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFacing](#vfacing-flow), [vFitBox](#vfitbox-flow), [vGroup](#vgroup-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMatch](#vmatch-flow), [vMiddleCurve](#vmiddlecurve-flow), [vNotches](#vnotches-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vOverlaps](#voverlaps-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSetPt](#vsetpt-flow), [vSplit](#vsplit-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTitle](#vtitle-flow), [vToggleControlPoints](#vtogglecontrolpoints-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -504,6 +505,16 @@ Notes:
 - Editing an existing title replaces it in place.
 - If the text annotation is later changed externally (e.g. via `Properties`), the bounding box resizes automatically on the next idle frame.
 - All settings persist to `vTools.config.json` under `vTitle`.
+
+### vToggleControlPoints flow
+
+1. Select objects or selected point grips.
+1. Run `vToggleControlPoints`.
+1. The command is transparent, so it can be run while another Rhino command is active.
+1. If no edit/control points are visible, edit points are shown first.
+1. If edit points are visible, the command switches to control points where supported.
+1. If control points are visible, the command switches back to edit points.
+1. Run with nothing selected to turn points off.
 
 ### vTogglePerpGumball flow
 
