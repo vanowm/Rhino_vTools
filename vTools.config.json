@@ -45,8 +45,8 @@
   },
   "vMatch": {
     "distance": 2.0,
-    "randStart": 0,
-    "randNext": 0
+    "randStart": false,
+    "randNext": false
   },
   "vMiddleCurve": {
     "lines": true,

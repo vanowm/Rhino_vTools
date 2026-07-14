@@ -97,6 +97,7 @@ public sealed class vFitBox : Command
         if (!TransformSelectedObjects(doc, objectIds, transform, out var transformedObjectIds))
         {
           RhinoApp.WriteLine("vFitBox: failed to rotate selected objects.");
+          DeleteObject(doc, fitId);
           return Result.Failure;
         }
 
@@ -106,6 +107,7 @@ public sealed class vFitBox : Command
         if (transformedFitId == Guid.Empty)
         {
           RhinoApp.WriteLine("vFitBox: failed to rotate fit box.");
+          DeleteObject(doc, fitId);
           return Result.Failure;
         }
 
@@ -201,8 +203,9 @@ public sealed class vFitBox : Command
 
   private static string FormatFitSizes(RhinoDoc doc, FitCandidate fit)
   {
-    var outWidth = fit.Mode == "2d" ? Math.Max(fit.Width, fit.Depth) : fit.Width;
-    var outHeight = fit.Mode == "2d" ? Math.Min(fit.Width, fit.Depth) : fit.Height;
+    var flat = fit.Mode == "2d" || IsEffectivelyFlatForSizeDisplay(doc, fit);
+    var outWidth = flat ? Math.Max(fit.Width, fit.Depth) : fit.Width;
+    var outHeight = flat ? Math.Min(fit.Width, fit.Depth) : fit.Height;
     if (outWidth < outHeight)
       (outWidth, outHeight) = (outHeight, outWidth);
     var primaryIsFractional = IsFractionalDisplayMode(doc);
@@ -211,6 +214,13 @@ public sealed class vFitBox : Command
     var wA = FormatLengthByMode(doc, outWidth, !primaryIsFractional);
     var hA = FormatLengthByMode(doc, outHeight, !primaryIsFractional);
     return $"{wP} x {hP} ({wA} x {hA})";
+  }
+
+  private static bool IsEffectivelyFlatForSizeDisplay(RhinoDoc doc, FitCandidate fit)
+  {
+    var shortSide = Math.Min(fit.Width, fit.Depth);
+    var tolerance = Math.Max(doc.ModelAbsoluteTolerance * 5.0, shortSide * 1.0e-4);
+    return fit.Height <= tolerance;
   }
 
   /// <summary>
@@ -292,7 +302,8 @@ public sealed class vFitBox : Command
       var currentFitMode = fitToggle.CurrentValue ? "area" : "height";
       UpdatePreviewBox(doc, conduit, currentFitMode, out var loopSizes);
       doc.Views.Redraw();
-      if (!string.IsNullOrEmpty(loopSizes) && loopSizes != lastPrintedSizes)
+      if ((result == GetResult.Option || result == GetResult.Number) &&
+          !string.IsNullOrEmpty(loopSizes) && loopSizes != lastPrintedSizes)
       {
         lastPrintedSizes = loopSizes;
         RhinoApp.WriteLine(loopSizes);
@@ -359,6 +370,7 @@ public sealed class vFitBox : Command
       RhinoDoc.DeselectObjects -= onSelectionChanged;
       debounceTimer.Stop();
       debounceTimer.Dispose();
+      conduit.PreviewBox = Box.Unset;
       conduit.Enabled = false;
       doc.Views.Redraw();
     }
@@ -435,6 +447,212 @@ public sealed class vFitBox : Command
     return Plane.WorldXY;
   }
 
+  private static bool TryFindSelectionPlane(
+    IReadOnlyList<GeometryBase> geometries,
+    double tolerance,
+    out Plane plane)
+  {
+    plane = Plane.Unset;
+
+    var points = new List<Point3d>();
+    foreach (var geometry in geometries)
+    {
+      if (!TryAddPlanarSamplePoints(geometry, points))
+        return false;
+    }
+
+    var unique = UniquePoints(points, tolerance);
+    if (!TryBuildPlaneFromPoints(unique, tolerance, out plane))
+      return false;
+
+    var bbox = new BoundingBox(unique);
+    var planeTolerance = Math.Max(tolerance, bbox.IsValid ? bbox.Diagonal.Length * 1.0e-6 : tolerance);
+    foreach (var point in unique)
+    {
+      if (Math.Abs(plane.DistanceTo(point)) > planeTolerance)
+      {
+        plane = Plane.Unset;
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private static bool TryAddPlanarSamplePoints(GeometryBase geometry, List<Point3d> points)
+  {
+    switch (geometry)
+    {
+      case Point point:
+        AddSamplePoint(points, point.Location);
+        return true;
+
+      case Curve curve:
+        return AddCurveSamplePoints(curve, points);
+
+      case Brep brep:
+        return AddBrepSamplePoints(brep, points);
+
+      case Extrusion extrusion:
+        var extrusionBrep = extrusion.ToBrep();
+        return extrusionBrep != null && AddBrepSamplePoints(extrusionBrep, points);
+
+      case Surface surface:
+        return AddSurfaceSamplePoints(surface, points);
+
+      case Mesh mesh:
+        for (var i = 0; i < mesh.Vertices.Count; i++)
+        {
+          var vertex = mesh.Vertices[i];
+          AddSamplePoint(points, new Point3d(vertex.X, vertex.Y, vertex.Z));
+        }
+        return mesh.Vertices.Count > 0;
+
+      default:
+        return false;
+    }
+  }
+
+  private static bool AddCurveSamplePoints(Curve curve, List<Point3d> points)
+  {
+    if (curve == null || !curve.IsValid)
+      return false;
+
+    var before = points.Count;
+    AddSamplePoint(points, curve.PointAtStart);
+    AddSamplePoint(points, curve.PointAtEnd);
+
+    double[]? parameters = null;
+    try
+    {
+      parameters = curve.DivideByCount(24, true);
+    }
+    catch
+    {
+    }
+
+    if (parameters != null && parameters.Length > 0)
+    {
+      foreach (var t in parameters)
+        AddSamplePoint(points, curve.PointAt(t));
+    }
+    else
+    {
+      var domain = curve.Domain;
+      for (var i = 1; i < 24; i++)
+      {
+        var t = domain.ParameterAt(i / 24.0);
+        AddSamplePoint(points, curve.PointAt(t));
+      }
+    }
+
+    return points.Count > before;
+  }
+
+  private static bool AddBrepSamplePoints(Brep brep, List<Point3d> points)
+  {
+    if (brep == null || !brep.IsValid)
+      return false;
+
+    var before = points.Count;
+    foreach (var vertex in brep.Vertices)
+      AddSamplePoint(points, vertex.Location);
+
+    foreach (var edge in brep.Edges)
+    {
+      Curve? curve = null;
+      try { curve = edge.DuplicateCurve(); }
+      catch { }
+      if (curve != null)
+        AddCurveSamplePoints(curve, points);
+    }
+
+    foreach (var face in brep.Faces)
+      AddSurfaceSamplePoints(face, points);
+
+    return points.Count > before;
+  }
+
+  private static bool AddSurfaceSamplePoints(Surface surface, List<Point3d> points)
+  {
+    if (surface == null || !surface.IsValid)
+      return false;
+
+    var before = points.Count;
+    var u = surface.Domain(0);
+    var v = surface.Domain(1);
+    var samples = new[] { 0.0, 0.5, 1.0 };
+    foreach (var a in samples)
+    {
+      foreach (var b in samples)
+        AddSamplePoint(points, surface.PointAt(u.ParameterAt(a), v.ParameterAt(b)));
+    }
+
+    return points.Count > before;
+  }
+
+  private static void AddSamplePoint(List<Point3d> points, Point3d point)
+  {
+    if (point.IsValid)
+      points.Add(point);
+  }
+
+  private static List<Point3d> UniquePoints(IEnumerable<Point3d> points, double tolerance)
+  {
+    var unique = new List<Point3d>();
+    var tol = Math.Max(tolerance, RhinoMath.ZeroTolerance);
+    foreach (var point in points)
+    {
+      if (!point.IsValid)
+        continue;
+      if (unique.Any(existing => existing.DistanceTo(point) <= tol))
+        continue;
+      unique.Add(point);
+    }
+    return unique;
+  }
+
+  private static bool TryBuildPlaneFromPoints(
+    IReadOnlyList<Point3d> points,
+    double tolerance,
+    out Plane plane)
+  {
+    plane = Plane.Unset;
+    if (points.Count < 3)
+      return false;
+
+    var tol = Math.Max(tolerance, RhinoMath.ZeroTolerance);
+    for (var i = 0; i < points.Count - 2; i++)
+    {
+      for (var j = i + 1; j < points.Count - 1; j++)
+      {
+        var xAxis = points[j] - points[i];
+        if (xAxis.Length <= tol)
+          continue;
+
+        for (var k = j + 1; k < points.Count; k++)
+        {
+          var candidate = points[k] - points[i];
+          var normal = Vector3d.CrossProduct(xAxis, candidate);
+          if (normal.Length <= tol * xAxis.Length)
+            continue;
+
+          if (!xAxis.Unitize() || !normal.Unitize())
+            continue;
+
+          var yAxis = Vector3d.CrossProduct(normal, xAxis);
+          if (yAxis.IsTiny() || !yAxis.Unitize())
+            continue;
+
+          plane = new Plane(points[i], xAxis, yAxis);
+          return plane.IsValid;
+        }
+      }
+    }
+
+    return false;
+  }
+
   /// <summary>
   /// Main fit solver matching the Python command behavior.
   /// </summary>
@@ -454,6 +672,23 @@ public sealed class vFitBox : Command
 
     var (requestedStepDeg, stableStepDeg) = StabilizedStepDeg(angleStepDeg);
     var planarTolerance = Math.Max(doc.ModelAbsoluteTolerance * 5.0, 1.0e-9);
+
+    if (TryFindSelectionPlane(geometries, planarTolerance, out var selectionPlane))
+    {
+      var selectionPlaneBest = FindBestYawForPlane2dRefined(geometries, selectionPlane, requestedStepDeg, objective2d);
+      if (selectionPlaneBest != null)
+      {
+        selectionPlaneBest.Normal = selectionPlane.ZAxis;
+        selectionPlaneBest.TestedNormals = 1;
+        selectionPlaneBest.RequestedStepDeg = requestedStepDeg;
+        selectionPlaneBest.EffectiveStepDeg = requestedStepDeg;
+        selectionPlaneBest.Mode = "2d";
+        selectionPlaneBest.FitMode = normalizedFitMode;
+        CanonicalizeCandidate(selectionPlaneBest);
+        Log.Write("vFitBox", $"FindBestFit planar: angle={selectionPlaneBest.AngleDeg:F4}° W={selectionPlaneBest.Width:F4} D={selectionPlaneBest.Depth:F4} H={selectionPlaneBest.Height:F4} area={selectionPlaneBest.Area:F4} normal=({selectionPlaneBest.Normal.X:F4},{selectionPlaneBest.Normal.Y:F4},{selectionPlaneBest.Normal.Z:F4})");
+        return selectionPlaneBest;
+      }
+    }
 
     var isBasePlanar = false;
     if (TryUnionBoundsInPlane(geometries, basePlane, out var baseBounds))
@@ -645,6 +880,20 @@ public sealed class vFitBox : Command
       return Guid.Empty;
 
     return doc.Objects.AddBrep(brep);
+  }
+
+  private static void DeleteObject(RhinoDoc doc, Guid objectId)
+  {
+    if (objectId == Guid.Empty)
+      return;
+
+    try
+    {
+      doc.Objects.Delete(objectId, true);
+    }
+    catch
+    {
+    }
   }
 
   /// <summary>

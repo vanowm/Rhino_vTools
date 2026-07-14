@@ -27,9 +27,12 @@ namespace vTools.Commands
 
     private const string TextLayerName = "Reference";
     private const string TextObjectName = "MultiUnroll_NumberLabel";
+    private const string FailureMarkerName = "MultiUnroll_FailedMarker";
     private const string LabelNumberKey = "MultiUnrollLabelNumber";
+    private const string FailedUnrollKey = "MultiUnrollFailed";
     private const string FlatGroupPrefix = "MultiUnroll_Flat";
     private const string OriginalGroupPrefix = "MultiUnroll_Original";
+    private const string FailureMarkerText = "X";
 
     private const string TextFont = "Arial";
     private const double TextHeightScale = 1.5;
@@ -203,6 +206,7 @@ namespace vTools.Commands
       bool exceeded = false;
       int done = 0;
       int failed = 0;
+      var failedSourceIds = new List<Guid>();
 
       doc.Views.RedrawEnabled = false;
       try
@@ -269,9 +273,24 @@ namespace vTools.Commands
           Curve[] unrolledCurves;
           Point3d[] unrolledPoints;
           TextDot[] unrolledDots;
-          Brep[] unrolledBreps = unroller.PerformUnroll(out unrolledCurves, out unrolledPoints, out unrolledDots);
+          Brep[] unrolledBreps;
+          try
+          {
+            unrolledBreps = unroller.PerformUnroll(out unrolledCurves, out unrolledPoints, out unrolledDots);
+          }
+          catch (Exception ex)
+          {
+            Dbg($"part={number} unroll_failed error={ex.Message}");
+            AddFailureMarker(doc, src, frame);
+            AddValid(failedSourceIds, src.Id);
+            failed++;
+            continue;
+          }
           if (unrolledBreps == null || unrolledBreps.Length == 0)
           {
+            Dbg($"part={number} unroll_failed no_breps");
+            AddFailureMarker(doc, src, frame);
+            AddValid(failedSourceIds, src.Id);
             failed++;
             continue;
           }
@@ -523,7 +542,8 @@ namespace vTools.Commands
       finally
       {
         doc.Views.RedrawEnabled = true;
-        RestoreSelection(doc, startIds);
+        var problemIds = Unique(failedSourceIds.Concat(assignment.SkippedIds)).ToList();
+        RestoreSelection(doc, problemIds.Count > 0 ? problemIds : startIds);
         doc.Views.Redraw();
       }
 
@@ -1176,6 +1196,57 @@ namespace vTools.Commands
       return doc.Objects.AddTextDot(text, point, attrs);
     }
 
+    private static Guid AddFailureMarker(RhinoDoc doc, SourceSurface src, LabelFrame? frame)
+    {
+      frame ??= SurfaceLabelFrame(doc, src.Id, ItemTextHeight(doc, src.Id, FailureMarkerText, src.Brep), src.Brep);
+
+      if (frame != null)
+      {
+        var height = Math.Max(frame.Height, doc.ModelAbsoluteTolerance * 10.0);
+        return AddFailureText(doc, frame.Point, frame.Y, frame.Normal, height, src.Id);
+      }
+
+      var point = LabelPoint(doc, src.Id, src.Brep);
+      if (!point.HasValue)
+      {
+        var bbox = src.Brep.GetBoundingBox(true);
+        if (bbox.IsValid)
+          point = bbox.Center;
+      }
+      if (!point.HasValue)
+        return Guid.Empty;
+
+      var fallbackHeight = Math.Max(ItemTextHeight(doc, src.Id, FailureMarkerText, src.Brep), doc.ModelAbsoluteTolerance * 10.0);
+      var normal = ClosestNormal(src.Brep, point.Value, Vector3d.ZAxis, doc.ModelAbsoluteTolerance);
+      var up = ProjectToPlane(Vector3d.YAxis, normal, doc.ModelAbsoluteTolerance) ?? Vector3d.YAxis;
+      return AddFailureText(doc, point.Value, up, normal, fallbackHeight, src.Id);
+    }
+
+    private static Guid AddFailureText(RhinoDoc doc, Point3d point, Vector3d yDirection, Vector3d normal, double height, Guid sourceId)
+    {
+      var n = Unit(normal, doc.ModelAbsoluteTolerance) ?? Vector3d.ZAxis;
+      var lift = Math.Max(height * TextLiftRatio, doc.ModelAbsoluteTolerance * 2.0);
+      var plane = TextPlane(point + n * lift, yDirection, n, doc.ModelAbsoluteTolerance);
+      var attrs = FailureMarkerAttributes(doc, sourceId);
+
+      try
+      {
+        var te = new TextEntity
+        {
+          PlainText = FailureMarkerText,
+          Plane = plane,
+          TextHeight = height,
+          Justification = TextJustification.MiddleCenter,
+          Font = Font.FromQuartetProperties(TextFont, false, false)
+        };
+        return doc.Objects.AddText(te, attrs);
+      }
+      catch
+      {
+        return doc.Objects.AddText(FailureMarkerText, plane, height, TextFont, false, false, attrs);
+      }
+    }
+
     private static ObjectAttributes LabelAttributes(RhinoDoc doc, Guid sourceId, bool transfer, string labelText)
     {
       ObjectAttributes? attrs = null;
@@ -1185,6 +1256,17 @@ namespace vTools.Commands
       attrs.Name = TextObjectName;
       attrs.LayerIndex = ReferenceLayerIndex(doc);
       attrs.SetUserString(LabelNumberKey, BaseNumber(labelText));
+      return attrs;
+    }
+
+    private static ObjectAttributes FailureMarkerAttributes(RhinoDoc doc, Guid sourceId)
+    {
+      var attrs = doc.Objects.FindId(sourceId)?.Attributes.Duplicate() ?? new ObjectAttributes();
+      attrs.Name = FailureMarkerName;
+      attrs.LayerIndex = ReferenceLayerIndex(doc);
+      attrs.ObjectColor = System.Drawing.Color.Red;
+      attrs.ColorSource = ObjectColorSource.ColorFromObject;
+      attrs.SetUserString(FailedUnrollKey, "true");
       return attrs;
     }
 
@@ -1336,6 +1418,7 @@ namespace vTools.Commands
         if (bestIndex < 0 || bestScore == null || bestScore.Item1 > bestLimit)
         {
           result.Skipped++;
+          result.SkippedIds.Add(item.Id);
           continue;
         }
 
@@ -1967,6 +2050,7 @@ namespace vTools.Commands
     private class AssignmentResult
     {
       public List<List<FollowingItem>> Buckets { get; }
+      public List<Guid> SkippedIds { get; } = new List<Guid>();
       public int Skipped { get; set; }
 
       public AssignmentResult(int count)

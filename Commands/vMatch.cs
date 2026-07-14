@@ -215,7 +215,11 @@ namespace vTools.Commands
           if (ires == GetResult.Number)
           {
             double v = go.Number();
-            if (v >= 0.0) { _distance = v; }
+            if (v >= 0.0)
+            {
+              _distance = v;
+              SaveSettings();
+            }
             continue;
           }
           if (ires == GetResult.Option)
@@ -232,7 +236,10 @@ namespace vTools.Commands
                   double.TryParse(gs.StringResult().Trim(),
                                   NumberStyles.Any, CultureInfo.InvariantCulture, out double dv)
                   && dv >= 0.0)
+              {
                 _distance = dv;
+                SaveSettings();
+              }
             }
             continue;
           }
@@ -555,21 +562,33 @@ namespace vTools.Commands
     {
       ToolsOptionStore.Read<int>(SectionName, s =>
       {
-        if (ToolsOptionStore.TryGetDouble(s, KeyDist,      out var d))  _distance  = d;
-        if (ToolsOptionStore.TryGetDouble(s, KeyRandStart, out var rs)) _randStart = rs > 0.5;
-        if (ToolsOptionStore.TryGetDouble(s, KeyRandNext,  out var rn)) _randNext  = rn > 0.5;
+        if (ToolsOptionStore.TryGetDouble(s, KeyDist, out var d) && d >= 0.0)
+          _distance = d;
+
+        if (ToolsOptionStore.TryGetBool(s, KeyRandStart, out var rs))
+          _randStart = rs;
+        else if (ToolsOptionStore.TryGetDouble(s, KeyRandStart, out var oldRs))
+          _randStart = oldRs > 0.5;
+
+        if (ToolsOptionStore.TryGetBool(s, KeyRandNext, out var rn))
+          _randNext = rn;
+        else if (ToolsOptionStore.TryGetDouble(s, KeyRandNext, out var oldRn))
+          _randNext = oldRn > 0.5;
+
         return 0;
       });
     }
 
     private static void SaveSettings()
     {
-      ToolsOptionStore.Update(SectionName, s =>
+      var saved = ToolsOptionStore.Update(SectionName, s =>
       {
         s[KeyDist]      = _distance;
-        s[KeyRandStart] = _randStart ? 1.0 : 0.0;
-        s[KeyRandNext]  = _randNext  ? 1.0 : 0.0;
+        s[KeyRandStart] = _randStart;
+        s[KeyRandNext]  = _randNext;
       });
+      if (!saved)
+        RhinoApp.WriteLine($"vMatch: failed to save options: {ToolsOptionStore.LastError}");
     }
   }
 }

@@ -80,7 +80,7 @@ public sealed class vSplitAtCorners : Command
 
         var idxAngle = gp.AddOptionDouble("Angle", ref angleOpt);
         var idxMinLen = gp.AddOptionDouble("MinLength", ref minLenOpt);
-        var idxClearManual = gp.AddOption("ClearManual");
+        var idxClearManual = manualCorners.Count > 0 ? gp.AddOption("ClearManual") : -1;
         var idxClearAll = gp.AddOption("ClearAll");
 
         EventHandler<GetPointDrawEventArgs> drawHandler = (_, e) => conduit.OnDynamicDraw(e);
@@ -98,7 +98,7 @@ public sealed class vSplitAtCorners : Command
           var opt = gp.Option();
           if (opt != null)
           {
-            if (opt.Index == idxClearManual)
+            if (idxClearManual >= 0 && opt.Index == idxClearManual)
               manualCorners.Clear();
             else if (opt.Index == idxClearAll)
             {
