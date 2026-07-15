@@ -104,29 +104,40 @@ public sealed class vToggleControlPoints : Command
     var grip = GripAtIndex(doc, record.OwnerId, record.Index);
     if (grip != null)
     {
-      var mode = GripMetadataMode(grip);
+      var mode = GripPointMode(doc, record.OwnerId, grip);
       if (mode != SelectionPointDisplayMode.None)
         return mode;
+
+      return SelectionPointDisplayMode.None;
     }
 
-    return PointLocationMode(doc, record.OwnerId, record.Point);
+    return PointLocationMode(doc, record.OwnerId, record.Point, ignoreCurveEndpoints: true);
   }
 
   private static SelectionPointDisplayMode GripPointMode(RhinoDoc doc, Guid objectId, GripObject grip)
   {
-    var mode = GripMetadataMode(grip);
+    var mode = GripMetadataMode(doc, objectId, grip);
     return mode != SelectionPointDisplayMode.None
       ? mode
-      : PointLocationMode(doc, objectId, grip.CurrentLocation);
+      : PointLocationMode(doc, objectId, grip.CurrentLocation, ignoreCurveEndpoints: true);
   }
 
-  private static SelectionPointDisplayMode GripMetadataMode(GripObject grip)
+  private static SelectionPointDisplayMode GripMetadataMode(RhinoDoc doc, Guid objectId, GripObject grip)
   {
-    if (IsCurveControlPointGrip(grip))
+    var isControlPoint = IsCurveControlPointGrip(grip);
+    var isEditPoint = IsCurveEditPointGrip(grip);
+
+    if (isEditPoint && !isControlPoint)
+      return SelectionPointDisplayMode.EditPoints;
+
+    if (isControlPoint && !isEditPoint)
       return SelectionPointDisplayMode.ControlPoints;
 
-    if (IsCurveEditPointGrip(grip))
-      return SelectionPointDisplayMode.EditPoints;
+    if (isControlPoint && isEditPoint)
+    {
+      Log.Write(Tag, $"ambiguous grip metadata owner={objectId} index={grip.Index}");
+      return PointLocationMode(doc, objectId, grip.CurrentLocation, ignoreCurveEndpoints: true);
+    }
 
     return SelectionPointDisplayMode.None;
   }
@@ -155,15 +166,41 @@ public sealed class vToggleControlPoints : Command
     }
   }
 
-  private static SelectionPointDisplayMode PointLocationMode(RhinoDoc doc, Guid objectId, Point3d point)
+  private static SelectionPointDisplayMode PointLocationMode(
+    RhinoDoc doc,
+    Guid objectId,
+    Point3d point,
+    bool ignoreCurveEndpoints = false)
   {
     var distance = DistanceToGeometry(doc, objectId, point);
     if (!distance.HasValue)
       return SelectionPointDisplayMode.None;
 
-    return distance.Value <= OnGeometryTolerance(doc)
-      ? SelectionPointDisplayMode.EditPoints
-      : SelectionPointDisplayMode.ControlPoints;
+    if (distance.Value > OnGeometryTolerance(doc))
+      return SelectionPointDisplayMode.ControlPoints;
+
+    if (ignoreCurveEndpoints && IsCurveEndpoint(doc, objectId, point))
+      return SelectionPointDisplayMode.None;
+
+    return SelectionPointDisplayMode.EditPoints;
+  }
+
+  private static bool IsCurveEndpoint(RhinoDoc doc, Guid objectId, Point3d point)
+  {
+    var obj = doc.Objects.FindId(objectId);
+    if (obj?.Geometry is not Curve curve)
+      return false;
+
+    var tolerance = OnGeometryTolerance(doc);
+    try
+    {
+      return point.DistanceTo(curve.PointAtStart) <= tolerance ||
+             point.DistanceTo(curve.PointAtEnd) <= tolerance;
+    }
+    catch
+    {
+      return false;
+    }
   }
 
   private static IEnumerable<int> SampleIndices(int count)
