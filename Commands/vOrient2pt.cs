@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using Rhino;
 using Rhino.Commands;
 using Rhino.Geometry;
@@ -60,7 +58,7 @@ public sealed class vOrient2pt : Command
         case 0:
           pickResult = OrientCommon.GetPointWithCopyOption(
             doc,
-            "Source first point",
+            "Source 1st point",
             ref copyMode,
             out sourceOrigin,
             previewSegments: previewSegments);
@@ -73,7 +71,7 @@ public sealed class vOrient2pt : Command
         case 1:
           pickResult = OrientCommon.GetPointWithCopyOption(
             doc,
-            "Target first point",
+            "Target 1st point",
             ref copyMode,
             out targetOrigin,
             traceFrom: sourceOrigin,
@@ -95,7 +93,7 @@ public sealed class vOrient2pt : Command
         case 2:
           pickResult = OrientCommon.GetPointWithCopyOption(
             doc,
-            "Source second point",
+            "Source 2nd point",
             ref copyMode,
             out sourceXAxisPoint,
             previewSegments: previewSegments,
@@ -115,7 +113,7 @@ public sealed class vOrient2pt : Command
         default:
           pickResult = OrientCommon.GetPointWithCopyOption(
             doc,
-            "Target second point",
+            "Target 2nd point",
             ref copyMode,
             out targetXAxisPoint,
             basePoint: targetOrigin,

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using Rhino;
 using Rhino.Commands;
 using Rhino.Geometry;
@@ -108,7 +106,7 @@ public sealed class vOrient3pt : Command
         case 0:
           pickResult = OrientCommon.GetPointWithCopyOption(
             doc,
-            "Source first point",
+            "Source 1st point",
             ref copyMode,
             out sourceOrigin,
             previewSegments: previewSegments);
@@ -121,7 +119,7 @@ public sealed class vOrient3pt : Command
         case 1:
           pickResult = OrientCommon.GetPointWithCopyOption(
             doc,
-            "Target first point",
+            "Target 1st point",
             ref copyMode,
             out targetOrigin,
             traceFrom: sourceOrigin,
@@ -143,7 +141,7 @@ public sealed class vOrient3pt : Command
         case 2:
           pickResult = OrientCommon.TryGetOptionalPointWithCopyOption(
             doc,
-            "Source second point. Press Enter for 1-point orient",
+            "Source 2nd point. Press Enter for 1-point orient",
             ref copyMode,
             out sourceXAxisPoint,
             previewSegments: previewSegments,
@@ -166,7 +164,7 @@ public sealed class vOrient3pt : Command
         case 3:
           pickResult = OrientCommon.TryGetOptionalPointWithCopyOption(
             doc,
-            "Target second point. Press Enter to use source point",
+            "Target 2nd point. Press Enter to use source point",
             ref copyMode,
             out targetXAxisPoint,
             basePoint: targetOrigin,
@@ -200,7 +198,7 @@ public sealed class vOrient3pt : Command
         case 4:
           pickResult = OrientCommon.TryGetOptionalPointWithCopyOption(
             doc,
-            "Source third point. Press Enter for 2-point orient",
+            "Source 3rd point. Press Enter for 2-point orient",
             ref copyMode,
             out sourceYAxisPoint,
             previewSegments: previewSegments,
@@ -224,7 +222,7 @@ public sealed class vOrient3pt : Command
         default:
           pickResult = OrientCommon.TryGetOptionalPointWithCopyOption(
             doc,
-            "Target third point. Press Enter to use source point",
+            "Target 3rd point. Press Enter to use source point",
             ref copyMode,
             out targetYAxisPoint,
             basePoint: targetOrigin,

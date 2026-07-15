@@ -1,4 +1,4 @@
-Tools  ·  v26.7.15.1950
+Tools  ·  v26.7.15.1955
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
