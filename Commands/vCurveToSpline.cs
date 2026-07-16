@@ -302,7 +302,7 @@ public sealed class vCurveToSpline : Command
   /// <summary>
   /// Builds a Segment list from an ordered sequence of RhinoObjects.
   /// </summary>
-  private static List<Segment> SegmentsFromObjects(IEnumerable<RhinoObject> objects)
+  private static List<Segment> SegmentsFromObjects(IEnumerable<RhinoObject> objects, double tolerance)
   {
     var segments = new List<Segment>();
     foreach (var obj in objects)
@@ -316,7 +316,11 @@ public sealed class vCurveToSpline : Command
         for (var i = 0; i < nurbs.Points.Count; i++)
           pts.Add(nurbs.Points[i].Location);
         if (pts.Count >= 1)
-          segments.Add(new Segment(pts, curve.PointAtStart, curve.PointAtEnd, curve.IsClosed));
+        {
+          var isClosed = curve.IsClosed ||
+            PointsMatch(curve.PointAtStart, curve.PointAtEnd, tolerance);
+          segments.Add(new Segment(pts, curve.PointAtStart, curve.PointAtEnd, isClosed));
+        }
       }
       else if (obj.Geometry is Rhino.Geometry.Point point)
       {
@@ -330,7 +334,7 @@ public sealed class vCurveToSpline : Command
   /// Builds a Segment list from the current document selection (unordered fallback).
   /// </summary>
   private static List<Segment> SegmentsFromDocumentSelection(RhinoDoc doc)
-    => SegmentsFromObjects(SelectedGeometryObjects(doc));
+    => SegmentsFromObjects(SelectedGeometryObjects(doc), doc.ModelAbsoluteTolerance);
 
   /// <summary>
   /// Builds interpolated curves according to selected join mode.
@@ -348,8 +352,8 @@ public sealed class vCurveToSpline : Command
         ? OrderSegmentsByClosestEndpointPairs(group, tolerance)
         : OrderSegmentsAsChain(group, tolerance);
       var closedOutput = IsClosedOutput(group, orderedChain, tolerance);
-      var interpPoints = BuildInterpPoints(group, orderedChain, tolerance);
-      var interpCurve = CreateInterpCurve(interpPoints, closedOutput);
+      var interpPoints = BuildInterpPoints(group, orderedChain, tolerance, closedOutput);
+      var interpCurve = CreateInterpCurve(interpPoints, closedOutput, tolerance);
       if (interpCurve != null)
         interpCurves.Add(interpCurve);
     }
@@ -919,7 +923,8 @@ private static SegmentEndpoint OtherEndpoint(EndpointPair pair, int segmentIndex
   private static List<Point3d> BuildInterpPoints(
     IReadOnlyList<Segment> segments,
     IReadOnlyList<(int SegmentIndex, bool Reverse)> orderedChain,
-    double tolerance)
+    double tolerance,
+    bool closed)
   {
     var interpPoints = new List<Point3d>();
 
@@ -935,8 +940,15 @@ private static SegmentEndpoint OtherEndpoint(EndpointPair pair, int segmentIndex
         interpPoints.AddRange(segPoints);
     }
 
-    if (interpPoints.Count > 2 && PointsMatch(interpPoints[0], interpPoints[^1], tolerance))
+    if (interpPoints.Count > 2 && closed)
+    {
+      if (!PointsMatch(interpPoints[0], interpPoints[^1], tolerance))
+        interpPoints.Add(interpPoints[0]);
+    }
+    else if (interpPoints.Count > 2 && PointsMatch(interpPoints[0], interpPoints[^1], tolerance))
+    {
       interpPoints.RemoveAt(interpPoints.Count - 1);
+    }
 
     return interpPoints;
   }
@@ -944,7 +956,7 @@ private static SegmentEndpoint OtherEndpoint(EndpointPair pair, int segmentIndex
   /// <summary>
   /// Creates one interpolated curve from a point chain.
   /// </summary>
-  private static Curve? CreateInterpCurve(IReadOnlyList<Point3d> interpPoints, bool closed)
+  private static Curve? CreateInterpCurve(IReadOnlyList<Point3d> interpPoints, bool closed, double tolerance)
   {
     if (interpPoints.Count < 2)
       return null;
@@ -953,10 +965,15 @@ private static SegmentEndpoint OtherEndpoint(EndpointPair pair, int segmentIndex
     if (interpPoints.Count <= degree)
       degree = Math.Max(1, interpPoints.Count - 1);
 
-    return Curve.CreateInterpolatedCurve(
+    var curve = Curve.CreateInterpolatedCurve(
       interpPoints,
       degree,
-      closed ? CurveKnotStyle.ChordPeriodic : CurveKnotStyle.Chord);
+      CurveKnotStyle.Chord);
+
+    if (closed && curve != null && !curve.IsClosed)
+      curve.MakeClosed(tolerance);
+
+    return curve;
   }
 
   private static bool PointsMatch(Point3d a, Point3d b, double tolerance)

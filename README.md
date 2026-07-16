@@ -1,4 +1,4 @@
-Tools  ·  v26.7.16.1310
+Tools  ·  v26.7.16.1317
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -138,7 +138,7 @@ Notes:
 
 1. Confirm to create interpolated curve output and select results.
 
-Closed source curves and closed joined chains are created as closed periodic splines.
+Closed source curves and closed joined chains are created as closed splines.
 
 ### vDiamonds flow
 
