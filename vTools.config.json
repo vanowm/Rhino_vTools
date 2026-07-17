@@ -60,6 +60,7 @@
     "notch_offset": 0.5,
     "notch_width": 0.18,
     "notch_type": "I",
+    "notch": true,
     "percent": false,
     "group": false,
     "label": false,

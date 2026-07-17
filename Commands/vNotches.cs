@@ -33,6 +33,7 @@ public sealed class vNotches : Rhino.Commands.Command
   static double _notchOffset    = 0.5;
   static double _notchWidth     = 0.18;
   static string _notchType      = "I";
+  static bool   _notch          = true;
   static bool   _percent        = false;
   static bool   _group          = false;
   static bool   _label          = false;
@@ -104,7 +105,8 @@ public sealed class vNotches : Rhino.Commands.Command
       if (ToolsOptionStore.TryGetDouble(s, "notch_offset",    out v))     _notchOffset   = v;
       if (ToolsOptionStore.TryGetDouble(s, "notch_width",     out v))     _notchWidth    = v;
       if (ToolsOptionStore.TryGetString(s, "notch_type",      out var t)) _notchType     = t;
-      if (ToolsOptionStore.TryGetBool  (s, "percent",         out var b)) _percent       = b;
+      if (ToolsOptionStore.TryGetBool  (s, "notch",           out var b)) _notch         = b;
+      if (ToolsOptionStore.TryGetBool  (s, "percent",         out b))     _percent       = b;
       if (ToolsOptionStore.TryGetBool  (s, "group",           out b))     _group         = b;
       if (ToolsOptionStore.TryGetBool  (s, "label",           out b))     _label         = b;
       if (ToolsOptionStore.TryGetString(s, "label_value",     out t))     _labelValue    = t;
@@ -131,6 +133,8 @@ public sealed class vNotches : Rhino.Commands.Command
     });
     if (double.IsNaN(_labelOffset))
       _labelOffset = ModelUnitsFromInches(doc, DefaultLabelOffIn);
+    if (!_notch && !_label)
+      _notch = true;
   }
 
   static void SaveOptions(NotchSession s)
@@ -143,6 +147,7 @@ public sealed class vNotches : Rhino.Commands.Command
     sec["notch_offset"]    = _notchOffset;
     sec["notch_width"]     = _notchWidth;
     sec["notch_type"]      = _notchType;
+    sec["notch"]           = _notch;
     sec["percent"]         = _percent;
     sec["group"]           = _group;
     sec["label"]           = _label;
@@ -175,6 +180,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   _notchOffset   = s.NotchOffsetOpt.CurrentValue;
   _notchWidth    = s.NotchWidthOpt.CurrentValue;
   _notchType     = s.NotchTypeValues[s.NotchTypeIndex];
+  _notch         = s.NotchToggle.CurrentValue;
 
   _percent       = s.PercentToggle.CurrentValue;
   _group         = s.GroupToggle.CurrentValue;
@@ -236,7 +242,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
 
     var session = new NotchSession(doc, curves, curveIds, initialSides,
-      _notchLength, _notchOffset, _notchWidth, _notchType,
+      _notchLength, _notchOffset, _notchWidth, _notchType, _notch,
       _percent, _group, _label, _labelValue,
       _labelSize, _labelSizeAuto, _labelSizePct,
       _notchLayer, _labelLayer, _labelOffset, _labelOffsetY,
@@ -723,10 +729,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       : -1;
     s.TypeOptionIndex        = gp.AddOptionList("NotchType", s.NotchTypeValues, s.NotchTypeIndex);
     s.NotchLayerOptionIndex  = gp.AddOption("NotchLayer", s.NotchLayerName);
+    s.NotchEnabledIndex      = gp.AddOptionToggle("NotchEnabled", ref s.NotchToggle);
     gp.AddOptionDouble("NotchLength", ref s.NotchLengthOpt);
     gp.AddOptionDouble("NotchWidth", ref s.NotchWidthOpt);
     gp.AddOptionDouble("NotchOffset", ref s.NotchOffsetOpt);
-    gp.AddOptionToggle("LabelEnabled", ref s.LabelToggle);
+    s.LabelEnabledIndex      = gp.AddOptionToggle("LabelEnabled", ref s.LabelToggle);
     s.LabelValueOptionIndex  = gp.AddOption("Label", s.LabelValueText);
     s.LabelLayerOptionIndex = gp.AddOption("LabelLayer", s.LabelLayerName);
     s.LabelSizeAutoIndex = gp.AddOptionToggle("LabelSizeMode", ref s.LabelSizeAutoToggle);
@@ -773,6 +780,18 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     else if (idx == s.NotchLayerOptionIndex)
     {
       RhinoGet.GetString("Notch layer", false, ref s.NotchLayerName);
+    }
+    else if (idx == s.NotchEnabledIndex)
+    {
+      if (!s.NotchToggle.CurrentValue && !s.LabelToggle.CurrentValue)
+        s.LabelToggle.CurrentValue = true;
+      SaveOptions(s);
+    }
+    else if (idx == s.LabelEnabledIndex)
+    {
+      if (!s.LabelToggle.CurrentValue && !s.NotchToggle.CurrentValue)
+        s.NotchToggle.CurrentValue = true;
+      SaveOptions(s);
     }
     else if (idx == s.LabelValueOptionIndex)
     {
@@ -853,6 +872,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       : s.CurveContextGroupIndices;
 
     string labelText = s.LabelValueText.Trim();
+    bool canNotch    = s.NotchToggle.CurrentValue;
     bool canLabel    = allowLabel && s.LabelToggle.CurrentValue && labelText.Length > 0;
     string nextLabel = labelText;
 
@@ -890,7 +910,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     {
       newIds = AddNotchesPerCurve(doc, s, sides, activeGroupIndices,
         lengthsFromStart, notchLen, notchOff, notchTyp, notchWid,
-        canLabel, placementLabels, resolvedLabelSize,
+        canNotch, canLabel, placementLabels, resolvedLabelSize,
         effectiveNotchLayer, effectiveLabelLayer,
         s.LabelOffsetOpt.CurrentValue, s.LabelOffsetYOpt.CurrentValue,
         s.LabelSideFlip, cursorPoint, s.CurveEnabled);
@@ -901,7 +921,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         doc.EndUndoRecord(undoRec);
     }
 
-    if (newIds == null || !newIds.Any(n => n.notch != Guid.Empty))
+    if (newIds == null || !newIds.Any(n => n.notch != Guid.Empty || n.label.HasValue))
       return false;
 
     s.RedoBatches.Clear();
@@ -913,6 +933,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       NotchOffset      = notchOff,
       NotchType        = notchTyp,
       NotchWidth       = notchWid,
+      NotchEnabled     = canNotch,
       GroupEnabled     = s.GroupToggle.CurrentValue,
       LabelEnabled     = canLabel,
       LabelValues      = new List<string>(placementLabels),
@@ -1271,6 +1292,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     double nw    = s.NotchWidthOpt.CurrentValue;
     double lsize = EffectiveLabelSize(s);
     string ltext = s.LabelValueText.Trim();
+    bool   canNotch = s.NotchToggle.CurrentValue;
     bool   canLabel = s.LabelToggle.CurrentValue && ltext.Length > 0 && lsize > doc.ModelAbsoluteTolerance;
 
     for (int i = 0; i < s.Curves.Count; i++)
@@ -1280,8 +1302,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       var geom = NotchGeometry(s.Curves[i], lengths[i], nl, no, sides[i], nt, nw,
         curveCursor, null);
       if (geom == null) continue;
-      if (geom is LineCurve lc)           e.Display.DrawLine(lc.Line, System.Drawing.Color.Cyan, 2);
-      else if (geom is PolylineCurve plc)  e.Display.DrawPolyline(plc.ToPolyline(), System.Drawing.Color.Cyan, 2);
+      if (canNotch)
+      {
+        if (geom is LineCurve lc)          e.Display.DrawLine(lc.Line, System.Drawing.Color.Cyan, 2);
+        else if (geom is PolylineCurve plc) e.Display.DrawPolyline(plc.ToPolyline(), System.Drawing.Color.Cyan, 2);
+      }
 
       if (canLabel)
       {
@@ -1749,7 +1774,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     Curve curve, double lengthFromStart,
     double notchLength, double notchOffset, string side, int groupIndex,
     string notchType, double notchWidth,
-    bool labelEnabled, string labelText, double labelSize,
+    bool notchEnabled, bool labelEnabled, string labelText, double labelSize,
     string notchLayer, string labelLayer,
     double labelOffset, double labelOffsetY,
     string labelCurveSide,
@@ -1762,22 +1787,21 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       side, notchType, notchWidth, cursorPoint, tangentHint);
     if (geom == null) return (Guid.Empty, null);
 
-    Guid notchId;
-    if (geom is LineCurve lc)
+    Guid notchId = Guid.Empty;
+    if (notchEnabled && geom is LineCurve lc)
     {
       var attrs = new ObjectAttributes { LayerIndex = ResolveLayerIndex(doc, notchLayer) };
       if (groupIndex >= 0) attrs.AddToGroup(groupIndex);
       notchId = doc.Objects.AddLine(lc.Line, attrs);
     }
-    else if (geom is PolylineCurve plc)
+    else if (notchEnabled && geom is PolylineCurve plc)
     {
       var attrs = new ObjectAttributes { LayerIndex = ResolveLayerIndex(doc, notchLayer) };
       if (groupIndex >= 0) attrs.AddToGroup(groupIndex);
       notchId = doc.Objects.AddPolyline(plc.ToPolyline(), attrs);
     }
-    else return (Guid.Empty, null);
-
-    if (notchId == Guid.Empty) return (Guid.Empty, null);
+    else if (notchEnabled)
+      return (Guid.Empty, null);
 
     Guid? labelId = null;
     if (labelEnabled && tangent.IsValid && direction.IsValid)
@@ -1813,7 +1837,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     RhinoDoc doc, NotchSession s, List<string> sides, int[] groupIndices,
     List<double> lengths, double notchLen, double notchOff,
     string notchTyp, double notchWid,
-    bool canLabel, List<string> labelValues, double labelSize,
+    bool canNotch, bool canLabel, List<string> labelValues, double labelSize,
     string notchLayer, string labelLayer,
     double labelOffset, double labelOffsetY,
     bool labelSideFlip, Point3d? cursorPoint, bool[] curveEnabled)
@@ -1837,12 +1861,12 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       var (nid, lid) = AddNotch(doc, s.Curves[i], lengths[i],
         notchLen, notchOff, sides[i], gi,
         notchTyp, notchWid,
-        canLabel, lv, labelSize,
+        canNotch, canLabel, lv, labelSize,
         notchLayer, labelLayer,
         labelOffset, labelOffsetY,
         labelCurveSide, curveCursor, null);
 
-      if (nid != Guid.Empty)
+      if (nid != Guid.Empty || lid.HasValue)
       {
         GetCurveTangentAndDirection(s.Curves[i], lengths[i], sides[i],
           curveCursor, null, out var resolvedTangent, out var resolvedDirection);
@@ -1915,7 +1939,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       var (nid, lid) = AddNotch(doc, s.Curves[curveIndex], d,
         rec.NotchLength, rec.NotchOffset, side, groupIdx,
         rec.NotchType, rec.NotchWidth,
-        lbl, lv, rec.LabelSize,
+        rec.NotchEnabled, lbl, lv, rec.LabelSize,
         EffectiveLayerName(doc, rec.NotchLayer, rec.NotchLayer),
         EffectiveLayerName(doc, rec.LabelLayer, rec.NotchLayer),
         rec.LabelOffset, rec.LabelOffsetY, labelCurveSide, null, null);
@@ -2165,6 +2189,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public OptionDouble LabelOffsetYOpt;
     public OptionToggle PercentToggle;
     public OptionToggle GroupToggle;
+    public OptionToggle NotchToggle;
     public OptionToggle LabelToggle;
     public OptionToggle LabelSizeAutoToggle;
 
@@ -2211,7 +2236,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     // Command option indices (set each iteration)
     public int SideOptionIndex, ReverseOptionIndex, UndoOptionIndex, RedoOptionIndex;
-    public int TypeOptionIndex, NotchLayerOptionIndex;
+    public int TypeOptionIndex, NotchLayerOptionIndex, NotchEnabledIndex, LabelEnabledIndex;
     public int LabelValueOptionIndex, LabelLayerOptionIndex;
     public int LabelSizeAutoIndex, LabelSizePctIndex2;
 
@@ -2226,7 +2251,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public List<double> PreviewLengthsFromStart = [];
     public readonly Stack<NotchUndoBatch> RedoBatches = [];
     public NotchSession(RhinoDoc doc, List<Curve> curves, List<Guid> curveIds, bool[] sides,
-      double notchLength, double notchOffset, double notchWidth, string notchType,
+      double notchLength, double notchOffset, double notchWidth, string notchType, bool notch,
       bool percent, bool group, bool label, string labelValue,
       double labelSize, bool labelSizeAuto, int labelSizePct,
       string notchLayer, string labelLayer, double labelOffset, double labelOffsetY,
@@ -2249,6 +2274,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       LabelOffsetYOpt   = new OptionDouble(labelOffsetY, -1e9, 1e9);
       PercentToggle     = new OptionToggle(percent,       "Off", "On");
       GroupToggle       = new OptionToggle(group,         "Off", "On");
+      NotchToggle       = new OptionToggle(notch,         "Off", "On");
       LabelToggle       = new OptionToggle(label,         "Off", "On");
       LabelSizeAutoToggle = new OptionToggle(labelSizeAuto, "Manual", "Auto");
 
@@ -2300,6 +2326,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public double         NotchOffset;
     public string         NotchType      = "I";
     public double         NotchWidth;
+    public bool           NotchEnabled   = true;
     public bool           GroupEnabled;
     public bool           LabelEnabled;
     public List<string>   LabelValues    = [];
@@ -2431,7 +2458,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     readonly TextBox     _lengthBox, _offsetBox, _widthBox;
     readonly DropDown    _notchLayerDrop;
     readonly CheckBox    _percentCheck, _groupCheck;
-    readonly CheckBox    _labelCheck, _autoAdvCheck, _sideFlipCheck;
+    readonly CheckBox    _notchCheck, _labelCheck, _autoAdvCheck, _sideFlipCheck;
+    System.Windows.Controls.CheckBox? _notchHeaderCheck;
     System.Windows.Controls.CheckBox? _labelHeaderCheck;
     readonly TextBox     _labelValueBox;
     readonly DropDown    _labelLayerDrop;
@@ -2503,6 +2531,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         finally { _suppress = false; }
       };
 
+      _notchCheck = new CheckBox { Text = "", Checked = s.NotchToggle.CurrentValue };
+      _notchCheck.CheckedChanged += (_, __) =>
+      {
+        if (_suppress) return;
+        ApplyFeatureToggle(notch: true, _notchCheck.Checked == true);
+      };
+
       // Percent / Group
       _percentCheck = new CheckBox { Text = "Percent", Checked = s.PercentToggle.CurrentValue };
       _percentCheck.CheckedChanged += (_, __) =>
@@ -2528,13 +2563,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _labelCheck.CheckedChanged += (_, __) =>
       {
         if (_suppress) return;
-        bool enabled = _labelCheck.Checked == true;
-        if (_labelHeaderCheck != null && _labelHeaderCheck.IsChecked != enabled)
-          _labelHeaderCheck.IsChecked = enabled;
-        s.LabelToggle.CurrentValue = enabled;
-        ApplyDynamic();
-        Redraw();
-        Persist();
+        ApplyFeatureToggle(notch: false, _labelCheck.Checked == true);
       };
       AttachTextLive(_labelValueBox, text => s.LabelValueText = text);
       _autoAdvCheck.CheckedChanged += (_, __) =>
@@ -2748,7 +2777,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       notchTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset"), new TableCell(_offsetBox,      true) } });
       var notchGroup = new GroupBox { Text = "", Content = notchTable };
       InstallCollapsibleGroupHeader(notchGroup, notchTable, "Notch",
-        () => _s.NotchCollapsed, value => _s.NotchCollapsed = value);
+        () => _s.NotchCollapsed, value => _s.NotchCollapsed = value,
+        notchToggle: true);
 
       // ── Multiple group ───────────────────────────────────────────────────
       var multipleTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
@@ -2863,8 +2893,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         Padding = new Eto.Drawing.Padding(6),
       };
       root.Items.Add(new StackLayoutItem(notchGroup, false));
-      root.Items.Add(new StackLayoutItem(labelGroup, false));
       root.Items.Add(new StackLayoutItem(multipleGroup, false));
+      root.Items.Add(new StackLayoutItem(labelGroup, false));
       root.Items.Add(new StackLayoutItem(pgStack,    false));
       root.Items.Add(new StackLayoutItem(curveStack, false));
       root.Items.Add(new StackLayoutItem(infoRow,    false));
@@ -2899,7 +2929,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       };
 
     void InstallCollapsibleGroupHeader(GroupBox group, Control content, string title,
-      Func<bool> getCollapsed, Action<bool> setCollapsed, bool labelToggle = false)
+      Func<bool> getCollapsed, Action<bool> setCollapsed,
+      bool notchToggle = false, bool labelToggle = false)
     {
       System.Windows.Controls.StackPanel? headerPanel = null;
       System.Windows.Controls.Button? collapseButton = null;
@@ -2982,17 +3013,21 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
           };
           headerPanel.Children.Add(collapseButton);
 
-          if (labelToggle)
+          if (notchToggle || labelToggle)
           {
+            bool isNotch = notchToggle;
             var headerCheck = new System.Windows.Controls.CheckBox
             {
               Content = title,
-              IsChecked = _s.LabelToggle.CurrentValue,
+              IsChecked = isNotch
+                ? _s.NotchToggle.CurrentValue
+                : _s.LabelToggle.CurrentValue,
               VerticalAlignment = System.Windows.VerticalAlignment.Center,
             };
-            headerCheck.Checked += (_, __) => SetLabelEnabledFromHeader(true);
-            headerCheck.Unchecked += (_, __) => SetLabelEnabledFromHeader(false);
-            _labelHeaderCheck = headerCheck;
+            headerCheck.Checked += (_, __) => SetFeatureEnabledFromHeader(isNotch, true);
+            headerCheck.Unchecked += (_, __) => SetFeatureEnabledFromHeader(isNotch, false);
+            if (isNotch) _notchHeaderCheck = headerCheck;
+            else _labelHeaderCheck = headerCheck;
             headerPanel.Children.Add(headerCheck);
           }
           else
@@ -3024,12 +3059,52 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       ClientSize = new Eto.Drawing.Size(Math.Max(280, ClientSize.Width), height);
     }
 
-    void SetLabelEnabledFromHeader(bool enabled)
+    void SetFeatureEnabledFromHeader(bool notch, bool enabled)
     {
       if (_suppress)
         return;
-      if (_labelCheck.Checked != enabled)
-        _labelCheck.Checked = enabled;
+      var check = notch ? _notchCheck : _labelCheck;
+      if (check.Checked != enabled)
+        check.Checked = enabled;
+    }
+
+    void ApplyFeatureToggle(bool notch, bool enabled)
+    {
+      if (_suppress) return;
+
+      _suppress = true;
+      try
+      {
+        if (notch)
+        {
+          _s.NotchToggle.CurrentValue = enabled;
+          _notchCheck.Checked = enabled;
+          if (_notchHeaderCheck != null) _notchHeaderCheck.IsChecked = enabled;
+          if (!enabled && !_s.LabelToggle.CurrentValue)
+          {
+            _s.LabelToggle.CurrentValue = true;
+            _labelCheck.Checked = true;
+            if (_labelHeaderCheck != null) _labelHeaderCheck.IsChecked = true;
+          }
+        }
+        else
+        {
+          _s.LabelToggle.CurrentValue = enabled;
+          _labelCheck.Checked = enabled;
+          if (_labelHeaderCheck != null) _labelHeaderCheck.IsChecked = enabled;
+          if (!enabled && !_s.NotchToggle.CurrentValue)
+          {
+            _s.NotchToggle.CurrentValue = true;
+            _notchCheck.Checked = true;
+            if (_notchHeaderCheck != null) _notchHeaderCheck.IsChecked = true;
+          }
+        }
+      }
+      finally { _suppress = false; }
+
+      ApplyDynamic();
+      Redraw();
+      Persist();
     }
 
     void AttachNumericLive(TextBox box, Func<double> current, Action<double> apply)
@@ -3189,6 +3264,9 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         _widthBox.Text                 = $"{_s.NotchWidthOpt.CurrentValue:G}";
         _percentCheck.Checked          = _s.PercentToggle.CurrentValue;
         _groupCheck.Checked            = _s.GroupToggle.CurrentValue;
+        _notchCheck.Checked            = _s.NotchToggle.CurrentValue;
+        if (_notchHeaderCheck != null)
+          _notchHeaderCheck.IsChecked = _s.NotchToggle.CurrentValue;
         _labelCheck.Checked            = _s.LabelToggle.CurrentValue;
         if (_labelHeaderCheck != null)
           _labelHeaderCheck.IsChecked = _s.LabelToggle.CurrentValue;
@@ -3224,9 +3302,12 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _s.NotchOffsetOpt.CurrentValue = ParseDouble(_offsetBox.Text, _s.NotchOffsetOpt.CurrentValue);
       _s.NotchWidthOpt.CurrentValue = ParseDouble(_widthBox.Text, _s.NotchWidthOpt.CurrentValue);
       _s.NotchLayerName = GetDropDownLayerName(_notchLayerDrop, _s.NotchLayerName);
+      _s.NotchToggle.CurrentValue = _notchCheck.Checked == true;
       _s.PercentToggle.CurrentValue = _percentCheck.Checked == true;
       _s.GroupToggle.CurrentValue = _groupCheck.Checked == true;
       _s.LabelToggle.CurrentValue = _labelCheck.Checked == true;
+      if (!_s.NotchToggle.CurrentValue && !_s.LabelToggle.CurrentValue)
+        _s.NotchToggle.CurrentValue = true;
       _s.LabelValueText = _labelValueBox.Text;
       _s.LabelAutoAdv = _autoAdvCheck.Checked == true;
       _s.LabelSideFlip = _sideFlipCheck.Checked == true;
