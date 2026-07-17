@@ -2750,6 +2750,27 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       InstallCollapsibleGroupHeader(notchGroup, notchTable, "Notch",
         () => _s.NotchCollapsed, value => _s.NotchCollapsed = value);
 
+      // ── Multiple group ───────────────────────────────────────────────────
+      var multipleTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
+      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Start offset"), new TableCell(_multipleStartOffsetStepper, true) } });
+      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("End offset"),   new TableCell(_multipleEndOffsetStepper,   true) } });
+      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Number"),       new TableCell(_multipleNumberStepper,      true) } });
+      var distanceStack = new StackLayout
+      {
+        Orientation = Orientation.Vertical,
+        Spacing = 0,
+        Items =
+        {
+          new StackLayoutItem(new Label { Text = "Distance" }, false),
+          new StackLayoutItem(_multipleDistanceLabel, false),
+        },
+      };
+      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = {
+        new TableCell(distanceStack, false), new TableCell(_multipleAddButton, false) } });
+      var multipleGroup = new GroupBox { Text = "", Content = multipleTable };
+      InstallCollapsibleGroupHeader(multipleGroup, multipleTable, "Multiple",
+        () => _s.MultipleCollapsed, value => _s.MultipleCollapsed = value);
+
       // ── Label group ──────────────────────────────────────────────────────
       var labelHeader = new TableLayout { Spacing = new Eto.Drawing.Size(4, 0) };
       labelHeader.Rows.Add(new TableRow { ScaleHeight = false, Cells = {
@@ -2781,27 +2802,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       InstallCollapsibleGroupHeader(labelGroup, labelTable, "Label",
         () => _s.LabelCollapsed, value => _s.LabelCollapsed = value,
         labelToggle: true);
-
-      // ── Multiple group ───────────────────────────────────────────────────
-      var multipleTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
-      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Start offset"), new TableCell(_multipleStartOffsetStepper, true) } });
-      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("End offset"),   new TableCell(_multipleEndOffsetStepper,   true) } });
-      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Number"),       new TableCell(_multipleNumberStepper,      true) } });
-      var distanceStack = new StackLayout
-      {
-        Orientation = Orientation.Vertical,
-        Spacing = 0,
-        Items =
-        {
-          new StackLayoutItem(new Label { Text = "Distance" }, false),
-          new StackLayoutItem(_multipleDistanceLabel, false),
-        },
-      };
-      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = {
-        new TableCell(distanceStack, false), new TableCell(_multipleAddButton, false) } });
-      var multipleGroup = new GroupBox { Text = "", Content = multipleTable };
-      InstallCollapsibleGroupHeader(multipleGroup, multipleTable, "Multiple",
-        () => _s.MultipleCollapsed, value => _s.MultipleCollapsed = value);
 
       // ── Percent / Group ──────────────────────────────────────────────────
       var pgStack = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 10,
