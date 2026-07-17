@@ -242,8 +242,12 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
   static bool TryUpdateCurveSelection(RhinoDoc doc, NotchSession s)
   {
+    var sideSequence = s.CurveSides.ToArray();
+    vTools.Log.Write("vNotches", $"curve selection begin: {DescribeCurveSides(s)}");
+
     var generatedIds = s.NotchIdsByCurve
       .SelectMany(ids => ids)
+      .Concat(s.NotchRecords.SelectMany(record => record.DetachedNotchIds))
       .Where(id => id != Guid.Empty)
       .ToHashSet();
 
@@ -306,11 +310,12 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     var selectedIds = selectedObjects.Select(obj => obj.Id).ToHashSet();
     bool changed = false;
-    for (int i = s.CurveIds.Count - 1; i >= 0; i--)
+    var removedIndices = Enumerable.Range(0, s.CurveIds.Count)
+      .Where(i => !selectedIds.Contains(s.CurveIds[i]))
+      .ToList();
+    for (int removed = removedIndices.Count - 1; removed >= 0; removed--)
     {
-      if (selectedIds.Contains(s.CurveIds[i]))
-        continue;
-      RemoveSessionCurve(doc, s, i);
+      RemoveSessionCurve(s, removedIndices[removed]);
       changed = true;
     }
 
@@ -328,18 +333,35 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       changed = true;
     }
 
+    var sidesBeforeRestore = s.CurveSides.ToArray();
+    ApplyCurveSideSequence(s, sideSequence);
+    for (int i = 0; i < s.CurveSides.Length; i++)
+      if (i >= sidesBeforeRestore.Length || s.CurveSides[i] != sidesBeforeRestore[i])
+        RebuildCurveNotches(doc, s, i);
+    SaveOptions(s);
+    vTools.Log.Write("vNotches", $"curve selection end: {DescribeCurveSides(s)}");
     SelectBothCurves(doc, s);
     s.PreviewValid = false;
     s.PreviewLengthsFromStart.Clear();
     return changed;
   }
 
-  static void RemoveSessionCurve(RhinoDoc doc, NotchSession s, int curveIndex)
+  static void RemoveSessionCurve(NotchSession s, int curveIndex)
   {
     if (curveIndex < 0 || curveIndex >= s.Curves.Count)
       return;
 
-    s.CurveSideMemory[s.CurveIds[curveIndex]] = s.CurveSides[curveIndex];
+    var notchIds = s.NotchIdsByCurve[curveIndex];
+    var labelIds = s.LabelIdsByCurve[curveIndex];
+    for (int recordIndex = 0; recordIndex < s.NotchRecords.Count; recordIndex++)
+    {
+      var record = s.NotchRecords[recordIndex];
+      if (recordIndex < notchIds.Count && notchIds[recordIndex] != Guid.Empty)
+        record.DetachedNotchIds.Add(notchIds[recordIndex]);
+      Guid? labelId = recordIndex < labelIds.Count ? labelIds[recordIndex] : null;
+      if (labelId.HasValue && labelId.Value != Guid.Empty)
+        record.DetachedLabelIds.Add(labelId.Value);
+    }
 
     s.NotchIdsByCurve.RemoveAt(curveIndex);
     s.LabelIdsByCurve.RemoveAt(curveIndex);
@@ -365,16 +387,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   static void AddSessionCurve(NotchSession s, RhinoObject rhObj, Curve curve)
   {
     int priorCurveCount = s.Curves.Count;
-    bool initialSide = s.CurveSideMemory.TryGetValue(rhObj.Id, out bool rememberedSide)
-      ? rememberedSide
-      : priorCurveCount > 0 && s.CurveSides[^1];
+    bool initialSide = priorCurveCount > 0 && s.CurveSides[^1];
     var groups = rhObj.Attributes.GetGroupList();
     int contextGroup = groups != null && groups.Length > 0 ? groups[0] : -1;
 
     s.Curves.Add(curve);
     s.CurveIds.Add(rhObj.Id);
     s.CurveSides = s.CurveSides.Append(initialSide).ToArray();
-    s.CurveSideMemory[rhObj.Id] = initialSide;
     s.CurveEnabled = s.CurveEnabled.Append(true).ToArray();
     s.SessionGroupIndices = s.SessionGroupIndices.Append(-1).ToArray();
     s.CurveContextGroupIndices = s.CurveContextGroupIndices.Append(contextGroup).ToArray();
@@ -394,6 +413,22 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       record.CurveEnabled.Add(false);
       record.LabelValues.Add("");
     }
+  }
+
+  static void ApplyCurveSideSequence(NotchSession s, IReadOnlyList<bool> sideSequence)
+  {
+    bool fallback = sideSequence.Count > 0 && sideSequence[^1];
+    s.CurveSides = Enumerable.Range(0, s.Curves.Count)
+      .Select(i => i < sideSequence.Count ? sideSequence[i] : fallback)
+      .ToArray();
+  }
+
+  static string DescribeCurveSides(NotchSession s)
+  {
+    var values = new List<string>();
+    for (int i = 0; i < s.CurveIds.Count && i < s.CurveSides.Length; i++)
+      values.Add($"{i + 1}:{s.CurveIds[i].ToString("N")[..8]}={(s.CurveSides[i] ? "Left" : "Right")}");
+    return values.Count > 0 ? string.Join(", ", values) : "none";
   }
 
   static void RebuildPanelForCurves(RhinoDoc doc, NotchSession s)
@@ -833,16 +868,16 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
   static void UndoLastNotch(RhinoDoc doc, NotchSession s)
   {
-    if (s.PlacementIds.Count == 0) return;
+    if (s.NotchRecords.Count == 0) return;
     int removeCount = 1;
-    if (s.NotchRecords.Count > 0 && s.NotchRecords[^1].BatchId != Guid.Empty)
+    if (s.NotchRecords[^1].BatchId != Guid.Empty)
     {
       Guid batchId = s.NotchRecords[^1].BatchId;
       removeCount = 0;
       for (int i = s.NotchRecords.Count - 1; i >= 0 && s.NotchRecords[i].BatchId == batchId; i--)
         removeCount++;
     }
-    removeCount = Math.Min(removeCount, s.PlacementIds.Count);
+    removeCount = Math.Min(removeCount, s.NotchRecords.Count);
 
     var removedRecords = s.NotchRecords
       .Skip(Math.Max(0, s.NotchRecords.Count - removeCount))
@@ -856,15 +891,25 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     for (int n = 0; n < removeCount; n++)
     {
-      var lastIds = s.PlacementIds[^1];
-      var lastLabelIds = s.PlacementLabelIds[^1];
-      s.PlacementIds.RemoveAt(s.PlacementIds.Count - 1);
-      s.PlacementLabelIds.RemoveAt(s.PlacementLabelIds.Count - 1);
+      var lastIds = s.PlacementIds.Count > 0 ? s.PlacementIds[^1] : [];
+      var lastLabelIds = s.PlacementLabelIds.Count > 0 ? s.PlacementLabelIds[^1] : [];
+      if (s.PlacementIds.Count > 0)
+        s.PlacementIds.RemoveAt(s.PlacementIds.Count - 1);
+      if (s.PlacementLabelIds.Count > 0)
+        s.PlacementLabelIds.RemoveAt(s.PlacementLabelIds.Count - 1);
 
       foreach (var id in lastIds)
         if (id != Guid.Empty) doc.Objects.Delete(id, true);
       foreach (var id in lastLabelIds)
         if (id.HasValue && id.Value != Guid.Empty) doc.Objects.Delete(id.Value, true);
+    }
+
+    foreach (var record in removedRecords)
+    {
+      foreach (var id in record.DetachedNotchIds)
+        if (id != Guid.Empty) doc.Objects.Delete(id, true);
+      foreach (var id in record.DetachedLabelIds)
+        if (id != Guid.Empty) doc.Objects.Delete(id, true);
     }
 
     if (removeCount > 0 && s.NotchRecords.Count >= removeCount)
@@ -875,6 +920,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     foreach (var ids in s.LabelIdsByCurve)
       if (ids.Count >= removeCount) ids.RemoveRange(ids.Count - removeCount, removeCount);
 
+    vTools.Log.Write("vNotches",
+      $"undo removed={removeCount} remaining={s.NotchRecords.Count} curves={s.Curves.Count}");
     SyncPanelFromOptions(s);
     doc.Views.Redraw();
   }
@@ -1608,7 +1655,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   {
     if (idx < 0 || idx >= s.CurveSides.Length) return;
     s.CurveSides[idx] = !s.CurveSides[idx];
-    s.CurveSideMemory[s.CurveIds[idx]] = s.CurveSides[idx];
     RebuildCurveNotches(doc, s, idx);
     SelectBothCurves(doc, s);
   }
@@ -1625,7 +1671,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
     s.Curves[idx].Reverse();
     s.CurveSides[idx] = !s.CurveSides[idx]; // side flips with reverse
-    s.CurveSideMemory[s.CurveIds[idx]] = s.CurveSides[idx];
     RebuildCurveNotches(doc, s, idx);
     SelectBothCurves(doc, s);
   }
@@ -1796,7 +1841,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public readonly List<Guid>  CurveIds;
     public bool[]   CurveSides;  // true = Left
     public bool[]   CurveEnabled;
-    public readonly Dictionary<Guid, bool> CurveSideMemory = [];
 
     public OptionDouble NotchLengthOpt;
     public OptionDouble NotchOffsetOpt;
@@ -1878,8 +1922,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
       CurveSides   = sides;
       CurveEnabled = Enumerable.Repeat(true, curves.Count).ToArray();
-      for (int i = 0; i < curveIds.Count && i < sides.Length; i++)
-        CurveSideMemory[curveIds[i]] = sides[i];
 
       double tol = doc.ModelAbsoluteTolerance;
       NotchLengthOpt    = new OptionDouble(notchLength, tol, 1e9);
@@ -1951,6 +1993,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public double         LabelOffsetY;
     public List<double>   LengthsFromStart = [];
     public List<bool>     CurveEnabled = [];
+    public List<Guid>     DetachedNotchIds = [];
+    public List<Guid>     DetachedLabelIds = [];
     public double?        Percent;
   }
 
@@ -2191,7 +2235,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         {
           if (_suppress) return;
           s.CurveSides[ci] = _sideChecks[ci].Checked == true;
-          s.CurveSideMemory[s.CurveIds[ci]] = s.CurveSides[ci];
           RebuildCurveNotches(doc, s, ci);
           SelectBothCurves(doc, s);
           Redraw();
@@ -2718,7 +2761,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
 
     public void UpdateUndoEnabled() =>
-      _undoBtn.Enabled = _s.PlacementIds.Count > 0;
+      _undoBtn.Enabled = _s.NotchRecords.Count > 0;
   }
 }
 
