@@ -997,6 +997,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     int count = Math.Clamp(s.MultipleNumber, 2, 10000);
     double startOffset = Math.Max(0.0, s.MultipleStartOffset);
     double endOffset = Math.Max(0.0, s.MultipleEndOffset);
+    bool usePercent = s.PercentToggle.CurrentValue;
     var activeCurveIndices = Enumerable.Range(0, s.Curves.Count)
       .Where(i => i >= s.CurveEnabled.Length || s.CurveEnabled[i])
       .ToList();
@@ -1018,6 +1019,14 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       }
     }
 
+    int baseCurveIndex = activeCurveIndices
+      .OrderBy(i => s.Curves[i].GetLength())
+      .First();
+    double baseAvailable = s.Curves[baseCurveIndex].GetLength() - startOffset - endOffset;
+    vTools.Log.Write("vNotches",
+      $"multiple count={count} percent={usePercent} baseCurve={baseCurveIndex + 1} " +
+      $"baseAvailable={baseAvailable:0.###}");
+
     string originalLabel = s.LabelValueText;
     bool labelActive = s.LabelToggle.CurrentValue && originalLabel.Trim().Length > 0;
     bool firstPlacementAdded = false;
@@ -1031,16 +1040,19 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       for (int notchIndex = 0; notchIndex < count; notchIndex++)
       {
         double ratio = (double)notchIndex / (count - 1);
-        var lengths = s.Curves
-          .Select(curve => startOffset + (curve.GetLength() - startOffset - endOffset) * ratio)
-          .ToList();
+        double baseLength = startOffset + baseAvailable * ratio;
+        var lengths = usePercent
+          ? s.Curves
+            .Select(curve => startOffset + (curve.GetLength() - startOffset - endOffset) * ratio)
+            .ToList()
+          : Enumerable.Repeat(baseLength, s.Curves.Count).ToList();
 
         bool added = PlaceNotchWithLengths(doc, s, lengths, null,
           allowLabel: notchIndex == 0,
           manageUndo: false,
           advanceLabel: false,
           updateUi: false,
-          usePercentMode: false,
+          usePercentMode: usePercent,
           batchId: batchId);
         if (!added)
           continue;
@@ -2619,7 +2631,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       // Percent / Group
       _percentCheck = new CheckBox { Text = "Percent", Checked = s.PercentToggle.CurrentValue };
       _percentCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.PercentToggle.CurrentValue = _percentCheck.Checked == true; Redraw(); Persist(); };
+      {
+        if (_suppress) return;
+        s.PercentToggle.CurrentValue = _percentCheck.Checked == true;
+        UpdateMultipleState();
+        Redraw();
+        Persist();
+      };
       _groupCheck   = new CheckBox { Text = "Group",   Checked = s.GroupToggle.CurrentValue };
       _groupCheck.CheckedChanged += (_, __) =>
       { if (_suppress) return; s.GroupToggle.CurrentValue = _groupCheck.Checked == true; Redraw(); Persist(); };
@@ -2804,6 +2822,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
           };
         }
       }
+      ApplyCurveLengthHighlights();
 
       // Layout
       Content = BuildLayout();
@@ -3294,11 +3313,56 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         double max = spacings.Max();
         string minText = FormatPanelNumber(min);
         string maxText = FormatPanelNumber(max);
-        _multipleDistanceLabel.Text = Math.Abs(max - min) <= _s.Doc.ModelAbsoluteTolerance
+        _multipleDistanceLabel.Text = !_s.PercentToggle.CurrentValue ||
+          Math.Abs(max - min) <= _s.Doc.ModelAbsoluteTolerance
           ? minText
           : $"{minText} - {maxText}";
       }
 
+    }
+
+    void ApplyCurveLengthHighlights()
+    {
+      if (_curveLengthLabels.Length < 2)
+        return;
+
+      double tolerance = ModelUnitsFromInches(_s.Doc, 1.0 / 16.0);
+      var ordered = Enumerable.Range(0, _s.Curves.Count)
+        .OrderBy(i => _s.Curves[i].GetLength())
+        .ToList();
+      var groupStarts = new List<double>();
+      var groupByCurve = new int[_s.Curves.Count];
+
+      foreach (int curveIndex in ordered)
+      {
+        double length = _s.Curves[curveIndex].GetLength();
+        int groupIndex = groupStarts.Count - 1;
+        if (groupIndex < 0 || length - groupStarts[groupIndex] > tolerance)
+        {
+          groupStarts.Add(length);
+          groupIndex = groupStarts.Count - 1;
+        }
+        groupByCurve[curveIndex] = groupIndex;
+      }
+
+      if (groupStarts.Count < 2)
+        return;
+
+      var backgrounds = new[]
+      {
+        new Eto.Drawing.Color(0.68f, 0.08f, 0.12f),
+        new Eto.Drawing.Color(0.02f, 0.31f, 0.66f),
+        new Eto.Drawing.Color(0.05f, 0.45f, 0.20f),
+        new Eto.Drawing.Color(0.48f, 0.16f, 0.62f),
+        new Eto.Drawing.Color(0.72f, 0.32f, 0.02f),
+        new Eto.Drawing.Color(0.00f, 0.43f, 0.45f),
+      };
+      var foreground = new Eto.Drawing.Color(1.0f, 1.0f, 1.0f);
+      for (int i = 0; i < _curveLengthLabels.Length; i++)
+      {
+        _curveLengthLabels[i].BackgroundColor = backgrounds[groupByCurve[i] % backgrounds.Length];
+        _curveLengthLabels[i].TextColor = foreground;
+      }
     }
 
     static double ParseDouble(string text, double fallback)
