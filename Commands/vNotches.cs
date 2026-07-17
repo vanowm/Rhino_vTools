@@ -453,7 +453,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       if (i >= sidesBeforeRestore.Length || s.CurveSides[i] != sidesBeforeRestore[i])
         RebuildCurveNotches(doc, s, i);
     if (changed)
+    {
+      s.CurveEnabled = Enumerable.Repeat(true, s.Curves.Count).ToArray();
       s.RedoBatches.Clear();
+      vTools.Log.Write("vNotches", $"selection changed; enabled all {s.Curves.Count} curve(s)");
+    }
     SaveOptions(s);
     vTools.Log.Write("vNotches", $"curve selection end: {DescribeCurveSides(s)}");
     SelectBothCurves(doc, s);
@@ -896,6 +900,17 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         percent = lengthsFromStart[s.PreviewRefCurveIndex] / refLen;
     }
 
+    var referenceKinkChoice = KinkTangentChoice.Default;
+    if (cursorPoint.HasValue &&
+        s.PreviewRefCurveIndex >= 0 && s.PreviewRefCurveIndex < s.Curves.Count &&
+        s.PreviewRefCurveIndex < lengthsFromStart.Count)
+    {
+      referenceKinkChoice = ResolveKinkChoice(
+        s.Curves[s.PreviewRefCurveIndex],
+        lengthsFromStart[s.PreviewRefCurveIndex],
+        cursorPoint.Value);
+    }
+
     uint undoRec = 0;
     bool undoStarted = false;
     if (manageUndo)
@@ -913,7 +928,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         canNotch, canLabel, placementLabels, resolvedLabelSize,
         effectiveNotchLayer, effectiveLabelLayer,
         s.LabelOffsetOpt.CurrentValue, s.LabelOffsetYOpt.CurrentValue,
-        s.LabelSideFlip, cursorPoint, s.CurveEnabled);
+        s.LabelSideFlip, cursorPoint, referenceKinkChoice, s.CurveEnabled);
     }
     finally
     {
@@ -945,6 +960,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       LengthsFromStart = new List<double>(lengthsFromStart),
       CurveEnabled     = s.CurveEnabled.ToList(),
       Percent          = percent,
+      KinkChoice       = referenceKinkChoice,
     };
 
     s.NotchRecords.Add(record);
@@ -1294,13 +1310,17 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     string ltext = s.LabelValueText.Trim();
     bool   canNotch = s.NotchToggle.CurrentValue;
     bool   canLabel = s.LabelToggle.CurrentValue && ltext.Length > 0 && lsize > doc.ModelAbsoluteTolerance;
+    var referenceKinkChoice = ResolveKinkChoice(refCurve, lengths[refIdx], cursorPoint);
 
     for (int i = 0; i < s.Curves.Count; i++)
     {
       if (!s.CurveEnabled[i]) continue;
       Point3d? curveCursor = i == refIdx ? cursorPoint : null;
+      KinkTangentChoice? kinkChoice = referenceKinkChoice == KinkTangentChoice.Default
+        ? null
+        : referenceKinkChoice;
       var geom = NotchGeometry(s.Curves[i], lengths[i], nl, no, sides[i], nt, nw,
-        curveCursor, null);
+        curveCursor, kinkChoice);
       if (geom == null) continue;
       if (canNotch)
       {
@@ -1310,7 +1330,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
       if (canLabel)
       {
-        GetCurveTangentAndDirection(s.Curves[i], lengths[i], sides[i], curveCursor, null,
+        GetCurveTangentAndDirection(s.Curves[i], lengths[i], sides[i], curveCursor, kinkChoice,
           out var tangent, out var direction);
         if (!tangent.IsValid || !direction.IsValid) continue;
 
@@ -1361,7 +1381,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
   static GeometryBase? NotchGeometry(Curve curve, double lengthFromStart,
     double notchLength, double notchOffset, string side,
-    string notchType, double notchWidth, Point3d? cursorPoint, Vector3d? tangentHint)
+    string notchType, double notchWidth, Point3d? cursorPoint, KinkTangentChoice? kinkChoice)
   {
     var (center, t) = PointAtCurveLength(curve, lengthFromStart);
     if (t == null) return null;
@@ -1375,7 +1395,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       tangent.Z = 0.0;
       if (!tangent.Unitize()) return null;
     }
-    tangent = KinkAwareTangent(curve, t.Value, tangent, cursorPoint, tangentHint);
+    tangent = KinkAwareTangent(curve, t.Value, tangent, cursorPoint, kinkChoice);
 
     var worldZ   = new Vector3d(0.0, 0.0, 1.0);
     var direction = Vector3d.CrossProduct(worldZ, tangent);
@@ -1439,9 +1459,25 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
   // ── Kink-aware tangent ────────────────────────────────────────────────────
 
-  static Vector3d KinkAwareTangent(Curve curve, double t, Vector3d defaultTangent,
-    Point3d? cursorPoint, Vector3d? tangentHint)
+  enum KinkTangentChoice
   {
+    Default,
+    Before,
+    Middle,
+    After,
+  }
+
+  static Vector3d KinkAwareTangent(Curve curve, double t, Vector3d defaultTangent,
+    Point3d? cursorPoint, KinkTangentChoice? requestedChoice)
+  {
+    return KinkAwareTangent(curve, t, defaultTangent, cursorPoint, requestedChoice, out _);
+  }
+
+  static Vector3d KinkAwareTangent(Curve curve, double t, Vector3d defaultTangent,
+    Point3d? cursorPoint, KinkTangentChoice? requestedChoice,
+    out KinkTangentChoice resolvedChoice)
+  {
+    resolvedChoice = KinkTangentChoice.Default;
     var domain = curve.Domain;
     double span = domain.Length;
     if (span <= 0.0) return defaultTangent;
@@ -1459,6 +1495,26 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     double dot = Vector3d.Multiply(tanBefore, tanAfter);
     if (dot >= Math.Cos(5.0 * Math.PI / 180.0)) return defaultTangent; // smooth
 
+    var tanMiddle = tanBefore + tanAfter;
+    tanMiddle.Z = 0.0;
+    bool middleValid = tanMiddle.IsValid && !tanMiddle.IsTiny() && tanMiddle.Unitize();
+
+    if (requestedChoice.HasValue)
+    {
+      switch (requestedChoice.Value)
+      {
+        case KinkTangentChoice.Before:
+          resolvedChoice = KinkTangentChoice.Before;
+          return tanBefore;
+        case KinkTangentChoice.Middle when middleValid:
+          resolvedChoice = KinkTangentChoice.Middle;
+          return tanMiddle;
+        case KinkTangentChoice.After:
+          resolvedChoice = KinkTangentChoice.After;
+          return tanAfter;
+      }
+    }
+
     if (cursorPoint.HasValue)
     {
       try
@@ -1475,10 +1531,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         var tol = RhinoDoc.ActiveDoc?.ModelAbsoluteTolerance ?? 0.001;
         if (!cursorDir.IsValid || cursorDir.Length <= tol * 2.0)
         {
-          var middle = tanBefore + tanAfter;
-          middle.Z = 0.0;
-          if (middle.IsValid && !middle.IsTiny() && middle.Unitize())
-            return middle;
+          if (middleValid)
+          {
+            resolvedChoice = KinkTangentChoice.Middle;
+            return tanMiddle;
+          }
 
           return defaultTangent;
         }
@@ -1499,14 +1556,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         {
           double beforeScoreFallback = Vector3d.Multiply(cursorDir, dirBefore);
           double afterScoreFallback  = Vector3d.Multiply(cursorDir, dirAfter);
-          return afterScoreFallback >= beforeScoreFallback ? tanAfter : tanBefore;
+          resolvedChoice = afterScoreFallback >= beforeScoreFallback
+            ? KinkTangentChoice.After
+            : KinkTangentChoice.Before;
+          return resolvedChoice == KinkTangentChoice.After ? tanAfter : tanBefore;
         }
-
-        var tanMiddle = tanBefore + tanAfter;
-        tanMiddle.Z = 0.0;
-
-        if (!tanMiddle.IsValid || tanMiddle.IsTiny() || !tanMiddle.Unitize())
-          tanMiddle = defaultTangent;
 
         double beforeScore = Vector3d.Multiply(cursorDir, dirBefore);
         double middleScore = Vector3d.Multiply(cursorDir, dirMiddle);
@@ -1515,34 +1569,50 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         const double middleBias = 0.03;
         middleScore += middleBias;
 
-        if (middleScore >= beforeScore && middleScore >= afterScore)
+        if (middleValid && middleScore >= beforeScore && middleScore >= afterScore)
+        {
+          resolvedChoice = KinkTangentChoice.Middle;
           return tanMiddle;
+        }
 
-        return afterScore >= beforeScore ? tanAfter : tanBefore;
+        resolvedChoice = afterScore >= beforeScore
+          ? KinkTangentChoice.After
+          : KinkTangentChoice.Before;
+        return resolvedChoice == KinkTangentChoice.After ? tanAfter : tanBefore;
       }
       catch
       {
         return defaultTangent;
       }
     }
-    if (tangentHint.HasValue)
-    {
-      var hint = new Vector3d(tangentHint.Value.X, tangentHint.Value.Y, 0.0);
-      if (hint.Unitize())
-        return Vector3d.Multiply(hint, tanAfter) >= Vector3d.Multiply(hint, tanBefore)
-          ? tanAfter : tanBefore;
-    }
     return defaultTangent;
+  }
+
+  static KinkTangentChoice ResolveKinkChoice(Curve curve, double lengthFromStart,
+    Point3d cursorPoint)
+  {
+    GetCurveTangentAndDirection(curve, lengthFromStart, "Left", cursorPoint, null,
+      out _, out _, out var resolvedChoice);
+    return resolvedChoice;
   }
 
   // ── Tangent + direction ───────────────────────────────────────────────────
 
   static void GetCurveTangentAndDirection(Curve curve, double lengthFromStart, string side,
-    Point3d? cursorPoint, Vector3d? tangentHint,
+    Point3d? cursorPoint, KinkTangentChoice? kinkChoice,
     out Vector3d tangent, out Vector3d direction)
+  {
+    GetCurveTangentAndDirection(curve, lengthFromStart, side, cursorPoint, kinkChoice,
+      out tangent, out direction, out _);
+  }
+
+  static void GetCurveTangentAndDirection(Curve curve, double lengthFromStart, string side,
+    Point3d? cursorPoint, KinkTangentChoice? kinkChoice,
+    out Vector3d tangent, out Vector3d direction, out KinkTangentChoice resolvedChoice)
   {
     tangent   = Vector3d.Unset;
     direction = Vector3d.Unset;
+    resolvedChoice = KinkTangentChoice.Default;
     var (_, t) = PointAtCurveLength(curve, lengthFromStart);
     if (t == null) return;
 
@@ -1555,7 +1625,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       tangent.Z = 0.0;
       if (!tangent.Unitize()) { tangent = Vector3d.Unset; return; }
     }
-    tangent = KinkAwareTangent(curve, t.Value, tangent, cursorPoint, tangentHint);
+    tangent = KinkAwareTangent(curve, t.Value, tangent, cursorPoint, kinkChoice,
+      out resolvedChoice);
 
     var worldZ = new Vector3d(0.0, 0.0, 1.0);
     direction  = Vector3d.CrossProduct(worldZ, tangent);
@@ -1778,13 +1849,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     string notchLayer, string labelLayer,
     double labelOffset, double labelOffsetY,
     string labelCurveSide,
-    Point3d? cursorPoint, Vector3d? tangentHint)
+    Point3d? cursorPoint, KinkTangentChoice? kinkChoice)
   {
-    GetCurveTangentAndDirection(curve, lengthFromStart, side, cursorPoint, tangentHint,
+    GetCurveTangentAndDirection(curve, lengthFromStart, side, cursorPoint, kinkChoice,
       out var tangent, out var direction);
 
     var geom = NotchGeometry(curve, lengthFromStart, notchLength, notchOffset,
-      side, notchType, notchWidth, cursorPoint, tangentHint);
+      side, notchType, notchWidth, cursorPoint, kinkChoice);
     if (geom == null) return (Guid.Empty, null);
 
     Guid notchId = Guid.Empty;
@@ -1840,7 +1911,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     bool canNotch, bool canLabel, List<string> labelValues, double labelSize,
     string notchLayer, string labelLayer,
     double labelOffset, double labelOffsetY,
-    bool labelSideFlip, Point3d? cursorPoint, bool[] curveEnabled)
+    bool labelSideFlip, Point3d? cursorPoint, KinkTangentChoice referenceKinkChoice,
+    bool[] curveEnabled)
   {
     var ids = new List<(Guid, Guid?)>();
     string firstSide = sides.Count > 0 ? sides[0] : "Left";
@@ -1857,6 +1929,9 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       string lv = (canLabel && i < labelValues.Count) ? labelValues[i] : "";
       int gi    = i < groupIndices.Length ? groupIndices[i] : -1;
       Point3d? curveCursor = i == referenceIndex ? cursorPoint : null;
+      KinkTangentChoice? kinkChoice = referenceKinkChoice == KinkTangentChoice.Default
+        ? null
+        : referenceKinkChoice;
 
       var (nid, lid) = AddNotch(doc, s.Curves[i], lengths[i],
         notchLen, notchOff, sides[i], gi,
@@ -1864,14 +1939,15 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         canNotch, canLabel, lv, labelSize,
         notchLayer, labelLayer,
         labelOffset, labelOffsetY,
-        labelCurveSide, curveCursor, null);
+        labelCurveSide, curveCursor, kinkChoice);
 
       if (nid != Guid.Empty || lid.HasValue)
       {
         GetCurveTangentAndDirection(s.Curves[i], lengths[i], sides[i],
-          curveCursor, null, out var resolvedTangent, out var resolvedDirection);
+          curveCursor, kinkChoice, out var resolvedTangent, out var resolvedDirection);
         vTools.Log.Write("vNotches",
           $"placed curve={i + 1} side={sides[i]} ref={referenceIndex + 1} " +
+          $"kink={referenceKinkChoice} " +
           $"tangent=({resolvedTangent.X:0.###},{resolvedTangent.Y:0.###}) " +
           $"direction=({resolvedDirection.X:0.###},{resolvedDirection.Y:0.###})");
       }
@@ -1942,7 +2018,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         rec.NotchEnabled, lbl, lv, rec.LabelSize,
         EffectiveLayerName(doc, rec.NotchLayer, rec.NotchLayer),
         EffectiveLayerName(doc, rec.LabelLayer, rec.NotchLayer),
-        rec.LabelOffset, rec.LabelOffsetY, labelCurveSide, null, null);
+        rec.LabelOffset, rec.LabelOffsetY, labelCurveSide, null,
+        rec.KinkChoice == KinkTangentChoice.Default ? null : rec.KinkChoice);
       newIds.Add(nid);
       newLabelIds.Add(lid);
     }
@@ -2340,6 +2417,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public List<Guid>     DetachedNotchIds = [];
     public List<Guid>     DetachedLabelIds = [];
     public double?        Percent;
+    public KinkTangentChoice KinkChoice;
   }
 
   sealed class NotchUndoBatch

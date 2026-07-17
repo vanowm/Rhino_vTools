@@ -28,9 +28,18 @@ internal static class ToolsOptionStore
   {
     lock (Sync)
     {
-      var root = LoadRoot();
-      var section = root[sectionName] as JsonObject;
-      return reader(section);
+      try
+      {
+        LastError = "";
+        var root = LoadRoot();
+        var section = root[sectionName] as JsonObject;
+        return reader(section);
+      }
+      catch (Exception ex)
+      {
+        LastError = ex.Message;
+        return reader(null);
+      }
     }
   }
 
@@ -174,31 +183,25 @@ internal static bool Update(string sectionName, Action<JsonObject> updater)
   /// </summary>
   private static JsonObject LoadRoot()
   {
-    try
-    {
-      var path = GetToolsConfigPath();
-      if (!File.Exists(path))
-        return new JsonObject();
-
-      var json = File.ReadAllText(path);
-      if (string.IsNullOrWhiteSpace(json))
-        return new JsonObject();
-
-      var node = JsonNode.Parse(
-        json,
-        nodeOptions: null,
-        documentOptions: new JsonDocumentOptions
-        {
-          AllowTrailingCommas = true,
-          CommentHandling = JsonCommentHandling.Skip
-        });
-
-      return node as JsonObject ?? new JsonObject();
-    }
-    catch
-    {
+    var path = GetToolsConfigPath();
+    if (!File.Exists(path))
       return new JsonObject();
-    }
+
+    var json = File.ReadAllText(path);
+    if (string.IsNullOrWhiteSpace(json))
+      throw new InvalidDataException($"Config file is empty: {path}");
+
+    var node = JsonNode.Parse(
+      json,
+      nodeOptions: null,
+      documentOptions: new JsonDocumentOptions
+      {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip
+      });
+
+    return node as JsonObject ??
+      throw new InvalidDataException($"Config root must be a JSON object: {path}");
   }
 
   /// <summary>

@@ -41,9 +41,15 @@
 
   <ItemGroup>
     <Content Include="vTools.config.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
+
+  <Target Name="MergeRuntimeConfigDefaults" BeforeTargets="Build">
+    <Exec
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\MergeConfigDefaults.ps1&quot; -SourcePath &quot;$(MSBuildProjectDirectory)\vTools.config.json&quot; -DestinationPath &quot;$(TargetDir)vTools.config.json&quot;" />
+  </Target>
 
   <Target Name="ComputeSourceBuildVersion" BeforeTargets="GenerateBuildVersionInfo;UpdateReadmeVersion;CommitReleaseVersion">
     <Exec

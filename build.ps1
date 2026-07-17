@@ -67,16 +67,6 @@ if (-not (Test-Path $pendingFile)) {
 }
 
 # Build
-# Protect the runtime config next to the DLL: vTools.csproj copies the project-root
-# vTools.config.json to the output with PreserveNewest, which can overwrite settings
-# the user saved at runtime. Snapshot before build and restore if overwritten.
-$configSrc  = 'vTools.config.json'                                        # project root (build source)
-$configDst  = 'bin\Release\net7.0-windows\vTools.config.json'             # runtime config
-$configSnap = $null
-if ((Test-Path $configDst) -and (Test-Path $configSrc)) {
-    $configSnap = Get-Content $configDst -Raw -Encoding utf8
-}
-
 $dllPath = 'bin\Release\net7.0-windows\vTools.dll'
 $dllTimeBefore = if (Test-Path $dllPath) { (Get-Item $dllPath).LastWriteTime } else { $null }
 
@@ -88,15 +78,6 @@ if ($buildExitCode -ne 0) {
     } else {
         Write-Host $buildOutput
         exit $buildExitCode
-    }
-}
-
-# Restore runtime config if MSBuild's PreserveNewest overwrote it
-if ($configSnap -ne $null -and (Test-Path $configDst)) {
-    $afterContent = Get-Content $configDst -Raw -Encoding utf8
-    if ($afterContent -ne $configSnap) {
-        Set-Content -Path $configDst -Value $configSnap -NoNewline -Encoding utf8
-        Write-Host "Runtime config restored (build overwrote it with project-root copy)." -ForegroundColor Cyan
     }
 }
 
