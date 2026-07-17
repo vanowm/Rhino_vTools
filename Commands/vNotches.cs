@@ -338,6 +338,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     for (int i = 0; i < s.CurveSides.Length; i++)
       if (i >= sidesBeforeRestore.Length || s.CurveSides[i] != sidesBeforeRestore[i])
         RebuildCurveNotches(doc, s, i);
+    if (changed)
+      s.RedoBatches.Clear();
     SaveOptions(s);
     vTools.Log.Write("vNotches", $"curve selection end: {DescribeCurveSides(s)}");
     SelectBothCurves(doc, s);
@@ -514,6 +516,12 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         if (s.RefreshCommandLine) { s.RefreshCommandLine = false; continue; }
         if (s.PanelClosedExit)    { FinalizeBlocks(doc, s); return; }
 
+        if (result == GetResult.Undo)
+        {
+          UndoLastNotch(doc, s);
+          continue;
+        }
+
         if (gp.CommandResult() != Result.Success) { FinalizeBlocks(doc, s); return; }
 
         if (result == GetResult.Nothing)
@@ -563,7 +571,12 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     gp.ClearCommandOptions();
     s.SideOptionIndex        = gp.AddOption("Side");
     s.ReverseOptionIndex     = gp.AddOption("Reverse");
-    s.UndoOptionIndex        = gp.AddOption("Undo");
+    s.UndoOptionIndex        = s.NotchRecords.Count > 0
+      ? gp.AddOption("Undo", string.Empty, true)
+      : -1;
+    s.RedoOptionIndex        = s.RedoBatches.Count > 0
+      ? gp.AddOption("Redo", string.Empty, true)
+      : -1;
     s.TypeOptionIndex        = gp.AddOptionList("NotchType", s.NotchTypeValues, s.NotchTypeIndex);
     s.NotchLayerOptionIndex  = gp.AddOption("NotchLayer", s.NotchLayerName);
     gp.AddOptionDouble("NotchLength", ref s.NotchLengthOpt);
@@ -604,6 +617,10 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     else if (idx == s.UndoOptionIndex)
     {
       UndoLastNotch(doc, s);
+    }
+    else if (idx == s.RedoOptionIndex)
+    {
+      RedoLastNotch(doc, s);
     }
     else if (idx == s.TypeOptionIndex)
     {
@@ -741,6 +758,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     if (newIds == null || !newIds.Any(n => n.notch != Guid.Empty))
       return false;
 
+    s.RedoBatches.Clear();
     var record = new NotchRecord
     {
       BatchId          = batchId ?? Guid.NewGuid(),
@@ -878,9 +896,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         removeCount++;
     }
     removeCount = Math.Min(removeCount, s.NotchRecords.Count);
+    int firstRecordIndex = s.NotchRecords.Count - removeCount;
+    var undoBatch = CaptureUndoBatch(doc, s, firstRecordIndex, removeCount);
 
     var removedRecords = s.NotchRecords
-      .Skip(Math.Max(0, s.NotchRecords.Count - removeCount))
+      .Skip(firstRecordIndex)
       .ToList();
     string restoredLabel = removedRecords
       .Where(rec => rec.LabelEnabled)
@@ -920,10 +940,128 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     foreach (var ids in s.LabelIdsByCurve)
       if (ids.Count >= removeCount) ids.RemoveRange(ids.Count - removeCount, removeCount);
 
+    s.RedoBatches.Push(undoBatch);
     vTools.Log.Write("vNotches",
-      $"undo removed={removeCount} remaining={s.NotchRecords.Count} curves={s.Curves.Count}");
+      $"undo removed={removeCount} remaining={s.NotchRecords.Count} redo={s.RedoBatches.Count} curves={s.Curves.Count}");
     SyncPanelFromOptions(s);
     doc.Views.Redraw();
+  }
+
+  static void RedoLastNotch(RhinoDoc doc, NotchSession s)
+  {
+    if (s.RedoBatches.Count == 0) return;
+
+    var batch = s.RedoBatches.Pop();
+    int restoredObjects = 0;
+    foreach (var placement in batch.Placements)
+    {
+      var notchIds = new List<Guid>();
+      var labelIds = new List<Guid?>();
+      for (int curveIndex = 0; curveIndex < s.Curves.Count; curveIndex++)
+      {
+        Guid notchId = curveIndex < placement.Notches.Count
+          ? RestoreDocObject(doc, placement.Notches[curveIndex])
+          : Guid.Empty;
+        Guid labelId = curveIndex < placement.Labels.Count
+          ? RestoreDocObject(doc, placement.Labels[curveIndex])
+          : Guid.Empty;
+        notchIds.Add(notchId);
+        labelIds.Add(labelId == Guid.Empty ? null : labelId);
+        if (notchId != Guid.Empty) restoredObjects++;
+        if (labelId != Guid.Empty) restoredObjects++;
+      }
+
+      placement.Record.DetachedNotchIds.Clear();
+      foreach (var snapshot in placement.DetachedNotches)
+      {
+        Guid id = RestoreDocObject(doc, snapshot);
+        if (id == Guid.Empty) continue;
+        placement.Record.DetachedNotchIds.Add(id);
+        restoredObjects++;
+      }
+
+      placement.Record.DetachedLabelIds.Clear();
+      foreach (var snapshot in placement.DetachedLabels)
+      {
+        Guid id = RestoreDocObject(doc, snapshot);
+        if (id == Guid.Empty) continue;
+        placement.Record.DetachedLabelIds.Add(id);
+        restoredObjects++;
+      }
+
+      s.NotchRecords.Add(placement.Record);
+      for (int curveIndex = 0; curveIndex < s.Curves.Count; curveIndex++)
+      {
+        s.NotchIdsByCurve[curveIndex].Add(notchIds[curveIndex]);
+        s.LabelIdsByCurve[curveIndex].Add(labelIds[curveIndex]);
+      }
+      s.PlacementIds.Add(notchIds);
+      s.PlacementLabelIds.Add(labelIds);
+    }
+
+    s.LabelValueText = batch.LabelValueAfterRedo;
+    vTools.Log.Write("vNotches",
+      $"redo restored={batch.Placements.Count} objects={restoredObjects} redo={s.RedoBatches.Count} curves={s.Curves.Count}");
+    SyncPanelFromOptions(s);
+    doc.Views.Redraw();
+  }
+
+  static NotchUndoBatch CaptureUndoBatch(
+    RhinoDoc doc, NotchSession s, int firstRecordIndex, int recordCount)
+  {
+    var batch = new NotchUndoBatch(s.LabelValueText);
+    for (int offset = 0; offset < recordCount; offset++)
+    {
+      int recordIndex = firstRecordIndex + offset;
+      var record = s.NotchRecords[recordIndex];
+      var placement = new NotchPlacementSnapshot(record);
+      var notchIds = recordIndex < s.PlacementIds.Count
+        ? s.PlacementIds[recordIndex]
+        : [];
+      var labelIds = recordIndex < s.PlacementLabelIds.Count
+        ? s.PlacementLabelIds[recordIndex]
+        : [];
+
+      for (int curveIndex = 0; curveIndex < s.Curves.Count; curveIndex++)
+      {
+        Guid notchId = curveIndex < notchIds.Count ? notchIds[curveIndex] : Guid.Empty;
+        Guid? labelId = curveIndex < labelIds.Count ? labelIds[curveIndex] : null;
+        placement.Notches.Add(CaptureDocObject(doc, notchId));
+        placement.Labels.Add(CaptureDocObject(doc, labelId ?? Guid.Empty));
+      }
+
+      foreach (var id in record.DetachedNotchIds)
+      {
+        var snapshot = CaptureDocObject(doc, id);
+        if (snapshot != null) placement.DetachedNotches.Add(snapshot);
+      }
+      foreach (var id in record.DetachedLabelIds)
+      {
+        var snapshot = CaptureDocObject(doc, id);
+        if (snapshot != null) placement.DetachedLabels.Add(snapshot);
+      }
+
+      batch.Placements.Add(placement);
+    }
+    return batch;
+  }
+
+  static DocObjectSnapshot? CaptureDocObject(RhinoDoc doc, Guid objectId)
+  {
+    if (objectId == Guid.Empty) return null;
+    var obj = doc.Objects.FindId(objectId);
+    var geometry = obj?.Geometry?.Duplicate();
+    if (obj == null || geometry == null) return null;
+    return new DocObjectSnapshot(geometry, obj.Attributes.Duplicate());
+  }
+
+  static Guid RestoreDocObject(RhinoDoc doc, DocObjectSnapshot? snapshot)
+  {
+    if (snapshot == null) return Guid.Empty;
+    var geometry = snapshot.Geometry.Duplicate();
+    return geometry == null
+      ? Guid.Empty
+      : doc.Objects.Add(geometry, snapshot.Attributes.Duplicate());
   }
 
   // ── Finalize ──────────────────────────────────────────────────────────────
@@ -1654,6 +1792,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   static void ToggleCurveSide(RhinoDoc doc, NotchSession s, int idx)
   {
     if (idx < 0 || idx >= s.CurveSides.Length) return;
+    s.RedoBatches.Clear();
     s.CurveSides[idx] = !s.CurveSides[idx];
     RebuildCurveNotches(doc, s, idx);
     SelectBothCurves(doc, s);
@@ -1662,6 +1801,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   static void ReverseCurve(RhinoDoc doc, NotchSession s, int idx)
   {
     if (idx < 0 || idx >= s.Curves.Count) return;
+    s.RedoBatches.Clear();
     double total = s.Curves[idx].GetLength();
     foreach (var rec in s.NotchRecords)
     {
@@ -1894,7 +2034,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public bool MultipleCollapsed;
 
     // Command option indices (set each iteration)
-    public int SideOptionIndex, ReverseOptionIndex, UndoOptionIndex;
+    public int SideOptionIndex, ReverseOptionIndex, UndoOptionIndex, RedoOptionIndex;
     public int TypeOptionIndex, NotchLayerOptionIndex;
     public int LabelValueOptionIndex, LabelLayerOptionIndex;
     public int LabelSizeAutoIndex, LabelSizePctIndex2;
@@ -1908,6 +2048,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public Point3d PreviewCursorPoint;
     public int PreviewRefCurveIndex;
     public List<double> PreviewLengthsFromStart = [];
+    public readonly Stack<NotchUndoBatch> RedoBatches = [];
     public NotchSession(RhinoDoc doc, List<Curve> curves, List<Guid> curveIds, bool[] sides,
       double notchLength, double notchOffset, double notchWidth, string notchType,
       bool percent, bool group, bool label, string labelValue,
@@ -1996,6 +2137,43 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public List<Guid>     DetachedNotchIds = [];
     public List<Guid>     DetachedLabelIds = [];
     public double?        Percent;
+  }
+
+  sealed class NotchUndoBatch
+  {
+    public NotchUndoBatch(string labelValueAfterRedo)
+    {
+      LabelValueAfterRedo = labelValueAfterRedo;
+    }
+
+    public string LabelValueAfterRedo { get; }
+    public List<NotchPlacementSnapshot> Placements { get; } = [];
+  }
+
+  sealed class NotchPlacementSnapshot
+  {
+    public NotchPlacementSnapshot(NotchRecord record)
+    {
+      Record = record;
+    }
+
+    public NotchRecord Record { get; }
+    public List<DocObjectSnapshot?> Notches { get; } = [];
+    public List<DocObjectSnapshot?> Labels { get; } = [];
+    public List<DocObjectSnapshot> DetachedNotches { get; } = [];
+    public List<DocObjectSnapshot> DetachedLabels { get; } = [];
+  }
+
+  sealed class DocObjectSnapshot
+  {
+    public DocObjectSnapshot(GeometryBase geometry, ObjectAttributes attributes)
+    {
+      Geometry = geometry;
+      Attributes = attributes;
+    }
+
+    public GeometryBase Geometry { get; }
+    public ObjectAttributes Attributes { get; }
   }
 
   // ── Eto panel ─────────────────────────────────────────────────────────────
@@ -2234,6 +2412,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         _sideChecks[i].CheckedChanged += (_, __) =>
         {
           if (_suppress) return;
+          s.RedoBatches.Clear();
           s.CurveSides[ci] = _sideChecks[ci].Checked == true;
           RebuildCurveNotches(doc, s, ci);
           SelectBothCurves(doc, s);
