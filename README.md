@@ -1,4 +1,4 @@
-Tools  ·  v26.7.17.957
+Tools  ·  v26.7.17.1022
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -282,12 +282,12 @@ Options persist to `vTools.config.json` under `vMatch`.
     - `Type`: notch shape — `I` (single perpendicular line), `V`, or `U`.
     - `Layer`: target layer for notch geometry.
     - `Length`: notch arm length.
-    - `Width`: arm separation distance (disabled for `I` type).
+    - `Width`: arm separation distance used by `V` and `U` types.
     - `Offset`: signed distance to shift the notch along the curve from the clicked point.
 
 1. **Label** group options:
 
-    - Checkbox to enable/disable label output.
+    - `Enable`: controls label output. The remaining label settings stay editable whether output is enabled or not.
     - Value text box: the label string placed at the notch.
     - `AutoAdv`: when enabled, increments a trailing numeric suffix after each placement.
     - `FlipSide`: mirrors the label to the opposite side of the curve.
@@ -297,17 +297,18 @@ Options persist to `vTools.config.json` under `vMatch`.
 
 1. **Multiple** group options:
 
-    - `Start offset` / `End offset`: distances from each curve's respective ends to the first and last notch.
-    - `Number`: total number of notches, including the first and last positions.
-    - `Distance`: live spacing between notches, rounded to two decimal places. A range is shown when selected curves have different spacing.
+    - `Start offset` / `End offset`: numeric steppers for the distances from each curve's respective ends to the first and last notch.
+    - `Number`: numeric stepper for the total number of notches, including the first and last positions.
+    - `Distance`: live spacing between notches, rounded to three decimal places. A range is shown when selected curves have different spacing.
     - `Add`: creates an evenly spaced notch batch. When labels are enabled, only the first notch position receives the label and auto-advance runs once.
 
 1. Other panel controls:
 
     - `Percent`: display the click position as a percentage of total curve length in the distance readout.
     - `Group`: group each notch geometry object with its label.
-    - Per-curve row — `Side N` checkbox: which side of the curve the notch and label are drawn on; `Reverse N` button: flip the curve's travel direction (affects side and offset behavior).
-    - Distance info: **From start**, **From end**, **From previous** show arc-length values for the last placed notch.
+    - `Select`: return to curve selection to add curves or Shift-remove existing curves without ending the command.
+    - Per-curve row — `Side N` checkbox: which side of the curve the notch and label are drawn on; `Reverse N` button: flip the curve's travel direction; the last column shows curve length rounded to three decimal places.
+    - Distance info: **From start**, **From end**, **From previous** show arc-length values rounded to three decimal places.
     - **Undo** button: removes the most recently placed notch.
 
 1. Press Enter to finish and keep all placed notches. Press Esc to cancel and remove them.
