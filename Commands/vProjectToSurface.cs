@@ -432,7 +432,7 @@ public sealed class vProjectToSurface : Command
     private readonly RhinoDoc _doc;
     private readonly IReadOnlyList<Brep> _targetBreps;
     private readonly double _tolerance;
-    private string _selectionSignature = string.Empty;
+    private string? _selectionSignature;
     private List<Curve> _curves = new();
     private List<Point3d> _points = new();
 
@@ -445,7 +445,7 @@ public sealed class vProjectToSurface : Command
 
     public void Invalidate()
     {
-      _selectionSignature = string.Empty;
+      _selectionSignature = null;
     }
 
     protected override void DrawForeground(DrawEventArgs e)
@@ -474,7 +474,7 @@ public sealed class vProjectToSurface : Command
     {
       var selectedObjects = SelectedSourceObjects(_doc);
       var signature = string.Join("|", selectedObjects.Select(obj => obj.Id.ToString("N")));
-      if (string.Equals(signature, _selectionSignature, StringComparison.Ordinal))
+      if (_selectionSignature != null && string.Equals(signature, _selectionSignature, StringComparison.Ordinal))
         return;
 
       _selectionSignature = signature;
