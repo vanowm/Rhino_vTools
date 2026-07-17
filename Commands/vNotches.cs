@@ -366,6 +366,17 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       explicitlyReselected &&
       getSelectionOrder.Count == s.CurveIds.Count &&
       !getSelectionOrder.SequenceEqual(s.CurveIds);
+    bool clickedEndChanged = sameCurveSet && selectionPoints.Any(entry =>
+    {
+      int curveIndex = s.CurveIds.IndexOf(entry.Key);
+      return curveIndex >= 0 && curveIndex < s.Curves.Count &&
+        PickTargetsCurveEnd(s.Curves[curveIndex], entry.Value);
+    });
+    bool selectionDefinitionChanged = sequenceChanged || clickedEndChanged;
+
+    var orientedCurvesById = new Dictionary<Guid, Curve>();
+    for (int i = 0; i < s.CurveIds.Count && i < s.Curves.Count; i++)
+      orientedCurvesById[s.CurveIds[i]] = s.Curves[i].DuplicateCurve();
 
     var orderedIds = new HashSet<Guid>();
     var selectedObjects = new List<RhinoObject>();
@@ -385,12 +396,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     vTools.Log.Write("vNotches", "selection order: " + string.Join(", ",
       selectedObjects.Select((obj, i) => $"{i + 1}:{obj.Id.ToString("N")[..8]}")) +
-      $" sameSet={sameCurveSet} reselected={explicitlyReselected} sequenceChanged={sequenceChanged}");
+      $" sameSet={sameCurveSet} reselected={explicitlyReselected} " +
+      $"sequenceChanged={sequenceChanged} clickedEndChanged={clickedEndChanged}");
 
     var selectedIds = selectedObjects.Select(obj => obj.Id).ToHashSet();
     bool changed = false;
     var removedIndices = Enumerable.Range(0, s.CurveIds.Count)
-      .Where(i => sequenceChanged || !selectedIds.Contains(s.CurveIds[i]))
+      .Where(i => selectionDefinitionChanged || !selectedIds.Contains(s.CurveIds[i]))
       .ToList();
     for (int removed = removedIndices.Count - 1; removed >= 0; removed--)
     {
@@ -404,15 +416,23 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       if (retainedIds.Contains(rhObj.Id) || rhObj.Geometry is not Curve sourceCurve)
         continue;
 
-      var curve = sourceCurve.DuplicateCurve();
+      Curve curve;
       if (selectionPoints.TryGetValue(rhObj.Id, out var pick))
       {
+        curve = sourceCurve.DuplicateCurve();
         curve = OrientCurveToPickPoint(curve, pick, out bool reversed);
         vTools.Log.Write("vNotches",
           $"curve {s.Curves.Count + 1} picked {(reversed ? "end" : "start")}");
       }
+      else if (orientedCurvesById.TryGetValue(rhObj.Id, out var orientedCurve))
+      {
+        curve = orientedCurve.DuplicateCurve();
+        vTools.Log.Write("vNotches",
+          $"curve {s.Curves.Count + 1} retained its current start");
+      }
       else
       {
+        curve = sourceCurve.DuplicateCurve();
         vTools.Log.Write("vNotches",
           $"curve {s.Curves.Count + 1} has no selection point; source direction retained");
       }
@@ -2041,9 +2061,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   {
     reversed = false;
     if (pick == Point3d.Unset) return curve;
-    double sd = pick.DistanceTo(curve.PointAtStart);
-    double ed = pick.DistanceTo(curve.PointAtEnd);
-    if (ed < sd)
+    if (PickTargetsCurveEnd(curve, pick))
     {
       curve = curve.DuplicateCurve();
       curve.Reverse();
@@ -2051,6 +2069,10 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
     return curve;
   }
+
+  static bool PickTargetsCurveEnd(Curve curve, Point3d pick) =>
+    pick != Point3d.Unset &&
+    pick.DistanceTo(curve.PointAtEnd) < pick.DistanceTo(curve.PointAtStart);
 
   static double Clamp(double v, double min, double max) =>
     v < min ? min : (v > max ? max : v);

@@ -77,6 +77,7 @@ public sealed class vSplitAtCorners : Command
         gp.EnableTransparentCommands(true);
         gp.SetCommandPrompt("Click to toggle split points. Enter to apply");
         gp.AcceptNothing(true);
+        gp.AcceptNumber(true, false);
 
         var idxAngle = gp.AddOptionDouble("Angle", ref angleOpt);
         var idxMinLen = gp.AddOptionDouble("MinLength", ref minLenOpt);
@@ -117,6 +118,16 @@ public sealed class vSplitAtCorners : Command
 
         if (result == GetResult.Nothing)
           break;
+
+        if (result == GetResult.Number)
+        {
+          angleOpt.CurrentValue = Math.Clamp(gp.Number(), 0.01, 179.99);
+          _angleDeg = angleOpt.CurrentValue;
+          SavePersistedOptions();
+          conduit.UpdateThresholds(angleOpt.CurrentValue, minLenOpt.CurrentValue);
+          doc.Views.Redraw();
+          continue;
+        }
 
         if (result != GetResult.Point)
           continue;
