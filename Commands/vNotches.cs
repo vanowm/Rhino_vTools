@@ -223,6 +223,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     go.EnableTransparentCommands(true);
     go.SetCommandPrompt("Select one or more curves (near start)");
     go.GeometryFilter = ObjectType.Curve;
+    go.GroupSelect = false;
     go.EnablePreSelect(true, true);
     var res = go.GetMultiple(1, 0);
     if (go.CommandResult() != Result.Success || res != GetResult.Object)
@@ -251,7 +252,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     go.SetCommandPrompt("Add or remove curves. Press Enter when done");
     go.GeometryFilter = ObjectType.Curve;
     go.SubObjectSelect = false;
-    go.GroupSelect = true;
+    go.GroupSelect = false;
     go.AcceptNothing(true);
     go.EnablePreSelect(true, true);
     go.EnablePostSelect(true);
@@ -338,6 +339,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     if (curveIndex < 0 || curveIndex >= s.Curves.Count)
       return;
 
+    s.CurveSideMemory[s.CurveIds[curveIndex]] = s.CurveSides[curveIndex];
+
     foreach (var id in s.NotchIdsByCurve[curveIndex])
       if (id != Guid.Empty) doc.Objects.Delete(id, true);
     foreach (var id in s.LabelIdsByCurve[curveIndex])
@@ -367,13 +370,16 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   static void AddSessionCurve(NotchSession s, RhinoObject rhObj, Curve curve)
   {
     int priorCurveCount = s.Curves.Count;
-    bool initialSide = priorCurveCount > 0 && s.CurveSides[^1];
+    bool initialSide = s.CurveSideMemory.TryGetValue(rhObj.Id, out bool rememberedSide)
+      ? rememberedSide
+      : priorCurveCount > 0 && s.CurveSides[^1];
     var groups = rhObj.Attributes.GetGroupList();
     int contextGroup = groups != null && groups.Length > 0 ? groups[0] : -1;
 
     s.Curves.Add(curve);
     s.CurveIds.Add(rhObj.Id);
     s.CurveSides = s.CurveSides.Append(initialSide).ToArray();
+    s.CurveSideMemory[rhObj.Id] = initialSide;
     s.CurveEnabled = s.CurveEnabled.Append(true).ToArray();
     s.SessionGroupIndices = s.SessionGroupIndices.Append(-1).ToArray();
     s.CurveContextGroupIndices = s.CurveContextGroupIndices.Append(contextGroup).ToArray();
@@ -1607,6 +1613,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   {
     if (idx < 0 || idx >= s.CurveSides.Length) return;
     s.CurveSides[idx] = !s.CurveSides[idx];
+    s.CurveSideMemory[s.CurveIds[idx]] = s.CurveSides[idx];
     RebuildCurveNotches(doc, s, idx);
     SelectBothCurves(doc, s);
   }
@@ -1623,6 +1630,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
     s.Curves[idx].Reverse();
     s.CurveSides[idx] = !s.CurveSides[idx]; // side flips with reverse
+    s.CurveSideMemory[s.CurveIds[idx]] = s.CurveSides[idx];
     RebuildCurveNotches(doc, s, idx);
     SelectBothCurves(doc, s);
   }
@@ -1793,6 +1801,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public readonly List<Guid>  CurveIds;
     public bool[]   CurveSides;  // true = Left
     public bool[]   CurveEnabled;
+    public readonly Dictionary<Guid, bool> CurveSideMemory = [];
 
     public OptionDouble NotchLengthOpt;
     public OptionDouble NotchOffsetOpt;
@@ -1871,6 +1880,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
       CurveSides   = sides;
       CurveEnabled = Enumerable.Repeat(true, curves.Count).ToArray();
+      for (int i = 0; i < curveIds.Count && i < sides.Length; i++)
+        CurveSideMemory[curveIds[i]] = sides[i];
 
       double tol = doc.ModelAbsoluteTolerance;
       NotchLengthOpt    = new OptionDouble(notchLength, tol, 1e9);
@@ -1958,6 +1969,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     readonly DropDown    _notchLayerDrop;
     readonly CheckBox    _percentCheck, _groupCheck;
     readonly CheckBox    _labelCheck, _autoAdvCheck, _sideFlipCheck;
+    System.Windows.Controls.CheckBox? _labelHeaderCheck;
     readonly TextBox     _labelValueBox;
     readonly DropDown    _labelLayerDrop;
     readonly TextBox     _labelSizeBox;
@@ -2046,12 +2058,21 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       };
 
       // Label
-      _labelCheck    = new CheckBox { Text = "Enable", Checked = s.LabelToggle.CurrentValue, ToolTip = "Create labels" };
+      _labelCheck    = new CheckBox { Text = "", Checked = s.LabelToggle.CurrentValue };
       _labelValueBox = MakeTextBox(s.LabelValueText);
       _autoAdvCheck  = new CheckBox { ToolTip = "Auto-advance label", Checked = s.LabelAutoAdv };
       _sideFlipCheck = new CheckBox { Text = "Flip side", Checked = s.LabelSideFlip };
       _labelCheck.CheckedChanged += (_, __) =>
-      { if (_suppress) return; s.LabelToggle.CurrentValue = _labelCheck.Checked == true; ApplyDynamic(); Redraw(); Persist(); };
+      {
+        if (_suppress) return;
+        bool enabled = _labelCheck.Checked == true;
+        if (_labelHeaderCheck != null && _labelHeaderCheck.IsChecked != enabled)
+          _labelHeaderCheck.IsChecked = enabled;
+        s.LabelToggle.CurrentValue = enabled;
+        ApplyDynamic();
+        Redraw();
+        Persist();
+      };
       AttachTextLive(_labelValueBox, text => s.LabelValueText = text);
       _autoAdvCheck.CheckedChanged += (_, __) =>
       { if (_suppress) return; s.LabelAutoAdv = _autoAdvCheck.Checked == true; Redraw(); Persist(); };
@@ -2172,6 +2193,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         {
           if (_suppress) return;
           s.CurveSides[ci] = _sideChecks[ci].Checked == true;
+          s.CurveSideMemory[s.CurveIds[ci]] = s.CurveSides[ci];
           RebuildCurveNotches(doc, s, ci);
           SelectBothCurves(doc, s);
           Redraw();
@@ -2240,7 +2262,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       // ── Label group ──────────────────────────────────────────────────────
       var labelHeader = new TableLayout { Spacing = new Eto.Drawing.Size(4, 0) };
       labelHeader.Rows.Add(new TableRow { ScaleHeight = false, Cells = {
-        new TableCell(_labelCheck,    false),
         new TableCell(_labelValueBox, false),
         new TableCell(_autoAdvCheck,  false),
         new TableCell(_sideFlipCheck, false),
@@ -2270,7 +2291,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       };
       labelContent.Items.Add(new StackLayoutItem(labelHeader,   false));
       labelContent.Items.Add(new StackLayoutItem(labelSubTable, false));
-      var labelGroup = new GroupBox { Text = "Label", Content = labelContent };
+      var labelGroup = new GroupBox { Text = "", Content = labelContent };
+      InstallLabelHeaderCheckBox(labelGroup);
 
       // ── Multiple group ───────────────────────────────────────────────────
       var multipleTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
@@ -2368,6 +2390,41 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         Width = 90,
         Height = 22,
       };
+
+    void InstallLabelHeaderCheckBox(GroupBox group)
+    {
+      void Install()
+      {
+        if (group.ControlObject is not System.Windows.Controls.GroupBox nativeGroup)
+          return;
+
+        if (_labelHeaderCheck == null)
+        {
+          var header = new System.Windows.Controls.CheckBox
+          {
+            Content = "Label",
+            IsChecked = _s.LabelToggle.CurrentValue,
+            VerticalAlignment = System.Windows.VerticalAlignment.Center,
+          };
+          header.Checked += (_, __) => SetLabelEnabledFromHeader(true);
+          header.Unchecked += (_, __) => SetLabelEnabledFromHeader(false);
+          _labelHeaderCheck = header;
+        }
+
+        nativeGroup.Header = _labelHeaderCheck;
+      }
+
+      Install();
+      group.Load += (_, __) => Install();
+    }
+
+    void SetLabelEnabledFromHeader(bool enabled)
+    {
+      if (_suppress)
+        return;
+      if (_labelCheck.Checked != enabled)
+        _labelCheck.Checked = enabled;
+    }
 
     void AttachNumericLive(TextBox box, Func<double> current, Action<double> apply)
     {
@@ -2527,6 +2584,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         _percentCheck.Checked          = _s.PercentToggle.CurrentValue;
         _groupCheck.Checked            = _s.GroupToggle.CurrentValue;
         _labelCheck.Checked            = _s.LabelToggle.CurrentValue;
+        if (_labelHeaderCheck != null)
+          _labelHeaderCheck.IsChecked = _s.LabelToggle.CurrentValue;
         _labelValueBox.Text            = _s.LabelValueText;
         _labelSizeBox.Text             = $"{_s.ManualLabelSize:G}";
         _labelSizeAutoCheck.Checked    = _s.LabelSizeAutoToggle.CurrentValue;
