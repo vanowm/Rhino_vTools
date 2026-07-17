@@ -1,4 +1,4 @@
-Tools  ·  v26.7.17.918
+Tools  ·  v26.7.17.927
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -25,7 +25,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vPart](#vpart-flow) *(26.5.18.1742)* — captures a closed perimeter from selected curves (gaps are bridged automatically), collects all visible objects inside the perimeter (curves trimmed at the boundary; other types included whole), and lets the user place the resulting Part with a full preview
   - [vPerpendicularTo](#vperpendicularto-flow) *(26.5.5.757)* — rotates curve A about its nearest endpoint so it is perpendicular to curve B in the active CPlane
   - [vPointNormalToSurface](#vpointnormaltosurface-flow) *(26.4.27.2109)* — places points projected onto the closest surface normal evaluation point
-  - [vProjectToSurface](#vprojecttosurface-flow) *(26.7.16.1432)* — projects selected curves and points onto a target surface or polysurface; overhanging curve portions are clipped away
+  - [vProjectToSurface](#vprojecttosurface-flow) *(26.7.16.1432)* — projects selected curves and points onto one or more target surfaces or polysurfaces with live preview; overhanging curve portions are clipped away
   - [vPointTrace](#vpointtrace-flow) *(26.4.30.1044)* — maps arc-length positions from a source curve onto a destination curve: pick points along the source and a corresponding point is placed on the destination at the same proportional arc-length position
   - [vRectangle](#vrectangle-flow) *(26.4.27.2259)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
@@ -382,12 +382,12 @@ Behavior:
 
 ### vProjectToSurface flow
 
-1. Select curves and point objects to project.
-1. Select the target surface or polysurface.
+1. Select one or more target surfaces or polysurfaces.
+1. Select curves and point objects to project; the projected result previews while the selection changes.
 1. Projected point objects and curve pieces are created on the target and selected; curve pieces use the current layer and source objects are left unchanged.
 
 Behavior:
-- Curves are pulled to each brep face by closest-point projection.
+- Curves are pulled to every selected brep face by closest-point projection.
 - Portions of a curve that do not touch the trimmed target face are skipped, so curves longer than the surface produce only the projected touching spans.
 
 ### vPointTrace flow
