@@ -352,15 +352,31 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
 
     var selectedById = selectedPool.ToDictionary(obj => obj.Id);
+    var getSelectionOrder = new List<Guid>();
+    var getSelectionIds = new HashSet<Guid>();
+    foreach (var id in getObjectOrder)
+      if (selectedById.ContainsKey(id) && getSelectionIds.Add(id))
+        getSelectionOrder.Add(id);
+
+    bool sameCurveSet = selectedById.Count == s.CurveIds.Count &&
+      selectedById.Keys.ToHashSet().SetEquals(s.CurveIds);
+    bool explicitlyReselected = getSelectionOrder.Count > 0 &&
+      getSelectionOrder.All(selectionPoints.ContainsKey);
+    bool sequenceChanged = sameCurveSet &&
+      explicitlyReselected &&
+      getSelectionOrder.Count == s.CurveIds.Count &&
+      !getSelectionOrder.SequenceEqual(s.CurveIds);
+
     var orderedIds = new HashSet<Guid>();
     var selectedObjects = new List<RhinoObject>();
 
     // Retained curves keep their existing sequence. Newly selected curves follow
     // GetObject's click order instead of document object-table order.
-    foreach (var id in s.CurveIds)
-      if (selectedById.TryGetValue(id, out var retained) && orderedIds.Add(id))
-        selectedObjects.Add(retained);
-    foreach (var id in getObjectOrder)
+    if (!sequenceChanged)
+      foreach (var id in s.CurveIds)
+        if (selectedById.TryGetValue(id, out var retained) && orderedIds.Add(id))
+          selectedObjects.Add(retained);
+    foreach (var id in getSelectionOrder)
       if (selectedById.TryGetValue(id, out var selected) && orderedIds.Add(id))
         selectedObjects.Add(selected);
     foreach (var selected in selectedPool)
@@ -368,12 +384,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         selectedObjects.Add(selected);
 
     vTools.Log.Write("vNotches", "selection order: " + string.Join(", ",
-      selectedObjects.Select((obj, i) => $"{i + 1}:{obj.Id.ToString("N")[..8]}")));
+      selectedObjects.Select((obj, i) => $"{i + 1}:{obj.Id.ToString("N")[..8]}")) +
+      $" sameSet={sameCurveSet} reselected={explicitlyReselected} sequenceChanged={sequenceChanged}");
 
     var selectedIds = selectedObjects.Select(obj => obj.Id).ToHashSet();
     bool changed = false;
     var removedIndices = Enumerable.Range(0, s.CurveIds.Count)
-      .Where(i => !selectedIds.Contains(s.CurveIds[i]))
+      .Where(i => sequenceChanged || !selectedIds.Contains(s.CurveIds[i]))
       .ToList();
     for (int removed = removedIndices.Count - 1; removed >= 0; removed--)
     {
