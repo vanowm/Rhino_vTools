@@ -232,7 +232,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     {
       if (i < _curveSides.Length) initialSides[i] = _curveSides[i];
       else if (_curveSides.Length > 0) initialSides[i] = _curveSides[_curveSides.Length - 1];
-      else initialSides[i] = false; // false = Left
+      else initialSides[i] = false; // false = Right
     }
 
     var session = new NotchSession(doc, curves, curveIds, initialSides,
@@ -734,6 +734,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     ClosestCurveHit(s, point, out int refIdx, out var refCurve, out double refT);
     if (refCurve == null) return;
 
+    s.PreviewRefCurveIndex = refIdx;
+
     double lengthFromStart = LengthFromStart(refCurve, refT);
 
     List<double> lengthsFromStart;
@@ -1203,18 +1205,23 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     double lsize = EffectiveLabelSize(s);
     string ltext = s.LabelValueText.Trim();
     bool   canLabel = s.LabelToggle.CurrentValue && ltext.Length > 0 && lsize > doc.ModelAbsoluteTolerance;
+    var referenceTangent = ResolveReferenceTangent(
+      s.Curves, lengths, refIdx, cursorPoint);
 
     for (int i = 0; i < s.Curves.Count; i++)
     {
       if (!s.CurveEnabled[i]) continue;
-      var geom = NotchGeometry(s.Curves[i], lengths[i], nl, no, sides[i], nt, nw, cursorPoint, null);
+      Point3d? curveCursor = i == refIdx ? cursorPoint : null;
+      Vector3d? tangentHint = i == refIdx ? null : referenceTangent;
+      var geom = NotchGeometry(s.Curves[i], lengths[i], nl, no, sides[i], nt, nw,
+        curveCursor, tangentHint);
       if (geom == null) continue;
       if (geom is LineCurve lc)           e.Display.DrawLine(lc.Line, System.Drawing.Color.Cyan, 2);
       else if (geom is PolylineCurve plc)  e.Display.DrawPolyline(plc.ToPolyline(), System.Drawing.Color.Cyan, 2);
 
       if (canLabel)
       {
-        GetCurveTangentAndDirection(s.Curves[i], lengths[i], sides[i], cursorPoint, null,
+        GetCurveTangentAndDirection(s.Curves[i], lengths[i], sides[i], curveCursor, tangentHint,
           out var tangent, out var direction);
         if (!tangent.IsValid || !direction.IsValid) continue;
 
@@ -1467,6 +1474,18 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     if (side == "Right") direction = -direction;
   }
 
+  static Vector3d? ResolveReferenceTangent(IReadOnlyList<Curve> curves,
+    IReadOnlyList<double> lengths, int referenceIndex, Point3d? cursorPoint)
+  {
+    if (!cursorPoint.HasValue || referenceIndex < 0 || referenceIndex >= curves.Count ||
+        referenceIndex >= lengths.Count)
+      return null;
+
+    GetCurveTangentAndDirection(curves[referenceIndex], lengths[referenceIndex], "Left",
+      cursorPoint, null, out var tangent, out _);
+    return tangent.IsValid && !tangent.IsTiny() ? tangent : null;
+  }
+
   // ── Point at curve arc-length ─────────────────────────────────────────────
 
   static (Point3d pt, double? t) PointAtCurveLength(Curve curve, double lengthFromStart)
@@ -1682,13 +1701,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     string notchLayer, string labelLayer,
     double labelOffset, double labelOffsetY,
     string labelCurveSide,
-    Point3d? cursorPoint)
+    Point3d? cursorPoint, Vector3d? tangentHint)
   {
-    GetCurveTangentAndDirection(curve, lengthFromStart, side, cursorPoint, null,
+    GetCurveTangentAndDirection(curve, lengthFromStart, side, cursorPoint, tangentHint,
       out var tangent, out var direction);
 
     var geom = NotchGeometry(curve, lengthFromStart, notchLength, notchOffset,
-      side, notchType, notchWidth, cursorPoint, null);
+      side, notchType, notchWidth, cursorPoint, tangentHint);
     if (geom == null) return (Guid.Empty, null);
 
     Guid notchId;
@@ -1749,6 +1768,9 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   {
     var ids = new List<(Guid, Guid?)>();
     string firstSide = sides.Count > 0 ? sides[0] : "Left";
+    int referenceIndex = cursorPoint.HasValue ? s.PreviewRefCurveIndex : -1;
+    var referenceTangent = ResolveReferenceTangent(
+      s.Curves, lengths, referenceIndex, cursorPoint);
 
     for (int i = 0; i < s.Curves.Count; i++)
     {
@@ -1760,6 +1782,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
       string lv = (canLabel && i < labelValues.Count) ? labelValues[i] : "";
       int gi    = i < groupIndices.Length ? groupIndices[i] : -1;
+      Point3d? curveCursor = i == referenceIndex ? cursorPoint : null;
+      Vector3d? tangentHint = i == referenceIndex ? null : referenceTangent;
 
       var (nid, lid) = AddNotch(doc, s.Curves[i], lengths[i],
         notchLen, notchOff, sides[i], gi,
@@ -1767,7 +1791,17 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         canLabel, lv, labelSize,
         notchLayer, labelLayer,
         labelOffset, labelOffsetY,
-        labelCurveSide, cursorPoint);
+        labelCurveSide, curveCursor, tangentHint);
+
+      if (nid != Guid.Empty)
+      {
+        GetCurveTangentAndDirection(s.Curves[i], lengths[i], sides[i],
+          curveCursor, tangentHint, out var resolvedTangent, out var resolvedDirection);
+        vTools.Log.Write("vNotches",
+          $"placed curve={i + 1} side={sides[i]} ref={referenceIndex + 1} " +
+          $"tangent=({resolvedTangent.X:0.###},{resolvedTangent.Y:0.###}) " +
+          $"direction=({resolvedDirection.X:0.###},{resolvedDirection.Y:0.###})");
+      }
 
       ids.Add((nid, lid));
     }
@@ -1835,7 +1869,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         lbl, lv, rec.LabelSize,
         EffectiveLayerName(doc, rec.NotchLayer, rec.NotchLayer),
         EffectiveLayerName(doc, rec.LabelLayer, rec.NotchLayer),
-        rec.LabelOffset, rec.LabelOffsetY, labelCurveSide, null);
+        rec.LabelOffset, rec.LabelOffsetY, labelCurveSide, null, null);
       newIds.Add(nid);
       newLabelIds.Add(lid);
     }
@@ -1873,6 +1907,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     s.CurveSides[idx] = !s.CurveSides[idx];
     RebuildCurveNotches(doc, s, idx);
     SelectBothCurves(doc, s);
+    s.Panel?.UpdateUndoEnabled();
   }
 
   static void ReverseCurve(RhinoDoc doc, NotchSession s, int idx)
@@ -1890,6 +1925,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     s.CurveSides[idx] = !s.CurveSides[idx]; // side flips with reverse
     RebuildCurveNotches(doc, s, idx);
     SelectBothCurves(doc, s);
+    s.Panel?.UpdateUndoEnabled();
   }
 
   static void SelectBothCurves(RhinoDoc doc, NotchSession s)
@@ -2345,7 +2381,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     readonly Label       _multipleDistanceLabel;
     readonly Button      _multipleAddButton;
     readonly Label       _fromStartLbl, _fromEndLbl, _fromPrevLbl;
-    readonly Button      _undoBtn, _selectCurvesButton;
+    readonly Button      _undoBtn, _redoBtn, _selectCurvesButton;
     readonly CheckBox[]  _sideChecks;
     readonly Button[]    _reverseButtons;
     readonly CheckBox[]  _enableChecks;
@@ -2536,11 +2572,16 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _fromEndLbl   = new Label { Text = "-" };
       _fromPrevLbl  = new Label { Text = "-" };
 
-      // Undo button
+      // History buttons
       _undoBtn = new Button { Text = "Undo", Height = 26 };
       _undoBtn.Click += (_, __) =>
       {
-        RunLocalHistory(doc, redo: false, source: "panel-button");
+        RunLocalHistory(doc, redo: false, source: "panel-undo");
+      };
+      _redoBtn = new Button { Text = "Redo", Height = 26 };
+      _redoBtn.Click += (_, __) =>
+      {
+        RunLocalHistory(doc, redo: true, source: "panel-redo");
       };
       UpdateUndoEnabled();
 
@@ -2560,6 +2601,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
           s.CurveSides[ci] = _sideChecks[ci].Checked == true;
           RebuildCurveNotches(doc, s, ci);
           SelectBothCurves(doc, s);
+          UpdateUndoEnabled();
           Redraw();
           Persist();
         };
@@ -2732,6 +2774,28 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       distTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("From start"),    new TableCell(_fromStartLbl, true) } });
       distTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("From end"),      new TableCell(_fromEndLbl,   true) } });
       distTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("From previous"), new TableCell(_fromPrevLbl,  true) } });
+      var historyButtons = new StackLayout
+      {
+        Orientation = Orientation.Horizontal,
+        Spacing = 4,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Items =
+        {
+          new StackLayoutItem(_undoBtn, false),
+          new StackLayoutItem(_redoBtn, false),
+        },
+      };
+      var infoRow = new StackLayout
+      {
+        Orientation = Orientation.Horizontal,
+        Spacing = 6,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Items =
+        {
+          new StackLayoutItem(distTable, true),
+          new StackLayoutItem(historyButtons, false),
+        },
+      };
 
       // ── Root (vertical stack, no bottom spacer) ──────────────────────────
       var root = new StackLayout
@@ -2746,8 +2810,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       root.Items.Add(new StackLayoutItem(multipleGroup, false));
       root.Items.Add(new StackLayoutItem(pgStack,    false));
       root.Items.Add(new StackLayoutItem(curveStack, false));
-      root.Items.Add(new StackLayoutItem(distTable,  false));
-      root.Items.Add(new StackLayoutItem(_undoBtn,   false));
+      root.Items.Add(new StackLayoutItem(infoRow,    false));
 
       return root;
     }
@@ -3105,8 +3168,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _fromPrevLbl.Text = prevDelta.HasValue ? FormatPanelNumber(prevDelta.Value) : "-";
     }
 
-    public void UpdateUndoEnabled() =>
+    public void UpdateUndoEnabled()
+    {
       _undoBtn.Enabled = _s.NotchRecords.Count > 0;
+      _redoBtn.Enabled = _s.RedoBatches.Count > 0;
+    }
   }
 }
 
