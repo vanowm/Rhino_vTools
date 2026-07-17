@@ -1,4 +1,4 @@
-Tools  ·  v26.7.17.931
+Tools  ·  v26.7.17.957
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -294,6 +294,13 @@ Options persist to `vTools.config.json` under `vMatch`.
     - `Layer`: target layer for label text.
     - `Size`: manual label text height. `Auto` computes height proportionally from notch geometry; when `Auto` is off, the adjacent percentage dropdown scales the auto-computed height.
     - `Offset X` / `Offset Y`: label position offset relative to the notch point (along-curve and across-curve).
+
+1. **Multiple** group options:
+
+    - `Start offset` / `End offset`: distances from each curve's respective ends to the first and last notch.
+    - `Number`: total number of notches, including the first and last positions.
+    - `Distance`: live spacing between notches, rounded to two decimal places. A range is shown when selected curves have different spacing.
+    - `Add`: creates an evenly spaced notch batch. When labels are enabled, only the first notch position receives the label and auto-advance runs once.
 
 1. Other panel controls:
 

@@ -109,6 +109,7 @@ public sealed class vProjectToSurface : Command
     go.GroupSelect = true;
     go.AcceptNothing(true);
     go.EnablePreSelect(true, true);
+    go.AlreadySelectedObjectSelect = true;
     go.EnableClearObjectsOnEntry(false);
     go.EnableUnselectObjectsOnExit(false);
     go.DeselectAllBeforePostSelect = false;
