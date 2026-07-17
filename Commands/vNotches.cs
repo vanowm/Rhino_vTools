@@ -423,6 +423,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     s.CurveIds.RemoveAt(curveIndex);
     s.CurveSides = s.CurveSides.Where((_, i) => i != curveIndex).ToArray();
     s.CurveEnabled = s.CurveEnabled.Where((_, i) => i != curveIndex).ToArray();
+    s.CurveDirectionFlipped = s.CurveDirectionFlipped.Where((_, i) => i != curveIndex).ToArray();
     s.SessionGroupIndices = s.SessionGroupIndices.Where((_, i) => i != curveIndex).ToArray();
     s.CurveContextGroupIndices = s.CurveContextGroupIndices.Where((_, i) => i != curveIndex).ToArray();
   }
@@ -438,8 +439,15 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     s.CurveIds.Add(rhObj.Id);
     s.CurveSides = s.CurveSides.Append(initialSide).ToArray();
     s.CurveEnabled = s.CurveEnabled.Append(true).ToArray();
+    bool directionFlipped = priorCurveCount < s.SideOrientationCurves.Count &&
+      CurveDirectionsOpposed(curve, s.SideOrientationCurves[priorCurveCount]);
+    s.CurveDirectionFlipped = s.CurveDirectionFlipped.Append(directionFlipped).ToArray();
     s.SessionGroupIndices = s.SessionGroupIndices.Append(-1).ToArray();
     s.CurveContextGroupIndices = s.CurveContextGroupIndices.Append(contextGroup).ToArray();
+    if (priorCurveCount >= s.SideOrientationCurves.Count)
+      s.SideOrientationCurves.Add(curve.DuplicateCurve());
+    vTools.Log.Write("vNotches",
+      $"curve {priorCurveCount + 1} orientation correction={(directionFlipped ? "reversed" : "same")}");
 
     int recordCount = s.NotchRecords.Count;
     s.NotchIdsByCurve.Add(Enumerable.Repeat(Guid.Empty, recordCount).ToList());
@@ -472,6 +480,16 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     for (int i = 0; i < s.CurveIds.Count && i < s.CurveSides.Length; i++)
       values.Add($"{i + 1}:{s.CurveIds[i].ToString("N")[..8]}={(s.CurveSides[i] ? "Left" : "Right")}");
     return values.Count > 0 ? string.Join(", ", values) : "none";
+  }
+
+  static bool CurveDirectionsOpposed(Curve curve, Curve orientationCurve)
+  {
+    var tangent = curve.TangentAtStart;
+    var orientationTangent = orientationCurve.TangentAtStart;
+    tangent.Z = 0.0;
+    orientationTangent.Z = 0.0;
+    return tangent.Unitize() && orientationTangent.Unitize() &&
+      Vector3d.Multiply(tangent, orientationTangent) < 0.0;
   }
 
   static void RebuildPanelForCurves(RhinoDoc doc, NotchSession s)
@@ -1206,7 +1224,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     string ltext = s.LabelValueText.Trim();
     bool   canLabel = s.LabelToggle.CurrentValue && ltext.Length > 0 && lsize > doc.ModelAbsoluteTolerance;
     var referenceTangent = ResolveReferenceTangent(
-      s.Curves, lengths, refIdx, cursorPoint);
+      s.Curves, lengths, refIdx, cursorPoint, s.CurveDirectionFlipped);
 
     for (int i = 0; i < s.Curves.Count; i++)
     {
@@ -1477,13 +1495,26 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
   }
 
   static Vector3d? ResolveReferenceTangent(IReadOnlyList<Curve> curves,
-    IReadOnlyList<double> lengths, int referenceIndex, Point3d? cursorPoint)
+    IReadOnlyList<double> lengths, int referenceIndex, Point3d? cursorPoint,
+    IReadOnlyList<bool>? directionFlips = null)
   {
     if (referenceIndex < 0 || referenceIndex >= curves.Count || referenceIndex >= lengths.Count)
       return null;
 
-    GetCurveTangentAndDirection(curves[referenceIndex], lengths[referenceIndex], "Left",
+    bool directionFlipped = directionFlips != null && referenceIndex < directionFlips.Count &&
+      directionFlips[referenceIndex];
+    var tangent = ResolveReferenceTangent(
+      curves[referenceIndex], lengths[referenceIndex], cursorPoint, directionFlipped);
+    return tangent;
+  }
+
+  static Vector3d? ResolveReferenceTangent(Curve curve, double lengthFromStart,
+    Point3d? cursorPoint, bool directionFlipped)
+  {
+    GetCurveTangentAndDirection(curve, lengthFromStart, "Left",
       cursorPoint, null, out var tangent, out _);
+    if (!tangent.IsValid || tangent.IsTiny()) return null;
+    if (directionFlipped) tangent = -tangent;
     return tangent.IsValid && !tangent.IsTiny() ? tangent : null;
   }
 
@@ -1793,7 +1824,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     int referenceIndex = ReferenceCurveIndex(
       preferredReference, curveEnabled, s.Curves.Count);
     var referenceTangent = ResolveReferenceTangent(
-      s.Curves, lengths, referenceIndex, cursorPoint);
+      s.Curves, lengths, referenceIndex, cursorPoint, s.CurveDirectionFlipped);
 
     for (int i = 0; i < s.Curves.Count; i++)
     {
@@ -1882,9 +1913,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       double d = LengthFromRecord(s.Curves[curveIndex], rec, curveIndex);
       int referenceIndex = ReferenceCurveIndex(-1, rec.CurveEnabled?.ToArray(), s.Curves.Count);
       double referenceLength = LengthFromRecord(s.Curves[referenceIndex], rec, referenceIndex);
-      GetCurveTangentAndDirection(s.Curves[referenceIndex], referenceLength, "Left",
-        null, null, out var referenceTangent, out _);
-      Vector3d? tangentHint = curveIndex == referenceIndex || !referenceTangent.IsValid
+      bool directionFlipped = referenceIndex < s.CurveDirectionFlipped.Length &&
+        s.CurveDirectionFlipped[referenceIndex];
+      var referenceTangent = ResolveReferenceTangent(
+        s.Curves[referenceIndex], referenceLength, null, directionFlipped);
+      Vector3d? tangentHint = curveIndex == referenceIndex || !referenceTangent.HasValue
         ? null
         : referenceTangent;
       bool lbl = rec.LabelEnabled;
@@ -1953,6 +1986,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
     s.Curves[idx].Reverse();
     s.CurveSides[idx] = !s.CurveSides[idx]; // side flips with reverse
+    if (idx < s.SideOrientationCurves.Count)
+      s.SideOrientationCurves[idx].Reverse();
     RebuildCurveNotches(doc, s, idx);
     SelectBothCurves(doc, s);
     s.Panel?.UpdateUndoEnabled();
@@ -2122,8 +2157,10 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public readonly RhinoDoc Doc;
     public readonly List<Curve> Curves;
     public readonly List<Guid>  CurveIds;
+    public readonly List<Curve> SideOrientationCurves;
     public bool[]   CurveSides;  // true = Left
     public bool[]   CurveEnabled;
+    public bool[]   CurveDirectionFlipped;
 
     public OptionDouble NotchLengthOpt;
     public OptionDouble NotchOffsetOpt;
@@ -2204,9 +2241,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       Doc      = doc;
       Curves   = curves;
       CurveIds = curveIds;
+      SideOrientationCurves = curves.Select(curve => curve.DuplicateCurve()).ToList();
 
       CurveSides   = sides;
       CurveEnabled = Enumerable.Repeat(true, curves.Count).ToArray();
+      CurveDirectionFlipped = new bool[curves.Count];
 
       double tol = doc.ModelAbsoluteTolerance;
       NotchLengthOpt    = new OptionDouble(notchLength, tol, 1e9);
@@ -2735,31 +2774,26 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         new TableCell(null,                true),   // filler
       } });
 
-      // labelHeader spans full width above the 2-column sub-table
-      var labelSubTable = new TableLayout { Spacing = new Eto.Drawing.Size(6, 4) };
-      labelSubTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Layer"),    new TableCell(_labelLayerDrop, true) } });
-      labelSubTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Size"),     new TableCell(sizeRow,         true) } });
-      labelSubTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Offset X"), new TableCell(_labelOffsetBox, true) } });
-      labelSubTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Offset Y"), new TableCell(_labelOffsetYBox,true) } });
-      var labelContent = new StackLayout
+      var labelTable = new TableLayout
       {
-        Orientation = Orientation.Vertical,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        Spacing = 4,
         Padding = new Eto.Drawing.Padding(6),
+        Spacing = new Eto.Drawing.Size(6, 4),
       };
-      labelContent.Items.Add(new StackLayoutItem(labelHeader,   false));
-      labelContent.Items.Add(new StackLayoutItem(labelSubTable, false));
-      var labelGroup = new GroupBox { Text = "", Content = labelContent };
-      InstallCollapsibleGroupHeader(labelGroup, labelContent, "Label",
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL(""),         new TableCell(labelHeader,       true) } });
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Layer"),    new TableCell(_labelLayerDrop,   true) } });
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Size"),     new TableCell(sizeRow,           true) } });
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset X"), new TableCell(_labelOffsetBox,   true) } });
+      labelTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Offset Y"), new TableCell(_labelOffsetYBox,  true) } });
+      var labelGroup = new GroupBox { Text = "", Content = labelTable };
+      InstallCollapsibleGroupHeader(labelGroup, labelTable, "Label",
         () => _s.LabelCollapsed, value => _s.LabelCollapsed = value,
         labelToggle: true);
 
       // ── Multiple group ───────────────────────────────────────────────────
       var multipleTable = new TableLayout { Padding = new Eto.Drawing.Padding(6), Spacing = new Eto.Drawing.Size(6, 4) };
-      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Start offset"), new TableCell(_multipleStartOffsetStepper, true) } });
-      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("End offset"),   new TableCell(_multipleEndOffsetStepper,   true) } });
-      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FLW("Number"),       new TableCell(_multipleNumberStepper,      true) } });
+      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Start offset"), new TableCell(_multipleStartOffsetStepper, true) } });
+      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("End offset"),   new TableCell(_multipleEndOffsetStepper,   true) } });
+      multipleTable.Rows.Add(new TableRow { ScaleHeight = false, Cells = { FL("Number"),       new TableCell(_multipleNumberStepper,      true) } });
       var distanceStack = new StackLayout
       {
         Orientation = Orientation.Vertical,
@@ -2781,8 +2815,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         VerticalContentAlignment = VerticalAlignment.Center };
       pgStack.Items.Add(new StackLayoutItem(_percentCheck, false));
       pgStack.Items.Add(new StackLayoutItem(_groupCheck,   false));
-      pgStack.Items.Add(new StackLayoutItem(null,          true));
       pgStack.Items.Add(new StackLayoutItem(_selectCurvesButton, false));
+      pgStack.Items.Add(new StackLayoutItem(null,          true));
 
       // ── Per-curve rows ───────────────────────────────────────────────────
       var curveStack = new StackLayout { Orientation = Orientation.Vertical, Spacing = 2 };
@@ -2847,10 +2881,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     static TableCell FL(string text) =>
       new TableCell(new Label { Text = text, VerticalAlignment = VerticalAlignment.Center });
-
-    // Fixed-width label cell for the Label group (keeps label column stable on resize)
-    static TableCell FLW(string text) =>
-      new TableCell(new Label { Text = text, Width = 80, VerticalAlignment = VerticalAlignment.Center });
 
     void Redraw() => _s.Doc.Views.Redraw();
 
