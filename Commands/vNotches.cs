@@ -2777,6 +2777,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     readonly CheckBox[]  _enableChecks;
     readonly Label[]     _curveLengthLabels;
     Scrollable? _scrollable;
+    static readonly System.Windows.Style NotchTypeFocusVisualStyle = CreateOutsideFocusStyle();
 
     public NotchPanel(RhinoDoc doc, NotchSession s)
     {
@@ -3380,15 +3381,50 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       native.MinHeight = 0;
       native.Width = 18;
       native.Height = 18;
-      native.Focusable = false;
-      native.FocusVisualStyle = null;
+      native.Focusable = true;
+      native.FocusVisualStyle = NotchTypeFocusVisualStyle;
       native.HorizontalContentAlignment = System.Windows.HorizontalAlignment.Center;
       native.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
       native.Content = CreateNotchTypeGlyph(
         _s.NotchTypeValues[typeIndex], active,
         _s.NotchLengthOpt.CurrentValue, _s.NotchWidthOpt.CurrentValue);
     }
+    static System.Windows.Style CreateOutsideFocusStyle()
+    {
+      var template = new System.Windows.Controls.ControlTemplate(
+        typeof(System.Windows.Controls.Control));
 
+      var outline = new System.Windows.FrameworkElementFactory(
+        typeof(System.Windows.Shapes.Rectangle));
+      outline.SetValue(
+        System.Windows.Shapes.Shape.StrokeProperty,
+        System.Windows.SystemColors.ControlTextBrush);
+      outline.SetValue(
+        System.Windows.Shapes.Shape.StrokeThicknessProperty,
+        1.0);
+      outline.SetValue(
+        System.Windows.Shapes.Shape.StrokeDashArrayProperty,
+        new System.Windows.Media.DoubleCollection { 1.0, 2.0 });
+      outline.SetValue(
+        System.Windows.FrameworkElement.MarginProperty,
+        new System.Windows.Thickness(-1.0));
+      outline.SetValue(
+        System.Windows.FrameworkElement.SnapsToDevicePixelsProperty,
+        true);
+      outline.SetValue(
+        System.Windows.UIElement.IsHitTestVisibleProperty,
+        false);
+      template.VisualTree = outline;
+
+      var style = new System.Windows.Style(
+        typeof(System.Windows.Controls.Control));
+
+      style.Setters.Add(new System.Windows.Setter(
+        System.Windows.Controls.Control.TemplateProperty,
+        template));
+
+      return style;
+    }
     void SelectNotchType(int typeIndex)
     {
       if (_suppress)
