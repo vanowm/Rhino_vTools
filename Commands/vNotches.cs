@@ -572,23 +572,9 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return values.Count > 0 ? string.Join(", ", values) : "none";
   }
 
-  static void RebuildPanelForCurves(RhinoDoc doc, NotchSession s)
+  static void RefreshPanelForCurves(NotchSession s)
   {
-    var oldPanel = s.Panel;
-    Eto.Drawing.Point? location = oldPanel?.Location;
-    if (oldPanel != null)
-    {
-      try { oldPanel.CommitPendingValues(); } catch { }
-      s.SuppressPanelCloseExit = true;
-      try { oldPanel.Close(); } catch { }
-      finally { s.SuppressPanelCloseExit = false; }
-    }
-
-    var newPanel = new NotchPanel(doc, s);
-    if (location.HasValue)
-      newPanel.Location = location.Value;
-    newPanel.Show();
-    s.Panel = newPanel;
+    s.Panel?.RefreshCurveRows();
     SyncPanelFromOptions(s);
   }
 
@@ -678,8 +664,15 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         if (s.CurveSelectionRequested)
         {
           s.CurveSelectionRequested = false;
-          if (TryUpdateCurveSelection(doc, s))
-            RebuildPanelForCurves(doc, s);
+          try
+          {
+            if (TryUpdateCurveSelection(doc, s))
+              RefreshPanelForCurves(s);
+          }
+          finally
+          {
+            s.Panel?.SetCurveSelectionInProgress(false);
+          }
           continue;
         }
         if (s.RefreshCommandLine) { s.RefreshCommandLine = false; continue; }
@@ -3022,15 +3015,20 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     readonly Label       _fromStartLbl, _fromEndLbl, _fromPrevLbl;
     readonly Button      _undoBtn, _redoBtn, _selectCurvesButton;
     System.Windows.Controls.CheckBox? _keepSelectionCheck;
-    readonly CheckBox[]  _sideChecks;
-    readonly Button[]    _reverseButtons;
-    readonly CheckBox[]  _enableChecks;
-    readonly Label[]     _curveLengthLabels;
-    readonly Panel[]     _curveLengthBadges;
+    CheckBox[] _sideChecks = [];
+    Button[]   _reverseButtons = [];
+    CheckBox[] _enableChecks = [];
+    Label[]    _curveLengthLabels = [];
+    Panel[]    _curveLengthBadges = [];
     readonly CurveRowHoverConduit _curveHoverConduit = new();
     Scrollable? _scrollable;
     Scrollable? _curveScrollable;
     Control? _layoutRoot;
+    bool _curveSelectionInProgress;
+    bool _selectButtonBrushesCaptured;
+    System.Windows.Media.Brush? _selectButtonBackground;
+    System.Windows.Media.Brush? _selectButtonBorder;
+    System.Windows.Media.Brush? _selectButtonForeground;
     static readonly System.Windows.Style NotchTypeFocusVisualStyle = CreateOutsideFocusStyle();
 
     public NotchPanel(RhinoDoc doc, NotchSession s)
@@ -3117,9 +3115,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       {
         CommitPendingValues();
         s.CurveSelectionRequested = true;
+        SetCurveSelectionInProgress(true);
         RhinoApp.SetFocusToMainWindow(doc);
         if (!RhinoApp.RunScript("_Enter", false))
+        {
           s.CurveSelectionRequested = false;
+          SetCurveSelectionInProgress(false);
+        }
       };
       InstallSelectButtonContent();
       _selectCurvesButton.Load += (_, __) => InstallSelectButtonContent();
@@ -3253,62 +3255,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       UpdateUndoEnabled();
 
       // Side/Reverse/Enable per curve
-      _sideChecks     = new CheckBox[s.Curves.Count];
-      _reverseButtons = new Button[s.Curves.Count];
-      _enableChecks   = new CheckBox[s.Curves.Count];
-      _curveLengthLabels = new Label[s.Curves.Count];
-      _curveLengthBadges = new Panel[s.Curves.Count];
-      for (int i = 0; i < s.Curves.Count; i++)
-      {
-        int ci = i;
-        _sideChecks[i] = new CheckBox { Text = $"Side {i + 1}", Checked = s.CurveSides[i] };
-        _sideChecks[i].CheckedChanged += (_, __) =>
-        {
-          if (_suppress) return;
-          s.RedoBatches.Clear();
-          s.CurveSides[ci] = _sideChecks[ci].Checked == true;
-          RebuildCurveNotches(doc, s, ci);
-          SelectBothCurves(doc, s);
-          UpdateUndoEnabled();
-          Redraw();
-          Persist();
-        };
-        _reverseButtons[i] = new Button { Text = $"Reverse {i + 1}", Height = 24 };
-        _reverseButtons[i].Click += (_, __) =>
-        {
-          ReverseCurve(doc, s, ci);
-          _suppress = true;
-          try { _sideChecks[ci].Checked = s.CurveSides[ci]; }
-          finally { _suppress = false; }
-          Redraw();
-          Persist();
-        };
-        _curveLengthLabels[i] = new Label
-        {
-          Text = FormatPanelNumber(s.Curves[i].GetLength()),
-          VerticalAlignment = VerticalAlignment.Center,
-          TextAlignment = TextAlignment.Right,
-        };
-        _curveLengthBadges[i] = new Panel
-        {
-          Padding = new Eto.Drawing.Padding(3),
-          Content = _curveLengthLabels[i],
-        };
-        if (s.Curves.Count > 1)
-        {
-          _enableChecks[i] = new CheckBox { Checked = true, ToolTip = "Enable notch on this curve" };
-          _enableChecks[i].CheckedChanged += (_, __) =>
-          {
-            if (_suppress) return;
-            s.CurveEnabled[ci] = _enableChecks[ci].Checked == true;
-            // RebuildCurveNotches(doc, s, ci);
-            UpdateMultipleState();
-            Redraw();
-            Persist();
-          };
-        }
-      }
-      ApplyCurveLengthHighlights();
+      CreateCurveRowControls(doc);
 
       // Layout
       _layoutRoot = BuildLayout();
@@ -3446,40 +3393,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       pgStack.Items.Add(new StackLayoutItem(null,          true));
 
       // ── Per-curve rows ───────────────────────────────────────────────────
-      var curveStack = new StackLayout { Orientation = Orientation.Vertical, Spacing = 2 };
-      for (int i = 0; i < _s.Curves.Count; i++)
-      {
-        int curveIndex = i;
-        var row = new StackLayout { Orientation = Orientation.Horizontal, Spacing = 6,
-          VerticalContentAlignment = VerticalAlignment.Center, Height = 26 };
-        if (_s.Curves.Count > 1 && _enableChecks[i] != null)
-          row.Items.Add(new StackLayoutItem(_enableChecks[i], false));
-        row.Items.Add(new StackLayoutItem(_sideChecks[i],   false));
-        var reverseHost = new Panel
-        {
-          Height = 26,
-          Padding = new Eto.Drawing.Padding(0, 2, 0, 0),
-          Content = _reverseButtons[i],
-        };
-        row.Items.Add(new StackLayoutItem(reverseHost, false));
-        row.Items.Add(new StackLayoutItem(null, true));
-        row.Items.Add(new StackLayoutItem(_curveLengthBadges[i], false));
-        row.MouseEnter += (_, __) => SetCurveRowHover(curveIndex);
-        row.MouseLeave += (_, __) =>
-        {
-          if (_curveHoverConduit.CurveIndex == curveIndex)
-            ClearCurveRowHover();
-        };
-        curveStack.Items.Add(new StackLayoutItem(row));
-      }
-      int visibleCurveRows = Math.Clamp(_s.Curves.Count, 1, 2);
-      int curveViewportHeight = (visibleCurveRows * 26) + ((visibleCurveRows - 1) * 2);
+      var curveStack = BuildCurveRows();
       _curveScrollable = new Scrollable
       {
         Border = BorderType.None,
         ExpandContentWidth = true,
         ExpandContentHeight = false,
-        Height = curveViewportHeight + 2,
+        Height = CurveViewportHeight(),
         Padding = new Eto.Drawing.Padding(0),
         Content = curveStack,
       };
@@ -3531,6 +3451,122 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       return root;
     }
 
+    void CreateCurveRowControls(RhinoDoc doc)
+    {
+      _sideChecks = new CheckBox[_s.Curves.Count];
+      _reverseButtons = new Button[_s.Curves.Count];
+      _enableChecks = new CheckBox[_s.Curves.Count];
+      _curveLengthLabels = new Label[_s.Curves.Count];
+      _curveLengthBadges = new Panel[_s.Curves.Count];
+
+      for (int i = 0; i < _s.Curves.Count; i++)
+      {
+        int curveIndex = i;
+        _sideChecks[i] = new CheckBox
+        {
+          Text = $"Side {i + 1}",
+          Checked = _s.CurveSides[i],
+        };
+        _sideChecks[i].CheckedChanged += (_, __) =>
+        {
+          if (_suppress) return;
+          _s.RedoBatches.Clear();
+          _s.CurveSides[curveIndex] = _sideChecks[curveIndex].Checked == true;
+          RebuildCurveNotches(doc, _s, curveIndex);
+          SelectBothCurves(doc, _s);
+          UpdateUndoEnabled();
+          Redraw();
+          Persist();
+        };
+
+        _reverseButtons[i] = new Button { Text = $"Reverse {i + 1}", Height = 24 };
+        _reverseButtons[i].Click += (_, __) =>
+        {
+          ReverseCurve(doc, _s, curveIndex);
+          _suppress = true;
+          try { _sideChecks[curveIndex].Checked = _s.CurveSides[curveIndex]; }
+          finally { _suppress = false; }
+          Redraw();
+          Persist();
+        };
+
+        _curveLengthLabels[i] = new Label
+        {
+          Text = FormatPanelNumber(_s.Curves[i].GetLength()),
+          VerticalAlignment = VerticalAlignment.Center,
+          TextAlignment = TextAlignment.Right,
+        };
+        _curveLengthBadges[i] = new Panel
+        {
+          Padding = new Eto.Drawing.Padding(4, 0, 4, 0),
+          Content = _curveLengthLabels[i],
+        };
+
+        if (_s.Curves.Count > 1)
+        {
+          _enableChecks[i] = new CheckBox
+          {
+            Checked = i < _s.CurveEnabled.Length && _s.CurveEnabled[i],
+            ToolTip = "Enable notch on this curve",
+          };
+          _enableChecks[i].CheckedChanged += (_, __) =>
+          {
+            if (_suppress) return;
+            _s.CurveEnabled[curveIndex] = _enableChecks[curveIndex].Checked == true;
+            UpdateMultipleState();
+            Redraw();
+            Persist();
+          };
+        }
+      }
+      ApplyCurveLengthHighlights();
+    }
+
+    StackLayout BuildCurveRows()
+    {
+      var curveStack = new StackLayout
+      {
+        Orientation = Orientation.Vertical,
+        Spacing = 2,
+      };
+      for (int i = 0; i < _s.Curves.Count; i++)
+      {
+        int curveIndex = i;
+        var row = new StackLayout
+        {
+          Orientation = Orientation.Horizontal,
+          Spacing = 6,
+          VerticalContentAlignment = VerticalAlignment.Center,
+          Height = 26,
+        };
+        if (_s.Curves.Count > 1 && _enableChecks[i] != null)
+          row.Items.Add(new StackLayoutItem(_enableChecks[i], false));
+        row.Items.Add(new StackLayoutItem(_sideChecks[i], false));
+        row.Items.Add(new StackLayoutItem(new Panel
+        {
+          Height = 26,
+          Padding = new Eto.Drawing.Padding(0, 2, 0, 0),
+          Content = _reverseButtons[i],
+        }, false));
+        row.Items.Add(new StackLayoutItem(null, true));
+        row.Items.Add(new StackLayoutItem(_curveLengthBadges[i], false));
+        row.MouseEnter += (_, __) => SetCurveRowHover(curveIndex);
+        row.MouseLeave += (_, __) =>
+        {
+          if (_curveHoverConduit.CurveIndex == curveIndex)
+            ClearCurveRowHover();
+        };
+        curveStack.Items.Add(new StackLayoutItem(row));
+      }
+      return curveStack;
+    }
+
+    int CurveViewportHeight()
+    {
+      int visibleRows = Math.Clamp(_s.Curves.Count, 1, 2);
+      return (visibleRows * 26) + ((visibleRows - 1) * 2) + 2;
+    }
+
     void ConfigureCurveScroller()
     {
       var root = _curveScrollable?.ControlObject as System.Windows.DependencyObject;
@@ -3561,6 +3597,64 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
           return descendant;
       }
       return null;
+    }
+
+    public void RefreshCurveRows()
+    {
+      if (_curveScrollable == null)
+        return;
+
+      ClearCurveRowHover();
+      int oldViewportHeight = _curveScrollable.Height;
+      CreateCurveRowControls(_s.Doc);
+      _curveScrollable.Content = BuildCurveRows();
+      _curveScrollable.Height = CurveViewportHeight();
+
+      int heightDelta = _curveScrollable.Height - oldViewportHeight;
+      if (heightDelta != 0)
+      {
+        ClientSize = new Eto.Drawing.Size(
+          ClientSize.Width,
+          Math.Max(1, ClientSize.Height + heightDelta));
+      }
+
+      SyncFromSession();
+      UpdateMultipleState();
+      Application.Instance.AsyncInvoke(() =>
+      {
+        ConfigureCurveScroller();
+        _curveScrollable.UpdateScrollSizes();
+        _scrollable?.UpdateScrollSizes();
+      });
+    }
+
+    public void SetCurveSelectionInProgress(bool selecting)
+    {
+      _curveSelectionInProgress = selecting;
+      Opacity = selecting ? 0.72 : 1.0;
+      if (_selectCurvesButton.ControlObject is System.Windows.Controls.Button nativeButton)
+        ApplySelectButtonState(nativeButton);
+    }
+
+    void ApplySelectButtonState(System.Windows.Controls.Button nativeButton)
+    {
+      if (!_selectButtonBrushesCaptured)
+      {
+        _selectButtonBackground = nativeButton.Background;
+        _selectButtonBorder = nativeButton.BorderBrush;
+        _selectButtonForeground = nativeButton.Foreground;
+        _selectButtonBrushesCaptured = true;
+      }
+
+      nativeButton.Background = _curveSelectionInProgress
+        ? System.Windows.SystemColors.HighlightBrush
+        : _selectButtonBackground;
+      nativeButton.BorderBrush = _curveSelectionInProgress
+        ? System.Windows.SystemColors.HighlightBrush
+        : _selectButtonBorder;
+      nativeButton.Foreground = _curveSelectionInProgress
+        ? System.Windows.SystemColors.HighlightTextBrush
+        : _selectButtonForeground;
     }
 
     static TableCell FL(string text) =>
@@ -3949,7 +4043,10 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       if (_selectCurvesButton.ControlObject is not System.Windows.Controls.Button nativeButton)
         return;
       if (_keepSelectionCheck != null)
+      {
+        ApplySelectButtonState(nativeButton);
         return;
+      }
 
       var content = new System.Windows.Controls.StackPanel
       {
@@ -3979,6 +4076,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       content.Children.Add(_keepSelectionCheck);
       nativeButton.Content = content;
       nativeButton.ToolTip = "Select curves; check the box to keep the current selection";
+      ApplySelectButtonState(nativeButton);
     }
 
     void ApplyFeatureToggle(bool notch, bool enabled)
