@@ -1366,7 +1366,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     s.PreviewRefCurveIndex = refIdx;
     s.PreviewLengthsFromStart = new List<double>(lengths);
     s.PreviewSnapPoint = snapPoint;
-    s.PreviewCursorPoint = cursorPoint;
     var sides    = s.CurveSidesAsStrings();
     double nl    = s.NotchLengthOpt.CurrentValue;
     double no    = s.NotchOffsetOpt.CurrentValue;
@@ -1376,12 +1375,39 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     string ltext = s.LabelValueText.Trim();
     bool   canNotch = s.NotchToggle.CurrentValue;
     bool   canLabel = s.LabelToggle.CurrentValue && ltext.Length > 0 && lsize > doc.ModelAbsoluteTolerance;
-    var referenceKinkChoice = ResolveKinkChoice(refCurve, lengths[refIdx], cursorPoint);
+    bool curveSnapActive = false;
+    try
+    {
+      curveSnapActive = e.Source.PointOnCurve(out _) != null &&
+        snapPoint.DistanceTo(refCurve.PointAt(refT)) <=
+          Math.Max(doc.ModelAbsoluteTolerance * 2.0, RhinoMath.ZeroTolerance * 10.0);
+    }
+    catch
+    {
+    }
+
+    var snappedKinkChoice = curveSnapActive
+      ? ResolveKinkChoice(refCurve, lengths[refIdx], snapPoint)
+      : KinkTangentChoice.Default;
+    bool forceSnappedMiddle = snappedKinkChoice == KinkTangentChoice.Middle;
+    var effectiveCursorPoint = forceSnappedMiddle ? snapPoint : cursorPoint;
+    s.PreviewCursorPoint = effectiveCursorPoint;
+    var referenceKinkChoice = forceSnappedMiddle
+      ? KinkTangentChoice.Middle
+      : ResolveKinkChoice(refCurve, lengths[refIdx], effectiveCursorPoint);
+
+    if (s.KinkCenterSnapActive != forceSnappedMiddle)
+    {
+      s.KinkCenterSnapActive = forceSnappedMiddle;
+      Log.Write("vNotches", forceSnappedMiddle
+        ? $"kink center snap locked curve={refIdx + 1}"
+        : "kink center snap released");
+    }
 
     for (int i = 0; i < s.Curves.Count; i++)
     {
       if (!s.CurveEnabled[i]) continue;
-      Point3d? curveCursor = i == refIdx ? cursorPoint : null;
+      Point3d? curveCursor = i == refIdx ? effectiveCursorPoint : null;
       KinkTangentChoice? kinkChoice = referenceKinkChoice == KinkTangentChoice.Default
         ? null
         : referenceKinkChoice;
@@ -2761,6 +2787,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public NotchPanel? Panel;
 
     public bool PreviewValid;
+    public bool KinkCenterSnapActive;
     public Point3d PreviewSnapPoint;
     public Point3d PreviewCursorPoint;
     public int PreviewRefCurveIndex;
