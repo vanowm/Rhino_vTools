@@ -20,9 +20,11 @@ public sealed class vSplitAtCorners : Command
   private const string OptionsSectionName = "vSplitAtCorners";
   private const string AngleKey = "angle";
   private const string MinLengthKey = "minLength";
+  private const string IgnoreNotchesKey = "ignoreNotches";
 
   private static double _angleDeg = 45.0;
   private static double _minLength;
+  private static bool _ignoreNotches = true;
 
   /// <summary>
   /// Rhino command name.
@@ -64,14 +66,15 @@ public sealed class vSplitAtCorners : Command
     var manualCorners = new HashSet<SplitPointKey>();
     var removedAutoCorners = new HashSet<SplitPointKey>();
 
-    var conduit = new CornerPreviewConduit(doc, selectedIds, angleOpt.CurrentValue, minLenOpt.CurrentValue, manualCorners, removedAutoCorners);
+    var conduit = new CornerPreviewConduit(doc, selectedIds, angleOpt.CurrentValue,
+      minLenOpt.CurrentValue, _ignoreNotches, manualCorners, removedAutoCorners);
     conduit.Enabled = true;
 
     try
     {
       while (true)
       {
-        conduit.UpdateThresholds(angleOpt.CurrentValue, minLenOpt.CurrentValue);
+        conduit.UpdateSettings(angleOpt.CurrentValue, minLenOpt.CurrentValue, _ignoreNotches);
 
         var gp = new GetPoint();
         gp.EnableTransparentCommands(true);
@@ -81,6 +84,7 @@ public sealed class vSplitAtCorners : Command
 
         var idxAngle = gp.AddOptionDouble("Angle", ref angleOpt);
         var idxMinLen = gp.AddOptionDouble("MinLength", ref minLenOpt);
+        var idxIgnoreNotches = gp.AddOption("IgnoreNotches", _ignoreNotches ? "Yes" : "No", true);
         var idxClearManual = manualCorners.Count > 0 ? gp.AddOption("ClearManual") : -1;
         var idxClearAll = gp.AddOption("ClearAll");
 
@@ -106,6 +110,13 @@ public sealed class vSplitAtCorners : Command
               manualCorners.Clear();
               removedAutoCorners.Clear();
             }
+            else if (opt.Index == idxIgnoreNotches)
+            {
+              _ignoreNotches = !_ignoreNotches;
+              SavePersistedOptions();
+              conduit.UpdateSettings(angleOpt.CurrentValue, minLenOpt.CurrentValue, _ignoreNotches);
+              doc.Views.Redraw();
+            }
             else if (opt.Index == idxAngle || opt.Index == idxMinLen)
             {
               _angleDeg = angleOpt.CurrentValue;
@@ -124,7 +135,7 @@ public sealed class vSplitAtCorners : Command
           angleOpt.CurrentValue = Math.Clamp(gp.Number(), 0.01, 179.99);
           _angleDeg = angleOpt.CurrentValue;
           SavePersistedOptions();
-          conduit.UpdateThresholds(angleOpt.CurrentValue, minLenOpt.CurrentValue);
+          conduit.UpdateSettings(angleOpt.CurrentValue, minLenOpt.CurrentValue, _ignoreNotches);
           doc.Views.Redraw();
           continue;
         }
@@ -147,7 +158,7 @@ public sealed class vSplitAtCorners : Command
       foreach (var id in selectedIds)
       {
         var obj = doc.Objects.FindId(id) as CurveObject;
-        if (obj?.CurveGeometry == null)
+        if (obj?.CurveGeometry == null || IsIgnoredNotch(obj, _ignoreNotches))
           continue;
 
         var curve = obj.CurveGeometry.DuplicateCurve();
@@ -281,17 +292,21 @@ public sealed class vSplitAtCorners : Command
       {
         var angle = _angleDeg;
         var minLength = _minLength;
+        var ignoreNotches = _ignoreNotches;
 
         if (ToolsOptionStore.TryGetDouble(section, AngleKey, out var persistedAngle))
           angle = persistedAngle;
         if (ToolsOptionStore.TryGetDouble(section, MinLengthKey, out var persistedMin))
           minLength = persistedMin;
+        if (ToolsOptionStore.TryGetBool(section, IgnoreNotchesKey, out var persistedIgnoreNotches))
+          ignoreNotches = persistedIgnoreNotches;
 
-        return (angle, minLength);
+        return (angle, minLength, ignoreNotches);
       });
 
     _angleDeg = Math.Max(0.01, Math.Min(179.99, values.angle));
     _minLength = Math.Max(0.0, values.minLength);
+    _ignoreNotches = values.ignoreNotches;
   }
 
   private static void SavePersistedOptions()
@@ -302,7 +317,14 @@ public sealed class vSplitAtCorners : Command
       {
         section[AngleKey] = _angleDeg;
         section[MinLengthKey] = _minLength;
+        section[IgnoreNotchesKey] = _ignoreNotches;
       });
+  }
+
+  private static bool IsIgnoredNotch(RhinoObject obj, bool ignoreNotches)
+  {
+    return ignoreNotches && string.Equals(
+      obj.Attributes.Name, "NOTCH", StringComparison.OrdinalIgnoreCase);
   }
 
   private static List<CornerCandidate> DetectCornerCandidates(Curve curve, double angleDeg, double minLength)
@@ -441,12 +463,14 @@ public sealed class vSplitAtCorners : Command
 
     private double _angleDeg;
     private double _minLength;
+    private bool _ignoreNotches;
 
     public CornerPreviewConduit(
       RhinoDoc doc,
       List<Guid> curveIds,
       double angleDeg,
       double minLength,
+      bool ignoreNotches,
       HashSet<SplitPointKey> manualCorners,
       HashSet<SplitPointKey> removedAutoCorners)
     {
@@ -454,16 +478,20 @@ public sealed class vSplitAtCorners : Command
       _curveIds = curveIds;
       _angleDeg = angleDeg;
       _minLength = minLength;
+      _ignoreNotches = ignoreNotches;
       _manualCorners = manualCorners;
       _removedAutoCorners = removedAutoCorners;
       RebuildAutoCandidates();
     }
 
-    public void UpdateThresholds(double angleDeg, double minLength)
+    public void UpdateSettings(double angleDeg, double minLength, bool ignoreNotches)
     {
-      var changed = Math.Abs(_angleDeg - angleDeg) > 1e-9 || Math.Abs(_minLength - minLength) > 1e-9;
+      var changed = Math.Abs(_angleDeg - angleDeg) > 1e-9 ||
+        Math.Abs(_minLength - minLength) > 1e-9 ||
+        _ignoreNotches != ignoreNotches;
       _angleDeg = angleDeg;
       _minLength = minLength;
+      _ignoreNotches = ignoreNotches;
       if (changed)
         RebuildAutoCandidates();
     }
@@ -492,7 +520,7 @@ public sealed class vSplitAtCorners : Command
       foreach (var m in _manualCorners)
       {
         var obj = _doc.Objects.FindId(m.CurveId) as CurveObject;
-        if (obj?.CurveGeometry == null)
+        if (obj?.CurveGeometry == null || IsIgnoredNotch(obj, _ignoreNotches))
           continue;
 
         var p = obj.CurveGeometry.PointAt(m.Parameter);
@@ -547,7 +575,7 @@ public sealed class vSplitAtCorners : Command
       foreach (var id in _curveIds)
       {
         var obj = _doc.Objects.FindId(id) as CurveObject;
-        if (obj?.CurveGeometry == null)
+        if (obj?.CurveGeometry == null || IsIgnoredNotch(obj, _ignoreNotches))
           continue;
 
         var curve = obj.CurveGeometry;
@@ -583,7 +611,7 @@ public sealed class vSplitAtCorners : Command
       foreach (var curveId in _curveIds)
       {
         var obj = _doc.Objects.FindId(curveId) as CurveObject;
-        if (obj?.CurveGeometry == null)
+        if (obj?.CurveGeometry == null || IsIgnoredNotch(obj, _ignoreNotches))
           continue;
 
         display.DrawCurve(obj.CurveGeometry, Color.FromArgb(120, 200, 200, 200), 1);
@@ -602,7 +630,7 @@ public sealed class vSplitAtCorners : Command
       foreach (var m in _manualCorners)
       {
         var obj = _doc.Objects.FindId(m.CurveId) as CurveObject;
-        if (obj?.CurveGeometry == null)
+        if (obj?.CurveGeometry == null || IsIgnoredNotch(obj, _ignoreNotches))
           continue;
 
         var p = obj.CurveGeometry.PointAt(m.Parameter);
@@ -617,7 +645,7 @@ public sealed class vSplitAtCorners : Command
       foreach (var id in _curveIds)
       {
         var obj = _doc.Objects.FindId(id) as CurveObject;
-        if (obj?.CurveGeometry == null)
+        if (obj?.CurveGeometry == null || IsIgnoredNotch(obj, _ignoreNotches))
           continue;
 
         var dup = obj.CurveGeometry.DuplicateCurve();

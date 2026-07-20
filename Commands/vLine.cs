@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Collections.Generic;
 using System.Drawing;
 using Rhino;
@@ -50,7 +49,6 @@ public sealed class vLine : Command
   private static EventHandler? _pendingNativeLineLaunchIdleHandler;
 
   private static bool _debugMode = false;
-  private static string? _debugLogPath = null;
 
   /// <summary>
   /// Rhino command name.
@@ -2020,17 +2018,12 @@ public sealed class vLine : Command
     if (!_debugMode) return;
     var line = $"[vLine {DateTime.Now:HH:mm:ss.fff}] {msg}";
     RhinoApp.WriteLine(line);
-    try { if (_debugLogPath != null) File.AppendAllText(_debugLogPath, line + "\n"); } catch { }
+    Log.Write("vLine.Debug", msg);
   }
 
   private static void EnsureDebugLog()
   {
-    if (_debugLogPath != null) return;
-    var asmDir = Path.GetDirectoryName(typeof(vLine).Assembly.Location) ?? ".";
-    var logsDir = Path.Combine(asmDir, "logs");
-    try { Directory.CreateDirectory(logsDir); } catch { logsDir = asmDir; }
-    _debugLogPath = Path.Combine(logsDir, $"vLine_{DateTime.Now:yyyyMMdd_HHmmss}.log");
-    RhinoApp.WriteLine($"[vLine] Debug log: {_debugLogPath}");
+    RhinoApp.WriteLine($"[vLine] Debug log: {Log.FilePath ?? "unavailable"}");
   }
 
   private static void LaunchNativeLineMode()

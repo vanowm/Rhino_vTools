@@ -103,7 +103,8 @@
   },
   "vSplitAtCorners": {
     "angle": 45,
-    "minLength": 0
+    "minLength": 0,
+    "ignoreNotches": true
   },
   "vTextAligned": {
     "text": "Text",

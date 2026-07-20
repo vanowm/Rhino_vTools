@@ -108,21 +108,7 @@ public sealed class vBiminiParts : Command
 
   // ── Debug logging ──────────────────────────────────────────────────────────
 
-  private static StreamWriter? _log;
-
-  private static string GetLogPath()
-  {
-    var dir = Path.Combine(Path.GetDirectoryName(typeof(vBiminiParts).Assembly.Location)!, "logs");
-    Directory.CreateDirectory(dir);
-    return Path.Combine(dir, "vBiminiParts.log");
-  }
-
-  internal static void InitLog()
-  {
-    try { File.WriteAllText(GetLogPath(), string.Empty); } catch { }
-  }
-
-  private static void L(string s) { _log?.WriteLine(s); }
+  private static void L(string message) => vTools.Log.Write("vBiminiParts", message);
 
   public override string EnglishName => "vBiminiParts";
 
@@ -154,8 +140,7 @@ public sealed class vBiminiParts : Command
 
   private static string GetConfigPath()
   {
-    var dir = Path.GetDirectoryName(typeof(vBiminiParts).Assembly.Location) ?? ".";
-    return Path.Combine(dir, ToolsConfigFileName);
+    return PluginPaths.ResolveFile(ToolsConfigFileName);
   }
 
   private static BiminiToolsConfigRoot LoadConfig(string path)
@@ -448,9 +433,7 @@ public sealed class vBiminiParts : Command
     var finParts  = Classify(finSegs,  centroid);
     var seamParts = Classify(seamSegs, centroid);
 
-    // Open log before picker so picker actions are captured
-    var logPath = GetLogPath();
-    _log = new StreamWriter(logPath, true, System.Text.Encoding.UTF8) { AutoFlush = true };
+    // Mark the picker/build run in the shared plug-in log.
     L($"── vBiminiParts {DateTime.Now} ──");
     L($"tol={doc.ModelAbsoluteTolerance}  selIds={selIds.Count}  seamIds={seamIds.Count}  finIds={finIds.Count}  excludeInterior={excludeInterior.Count}");
     L($"seamCandidates: {seamSegs.Count} segs, {seamDocIds.Count} docIds");
@@ -612,8 +595,6 @@ public sealed class vBiminiParts : Command
       FindOrAddCurve(doc, seamCrv, cut1Idx, cut1Attr, toExclude, doc.ModelAbsoluteTolerance);
 
     doc.Views.Redraw();
-    _log?.Dispose();
-    _log = null;
     return Result.Success;
   }
   private static Result CancelWithTempCleanup(RhinoDoc doc, IEnumerable<Guid> finTempIds, IEnumerable<Guid> seamTempIds)
@@ -626,8 +607,6 @@ public sealed class vBiminiParts : Command
       if (id != Guid.Empty)
         doc.Objects.Delete(id, false);
 
-    _log?.Dispose();
-    _log = null;
     doc.Views.Redraw();
     RhinoApp.WriteLine("vBiminiParts: canceled.");
     return Result.Cancel;

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -634,28 +633,10 @@ public sealed class vUzip : Command
 
   private static class Dbg
   {
-    private static string _path = string.Empty;
-
-    public static void Init(string pluginDir)
-    {
-      try
-      {
-        var logsDir = Path.Combine(pluginDir, "logs");
-        Directory.CreateDirectory(logsDir);
-        _path = Path.Combine(logsDir, "vUzip-debug.log");
-      }
-      catch { _path = string.Empty; }
-    }
-
     public static void Run()
-      => Write($"\n=== vUzip run {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
+      => Write("run start");
 
-    public static void Write(string msg)
-    {
-      if (string.IsNullOrEmpty(_path)) return;
-      try { File.AppendAllText(_path, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); }
-      catch { }
-    }
+    public static void Write(string msg) => vTools.Log.Write("vUzip", msg);
   }
 
   // ── Preview conduit ───────────────────────────────────────────────────────
@@ -842,7 +823,6 @@ public sealed class vUzip : Command
     ApplyLayerRuntime(lr);
     var ctx = new UzipLayerContext(LayerCut, LayerPlot, LayerReference);
     EnsureCommandLayers(doc, lr);
-    Dbg.Init(GetPluginDataDirectory());
     Dbg.Run();
 
     double offL         = s.Left;

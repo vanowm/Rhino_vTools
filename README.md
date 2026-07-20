@@ -1,4 +1,4 @@
-Tools  ·  v26.7.20.1000
+Tools  ·  v26.7.20.1047
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -651,11 +651,11 @@ When the plug-in loads, Rhino's command history shows:
 vTools v26.7.3.HMM loaded — N commands: vBiminiParts, vChamfer, ...
 ```
 
-The same line plus the DLL path is written to `logs/debug.log`.
+The same line plus the DLL path is written to `vtools.log` beside the loaded DLL.
 
 ## Logging
 
-- `logs/debug.log` — cleared on every Rhino startup. First lines show version and command list. All commands write diagnostics here via `Log.Write(tag, message)`.
+- `vtools.log` beside the loaded DLL — cleared on every Rhino startup. First lines show version and command list. All commands write diagnostics here via `Log.Write(tag, message)`.
 
 ## Versioning
 

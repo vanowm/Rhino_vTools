@@ -234,8 +234,6 @@ internal static bool Update(string sectionName, Action<JsonObject> updater)
   /// </summary>
   private static string GetToolsConfigPath()
   {
-    var pluginDir = Path.GetDirectoryName(typeof(ToolsOptionStore).Assembly.Location) ?? ".";
-    Directory.CreateDirectory(pluginDir);
-    return Path.Combine(pluginDir, ToolsConfigFileName);
+    return PluginPaths.ResolveFile(ToolsConfigFileName);
   }
 }

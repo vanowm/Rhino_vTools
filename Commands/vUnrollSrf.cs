@@ -78,40 +78,7 @@ namespace vTools.Commands
     private const int    EdgeMateSamples     = 7;
 
     // ── Debug logging ─────────────────────────────────────────────────────
-    private static string? _dbgPath;
-
-    private static void DbgInit(RhinoDoc doc)
-    {
-      _dbgPath = null;
-      try
-      {
-        var dir = new System.IO.DirectoryInfo(
-          System.IO.Path.GetDirectoryName(typeof(vUnrollSrf).Assembly.Location) ?? ".");
-        while (dir != null)
-        {
-          if (System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "vTools.csproj")))
-          {
-            var logsDir = System.IO.Path.Combine(dir.FullName, "logs");
-            System.IO.Directory.CreateDirectory(logsDir);
-            _dbgPath = System.IO.Path.Combine(logsDir, "vUnrollSrf_debug.log");
-            break;
-          }
-          dir = dir.Parent;
-        }
-        if (_dbgPath == null) return;
-        System.IO.File.WriteAllText(_dbgPath,
-          $"vUnrollSrf debug log\ntime={DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
-          $"model_tol={doc.ModelAbsoluteTolerance:G}\ndoc={doc.Path}\n\n");
-      }
-      catch { _dbgPath = null; }
-    }
-
-    private static void Dbg(string msg)
-    {
-      if (_dbgPath == null) return;
-      try { System.IO.File.AppendAllText(_dbgPath, $"{DateTime.Now:HH:mm:ss} {msg}\n"); }
-      catch { }
-    }
+    private static void Dbg(string msg) => vTools.Log.Write("vUnrollSrf", msg);
 
     private static string P(Point3d? p)  => p.HasValue  ? $"({p.Value.X:G6}, {p.Value.Y:G6}, {p.Value.Z:G6})" : "None";
     private static string P(Point3d p)   => $"({p.X:G6}, {p.Y:G6}, {p.Z:G6})";
@@ -120,7 +87,7 @@ namespace vTools.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-      DbgInit(doc);
+      Dbg($"run start model_tol={doc.ModelAbsoluteTolerance:G} doc={doc.Path}");
       var startIds = SelectedIds(doc);
       var surfaceIds = GetSurfaceIds(doc, startIds.Where(IsSurfaceLikeId).ToList());
       if (surfaceIds == null || surfaceIds.Count == 0)

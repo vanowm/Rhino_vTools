@@ -11,7 +11,8 @@ namespace vTools;
 ///   Log.Write("vGroup", "message");            // tagged with command name
 ///   Log.Write("vGroup", "x={0} y={1}", x, y); // tagged + formatted
 ///
-/// A single file  logs/debug.log  is used per session and cleared on startup.
+/// A single file named vtools.log beside the loaded plug-in DLL is used per
+/// session and cleared on startup.
 /// Call  Log.Initialize()  once from  PlugIn.OnLoad.
 /// </summary>
 internal static class Log
@@ -76,21 +77,7 @@ internal static class Log
   {
     try
     {
-      var asmDir = Path.GetDirectoryName(typeof(Log).Assembly.Location) ?? ".";
-      var dir = new DirectoryInfo(asmDir);
-      while (dir != null)
-      {
-        if (File.Exists(Path.Combine(dir.FullName, "vTools.csproj")))
-        {
-          var logsDir = Path.Combine(dir.FullName, "logs");
-          Directory.CreateDirectory(logsDir);
-          return Path.Combine(logsDir, "debug.log");
-        }
-        dir = dir.Parent;
-      }
-      var fallback = Path.Combine(asmDir, "logs");
-      Directory.CreateDirectory(fallback);
-      return Path.Combine(fallback, "debug.log");
+      return PluginPaths.ResolveFile("vtools.log");
     }
     catch { return string.Empty; }
   }

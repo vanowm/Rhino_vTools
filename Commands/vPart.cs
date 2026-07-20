@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Drawing;
-using System.IO;
 using System.Linq;
 using Rhino;
 using Rhino.Commands;
@@ -35,26 +34,7 @@ public sealed class vPart : Command
   private static bool _joinPerim = false;
 
   // ── Logging ────────────────────────────────────────────────────────────
-  private static StreamWriter? _log;
-
-  private static void OpenLog()
-  {
-    try
-    {
-      _log?.Dispose();
-      _log = null;
-      var asmDir  = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
-      var logsDir = Path.Combine(asmDir, "logs");
-      Directory.CreateDirectory(logsDir);
-      _log = new StreamWriter(Path.Combine(logsDir, "vPart_perim.log"), append: false) { AutoFlush = true };
-    }
-    catch { }
-  }
-
-  private static void L(string m)
-  {
-    try { _log?.WriteLine($"{DateTime.Now:HH:mm:ss.fff}  {m}"); } catch { }
-  }
+  private static void L(string message) => vTools.Log.Write("vPart", message);
 
   private static string Short(Guid id) => id.ToString()[..8];
 
@@ -77,7 +57,6 @@ public sealed class vPart : Command
   {
     LoadOptions();
     var tol = doc.ModelAbsoluteTolerance;
-    OpenLog();
     L($"=== vPart {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
     L($"  tol={tol:G4}  group={_group}  joinPerim={_joinPerim}");
 

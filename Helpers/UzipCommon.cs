@@ -4,7 +4,6 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Rhino;
@@ -161,24 +160,11 @@ internal static class UzipCommon
 
   // ── Config / File I/O ──────────────────────────────────────────────────────
   /// <summary>
-  /// Returns the plug-in deployment directory used for configuration storage.
-  /// </summary>
-  internal static string GetPluginDataDirectory()
-  {
-    var pluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? string.Empty;
-    if (string.IsNullOrWhiteSpace(pluginDir))
-      pluginDir = ".";
-
-    Directory.CreateDirectory(pluginDir);
-    return pluginDir;
-  }
-
-  /// <summary>
   /// Gets the full path of the shared tools configuration file.
   /// </summary>
   internal static string GetToolsConfigPath()
   {
-    return Path.Combine(GetPluginDataDirectory(), ToolsConfigFileName);
+    return PluginPaths.ResolveFile(ToolsConfigFileName);
   }
 
   /// <summary>

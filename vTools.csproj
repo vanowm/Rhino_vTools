@@ -10,6 +10,8 @@
     <RootNamespace>vTools</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
     <BuildVersion>0.0.0.0</BuildVersion>
     <Version>$(BuildVersion)</Version>
     <InformationalVersion>$(BuildVersion)</InformationalVersion>

@@ -1438,19 +1438,13 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     double centerLen   = Clamp(lengthFromStart, 0.0, totalLength);
     double leftRaw     = centerLen - halfWidth;
     double rightRaw    = centerLen + halfWidth;
-    double leftLen     = Clamp(leftRaw, 0.0, totalLength);
-    double rightLen    = Clamp(rightRaw, 0.0, totalLength);
-    var (leftBase, _)  = PointAtCurveLength(curve, leftLen);
-    var (rightBase, _) = PointAtCurveLength(curve, rightLen);
-    if (leftRaw < 0.0)               leftBase  = leftBase  - tangent * Math.Abs(leftRaw);
-    if (rightRaw > totalLength)      rightBase = rightBase + tangent * (rightRaw - totalLength);
+    if (!TryOffsetNotchBase(curve, leftRaw, totalLength, notchOffset, side, tangent, out var leftBase) ||
+        !TryOffsetNotchBase(curve, rightRaw, totalLength, notchOffset, side, tangent, out var rightBase))
+      return null;
 
     var tip = center + direction * notchLength;
     if (notchOffset > 0.0)
     {
-      var shift = direction * notchOffset;
-      leftBase  = leftBase  + shift;
-      rightBase = rightBase + shift;
       tip       = center + direction * Math.Max(0.0, notchOffset - notchLength);
     }
 
@@ -1467,6 +1461,55 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     // Fallback
     return new LineCurve(center, center + direction * notchLength);
+  }
+
+  static bool TryOffsetNotchBase(Curve curve, double rawLength, double totalLength,
+    double notchOffset, string side, Vector3d fallbackTangent, out Point3d basePoint)
+  {
+    basePoint = Point3d.Unset;
+    if (totalLength <= RhinoMath.ZeroTolerance)
+      return false;
+
+    double curveLength;
+    double extension = 0.0;
+    if (curve.IsClosed)
+    {
+      curveLength = rawLength % totalLength;
+      if (curveLength < 0.0)
+        curveLength += totalLength;
+    }
+    else
+    {
+      curveLength = Clamp(rawLength, 0.0, totalLength);
+      extension = rawLength - curveLength;
+    }
+
+    var (point, parameter) = PointAtCurveLength(curve, curveLength);
+    if (parameter == null)
+      return false;
+
+    var localTangent = curve.TangentAt(parameter.Value);
+    localTangent.Z = 0.0;
+    if (!localTangent.Unitize())
+    {
+      localTangent = fallbackTangent;
+      localTangent.Z = 0.0;
+      if (!localTangent.Unitize())
+        return false;
+    }
+
+    basePoint = point + localTangent * extension;
+    if (notchOffset <= 0.0)
+      return true;
+
+    var localDirection = Vector3d.CrossProduct(Vector3d.ZAxis, localTangent);
+    if (!localDirection.Unitize())
+      return false;
+    if (side == "Right")
+      localDirection = -localDirection;
+
+    basePoint += localDirection * notchOffset;
+    return true;
   }
 
   // ── Kink-aware tangent ────────────────────────────────────────────────────
@@ -1873,13 +1916,21 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     Guid notchId = Guid.Empty;
     if (notchEnabled && geom is LineCurve lc)
     {
-      var attrs = new ObjectAttributes { LayerIndex = ResolveLayerIndex(doc, notchLayer) };
+      var attrs = new ObjectAttributes
+      {
+        LayerIndex = ResolveLayerIndex(doc, notchLayer),
+        Name = "NOTCH",
+      };
       if (groupIndex >= 0) attrs.AddToGroup(groupIndex);
       notchId = doc.Objects.AddLine(lc.Line, attrs);
     }
     else if (notchEnabled && geom is PolylineCurve plc)
     {
-      var attrs = new ObjectAttributes { LayerIndex = ResolveLayerIndex(doc, notchLayer) };
+      var attrs = new ObjectAttributes
+      {
+        LayerIndex = ResolveLayerIndex(doc, notchLayer),
+        Name = "NOTCH",
+      };
       if (groupIndex >= 0) attrs.AddToGroup(groupIndex);
       notchId = doc.Objects.AddPolyline(plc.ToPolyline(), attrs);
     }
@@ -1905,7 +1956,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
             Justification = TextJustification.MiddleCenter,
             DimensionScale= 0.9,
           };
-          var la = new ObjectAttributes { LayerIndex = ResolveLayerIndex(doc, labelLayer) };
+          var la = new ObjectAttributes
+          {
+            LayerIndex = ResolveLayerIndex(doc, labelLayer),
+            Name = "NOTCHLABEL",
+          };
           if (groupIndex >= 0) la.AddToGroup(groupIndex);
           var lid = doc.Objects.AddText(te, la);
           if (lid != Guid.Empty) labelId = lid;
