@@ -2751,7 +2751,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     bool _updatingMultipleControls;
 
     // Controls
-    readonly ToggleButton[] _typeButtons;
+    readonly Button[] _typeButtons;
     readonly NumericStepper _lengthStepper, _offsetStepper, _widthStepper;
     readonly DropDown    _notchLayerDrop;
     readonly CheckBox    _percentCheck, _groupCheck;
@@ -2774,6 +2774,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     readonly Button[]    _reverseButtons;
     readonly CheckBox[]  _enableChecks;
     readonly Label[]     _curveLengthLabels;
+    Scrollable? _scrollable;
 
     public NotchPanel(RhinoDoc doc, NotchSession s)
     {
@@ -2785,25 +2786,22 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       ClientSize= new Eto.Drawing.Size(280, -1);
 
       // Type
-      _typeButtons = new ToggleButton[s.NotchTypeValues.Length];
+      _typeButtons = new Button[s.NotchTypeValues.Length];
       for (int i = 0; i < _typeButtons.Length; i++)
       {
         int typeIndex = i;
         string typeName = s.NotchTypeValues[i];
-        bool active = i == s.NotchTypeIndex;
-        _typeButtons[i] = new ToggleButton
+        _typeButtons[i] = new Button
         {
-          Image = CreateNotchTypeIcon(typeName, active,
-            s.NotchLengthOpt.CurrentValue, s.NotchWidthOpt.CurrentValue),
           ToolTip = $"{typeName} notch",
-          Checked = active,
           BackgroundColor = Colors.Transparent,
-          Width = 20,
-          Height = 20,
+          Width = 15,
+          Height = 15,
         };
         _typeButtons[i].Click += (_, __) => SelectNotchType(typeIndex);
-        InstallNotchTypeButtonStyle(_typeButtons[i]);
-        _typeButtons[i].Load += (_, __) => InstallNotchTypeButtonStyle(_typeButtons[typeIndex]);
+        InstallNotchTypeButtonStyle(_typeButtons[i], typeIndex);
+        _typeButtons[i].Load += (_, __) =>
+          InstallNotchTypeButtonStyle(_typeButtons[typeIndex], typeIndex);
       }
 
       // Numeric fields
@@ -3050,7 +3048,14 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       ApplyCurveLengthHighlights();
 
       // Layout
-      Content = BuildLayout();
+      _scrollable = new Scrollable
+      {
+        Border = BorderType.None,
+        ExpandContentWidth = true,
+        ExpandContentHeight = false,
+        Content = BuildLayout(),
+      };
+      Content = _scrollable;
       MinimumSize = new Eto.Drawing.Size(280, 0);
       ApplyDynamic();
 
@@ -3270,61 +3275,90 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     static double RoundPanelNumber(double value) => RoundForDisplay(value, 3);
 
-    static Bitmap CreateNotchTypeIcon(string notchType, bool active,
+    static System.Windows.FrameworkElement CreateNotchTypeGlyph(string notchType, bool active,
       double notchLength, double notchWidth)
     {
-      var bitmap = new Bitmap(16, 16, PixelFormat.Format32bppRgba);
-      using var graphics = new Graphics(bitmap);
-      graphics.Clear(Colors.Transparent);
-      var color = active ? Color.FromArgb(0, 120, 215) : Color.FromArgb(75, 75, 75);
-      using var pen = new Pen(color, active ? 2.0f : 1.5f);
-
-      const float center = 8.0f;
-      const float available = 13.0f;
+      const double size = 12.0;
+      const double center = size * 0.5;
+      const double available = 10.5;
       double modelHeight = Math.Max(notchLength, RhinoMath.ZeroTolerance);
       double modelWidth = Math.Max(notchWidth, RhinoMath.ZeroTolerance);
       double scale = Math.Min(available / modelWidth, available / modelHeight);
-      float width = (float)(modelWidth * scale);
-      float height = (float)(modelHeight * scale);
-      float left = center - width * 0.5f;
-      float right = center + width * 0.5f;
-      float top = center - height * 0.5f;
-      float bottom = center + height * 0.5f;
+      double width = modelWidth * scale;
+      double height = modelHeight * scale;
+      double left = center - width * 0.5;
+      double right = center + width * 0.5;
+      double top = center - height * 0.5;
+      double bottom = center + height * 0.5;
+
+      var points = new System.Windows.Media.PointCollection();
 
       switch ((notchType ?? "I").ToUpperInvariant())
       {
         case "V":
-          graphics.DrawLines(pen, new[]
-          {
-            new PointF(left, top), new PointF(center, bottom), new PointF(right, top),
-          });
+          points.Add(new System.Windows.Point(left, top));
+          points.Add(new System.Windows.Point(center, bottom));
+          points.Add(new System.Windows.Point(right, top));
           break;
         case "U":
-          float halfFlat = width * 0.1f;
-          graphics.DrawLines(pen, new[]
-          {
-            new PointF(left, top), new PointF(center - halfFlat, bottom),
-            new PointF(center + halfFlat, bottom), new PointF(right, top),
-          });
+          double halfFlat = width * 0.1;
+          points.Add(new System.Windows.Point(left, top));
+          points.Add(new System.Windows.Point(center - halfFlat, bottom));
+          points.Add(new System.Windows.Point(center + halfFlat, bottom));
+          points.Add(new System.Windows.Point(right, top));
           break;
         default:
-          graphics.DrawLine(pen,
-            new PointF(center, center - available * 0.5f),
-            new PointF(center, center + available * 0.5f));
+          points.Add(new System.Windows.Point(center, center - available * 0.5));
+          points.Add(new System.Windows.Point(center, center + available * 0.5));
           break;
       }
-      return bitmap;
+
+      var stroke = active
+        ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 120, 215))
+        : System.Windows.SystemColors.ControlTextBrush;
+      var glyph = new System.Windows.Shapes.Polyline
+      {
+        Points = points,
+        Stroke = stroke,
+        StrokeThickness = active ? 1.35 : 1.0,
+        StrokeLineJoin = System.Windows.Media.PenLineJoin.Round,
+        StrokeStartLineCap = System.Windows.Media.PenLineCap.Round,
+        StrokeEndLineCap = System.Windows.Media.PenLineCap.Round,
+        SnapsToDevicePixels = true,
+        IsHitTestVisible = false,
+      };
+      var canvas = new System.Windows.Controls.Canvas
+      {
+        Width = size,
+        Height = size,
+        SnapsToDevicePixels = true,
+        UseLayoutRounding = true,
+        IsHitTestVisible = false,
+      };
+      canvas.Children.Add(glyph);
+      return canvas;
     }
 
-    static void InstallNotchTypeButtonStyle(ToggleButton button)
+    void InstallNotchTypeButtonStyle(Button button, int typeIndex)
     {
-      if (button.ControlObject is not System.Windows.Controls.Primitives.ToggleButton native)
+      if (button.ControlObject is not System.Windows.Controls.Button native)
         return;
+      bool active = typeIndex == _s.NotchTypeIndex;
       native.Background = System.Windows.Media.Brushes.Transparent;
       native.BorderBrush = System.Windows.Media.Brushes.Transparent;
       native.Padding = new System.Windows.Thickness(0);
+      native.BorderThickness = new System.Windows.Thickness(0);
+      native.MinWidth = 0;
+      native.MinHeight = 0;
+      native.Width = 15;
+      native.Height = 15;
+      native.Focusable = false;
+      native.FocusVisualStyle = null;
       native.HorizontalContentAlignment = System.Windows.HorizontalAlignment.Center;
       native.VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+      native.Content = CreateNotchTypeGlyph(
+        _s.NotchTypeValues[typeIndex], active,
+        _s.NotchLengthOpt.CurrentValue, _s.NotchWidthOpt.CurrentValue);
     }
 
     void SelectNotchType(int typeIndex)
@@ -3336,8 +3370,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _suppress = true;
       try
       {
-        for (int i = 0; i < _typeButtons.Length; i++)
-          _typeButtons[i].Checked = i == selected;
         _s.NotchTypeIndex = selected;
         RefreshNotchTypeIcons();
       }
@@ -3351,12 +3383,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     void RefreshNotchTypeIcons()
     {
       for (int i = 0; i < _typeButtons.Length; i++)
-      {
-        bool active = i == _s.NotchTypeIndex;
-        _typeButtons[i].Image = CreateNotchTypeIcon(
-          _s.NotchTypeValues[i], active,
-          _s.NotchLengthOpt.CurrentValue, _s.NotchWidthOpt.CurrentValue);
-      }
+        InstallNotchTypeButtonStyle(_typeButtons[i], i);
     }
 
     void InstallCollapsibleGroupHeader(GroupBox group, Control content, string title,
@@ -3485,6 +3512,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       if (Content == null)
         return;
       Content.UpdateLayout();
+      _scrollable?.UpdateScrollSizes();
       var preferred = Content.GetPreferredSize();
       int height = Math.Max(1, (int)Math.Ceiling(preferred.Height));
       ClientSize = new Eto.Drawing.Size(Math.Max(280, ClientSize.Width), height);
@@ -3776,7 +3804,10 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       {
         var bitmap = new Bitmap(18, 18, PixelFormat.Format32bppRgba);
         using var graphics = new Graphics(bitmap);
-        graphics.Clear(Colors.Transparent);
+        graphics.FillRectangle(Eto.Drawing.Color.FromArgb(242, 242, 242), 0, 0, 9, 9);
+        graphics.FillRectangle(Eto.Drawing.Color.FromArgb(191, 191, 191), 9, 0, 9, 9);
+        graphics.FillRectangle(Eto.Drawing.Color.FromArgb(191, 191, 191), 0, 9, 9, 9);
+        graphics.FillRectangle(Eto.Drawing.Color.FromArgb(242, 242, 242), 9, 9, 9, 9);
         graphics.FillRectangle(color, 0, 0, 18, 18);
         graphics.DrawRectangle(Colors.Black, 0, 0, 17, 17);
         return bitmap;
@@ -3787,7 +3818,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     {
       var items = new List<LayerDropItem>();
       static Eto.Drawing.Color ToEtoColor(System.Drawing.Color color) =>
-        Eto.Drawing.Color.FromArgb(color.A, color.R, color.G, color.B);
+        Eto.Drawing.Color.FromArgb(color.ToArgb());
 
       if (includeCurrentSpecial)
       {
@@ -3851,8 +3882,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _suppress = true;
       try
       {
-        for (int i = 0; i < _typeButtons.Length; i++)
-          _typeButtons[i].Checked = i == _s.NotchTypeIndex;
         RefreshNotchTypeIcons();
         _lengthStepper.Value            = _s.NotchLengthOpt.CurrentValue;
         _offsetStepper.Value            = _s.NotchOffsetOpt.CurrentValue;
@@ -3894,8 +3923,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     public void CommitPendingValues()
     {
       if (_suppress) return;
-      int selectedType = Array.FindIndex(_typeButtons, button => button.Checked == true);
-      _s.NotchTypeIndex = selectedType >= 0 ? selectedType : _s.NotchTypeIndex;
       _s.NotchLengthOpt.CurrentValue = RoundPanelNumber(_lengthStepper.Value);
       _s.NotchOffsetOpt.CurrentValue = RoundPanelNumber(_offsetStepper.Value);
       _s.NotchWidthOpt.CurrentValue = RoundPanelNumber(_widthStepper.Value);

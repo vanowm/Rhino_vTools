@@ -312,7 +312,11 @@ public sealed class vTextAligned : Command
       var placeSideSign = getter.LastSideSign != 0 ? getter.LastSideSign : 0;
       var placeSideDeadband = getter.LastSideSign != 0 ? Math.Max(doc.ModelAbsoluteTolerance * 4.0, effHeightPlace * 0.1) : 0.0;
 
-      if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset, effHeightPlace, _rotate90, upAxis, out var plane, out var primarySideSign, sideSignHint: placeSideSign, sideDeadband: placeSideDeadband, previewTemplateTextId))
+      if (!BuildPlaneFromCurve(doc, curveToUse, t, clickPoint, _offset,
+            effTextPlace, effHeightPlace, _rotate90, upAxis,
+            out var plane, out var primarySideSign,
+            sideSignHint: placeSideSign, sideDeadband: placeSideDeadband,
+            previewTemplateTextId))
       {
         RhinoApp.WriteLine("vTextAligned: could not compute text plane.");
         continue;
@@ -348,7 +352,8 @@ public sealed class vTextAligned : Command
       }
 
       var entity = BuildTextEntity(doc, _text, _height, plane);
-      var newId = doc.Objects.AddText(entity);
+      var newAttributes = NewTextAttributes(doc, activeCurveId);
+      var newId = doc.Objects.AddText(entity, newAttributes);
       if (newId == Guid.Empty)
       {
         RhinoApp.WriteLine("vTextAligned: failed to add text.");
@@ -369,18 +374,19 @@ public sealed class vTextAligned : Command
         {
           var curvePoint = curveToUse.PointAt(t);
           var oppCursor = curvePoint - sideBaseVec * (primarySideSign * 1000.0);
-          if (BuildPlaneFromCurve(doc, curveToUse, t, oppCursor, _offset, _height,
+          if (BuildPlaneFromCurve(doc, curveToUse, t, oppCursor, _offset, _text, _height,
                 NormalizeRotate(_rotate90 + 2), upAxis,
                 out var oppPlane, out _, sideSignHint: 0, sideDeadband: 0.0, previewTemplateTextId))
           {
             var secEntity = BuildTextEntity(doc, _text, _height, oppPlane);
-            var secId = doc.Objects.AddText(secEntity);
+            var secAttributes = NewTextAttributes(doc, activeCurveId);
+            var secId = doc.Objects.AddText(secEntity, secAttributes);
             if (secId != Guid.Empty)
             {
               _ = ForceTextObjectHeight(doc, secId, _height);
               var secGeo = DupTextGeometry(doc, secId);
               if (secGeo != null)
-                undoStack.Push(TextAction.CreateAdd(secId, secGeo));
+                undoStack.Push(TextAction.CreateAdd(secId, secGeo, secAttributes));
             }
           }
         }
@@ -389,7 +395,7 @@ public sealed class vTextAligned : Command
       var addedGeo = DupTextGeometry(doc, newId);
       if (addedGeo != null)
       {
-        undoStack.Push(TextAction.CreateAdd(newId, addedGeo));
+        undoStack.Push(TextAction.CreateAdd(newId, addedGeo, newAttributes));
         redoStack.Clear();
       }
 
@@ -652,6 +658,7 @@ public sealed class vTextAligned : Command
     double parameter,
     Point3d cursorPoint,
     double offsetValue,
+    string textValue,
     double heightValue,
     int rotate90,
     Vector3d upAxis,
@@ -730,7 +737,6 @@ public sealed class vTextAligned : Command
       var targetGap = Math.Abs(offsetNumber);
       origin = curvePoint + sideVec * targetGap;
 
-      var textValue = _text;
       var textHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
 
       try
@@ -772,11 +778,25 @@ public sealed class vTextAligned : Command
     };
 
     SetTextEntityValue(text, textValue);
+    ApplyHeightOverride(doc, text, heightValue);
     return text;
   }
 
   private static TextEntity BuildProbeTextEntity(RhinoDoc doc, string textValue, double heightValue, Plane plane, Guid? templateTextId)
   {
+    if (templateTextId.HasValue &&
+        doc.Objects.FindId(templateTextId.Value)?.Geometry is TextEntity template)
+    {
+      var probe = template.Duplicate() as TextEntity;
+      if (probe != null)
+      {
+        probe.Plane = plane;
+        SetTextEntityValue(probe, textValue);
+        ApplyHeightOverride(doc, probe, heightValue);
+        return probe;
+      }
+    }
+
     return BuildTextEntity(doc, textValue, heightValue, plane);
   }
 
@@ -797,9 +817,10 @@ public sealed class vTextAligned : Command
     if (!ux.Unitize() || !uy.Unitize())
       return null;
 
-    var center = plane.Origin;
-    var centerDist = Vector3d.Multiply(center - curvePoint, sv);
-
+    var centerU = 0.5 * (minx + maxx);
+    var centerV = 0.5 * (miny + maxy);
+    var boundsCenter = plane.PointAt(centerU, centerV);
+    var centerDist = Vector3d.Multiply(boundsCenter - curvePoint, sv);
     var halfW = 0.5 * (maxx - minx);
     var halfH = 0.5 * (maxy - miny);
     var du = Math.Abs(Vector3d.Multiply(sv, ux));
@@ -879,6 +900,27 @@ public sealed class vTextAligned : Command
     }
   }
 
+  private static ObjectAttributes NewTextAttributes(RhinoDoc doc, Guid? curveId)
+  {
+    var attributes = new ObjectAttributes
+    {
+      LayerIndex = doc.Layers.CurrentLayerIndex
+    };
+
+    if (!curveId.HasValue)
+      return attributes;
+
+    var groups = doc.Objects.FindId(curveId.Value)?.Attributes.GetGroupList();
+    if (groups == null)
+      return attributes;
+
+    foreach (var groupIndex in groups.Distinct())
+      if (groupIndex >= 0)
+        attributes.AddToGroup(groupIndex);
+
+    return attributes;
+  }
+
   private static void ApplyHeightOverride(RhinoDoc doc, TextEntity te, double height)
   {
     var baseStyleId = te.DimensionStyleId != Guid.Empty ? te.DimensionStyleId : doc.DimStyles.Current.Id;
@@ -930,7 +972,12 @@ public sealed class vTextAligned : Command
       if (geo == null)
         return false;
 
-      var newId = doc.Objects.AddText(geo);
+      var attributes = action.Attributes?.Duplicate() ?? new ObjectAttributes
+      {
+        LayerIndex = doc.Layers.CurrentLayerIndex
+      };
+      attributes.ObjectId = Guid.Empty;
+      var newId = doc.Objects.AddText(geo, attributes);
       if (newId == Guid.Empty)
         return false;
 
@@ -1008,14 +1055,16 @@ public sealed class vTextAligned : Command
     public TextEntity? Geo { get; private init; }
     public TextEntity? Before { get; private init; }
     public TextEntity? After { get; private init; }
+    public ObjectAttributes? Attributes { get; private init; }
 
-    public static TextAction CreateAdd(Guid id, TextEntity geo)
+    public static TextAction CreateAdd(Guid id, TextEntity geo, ObjectAttributes attributes)
     {
       return new TextAction
       {
         Kind = TextActionKind.Add,
         ObjectId = id,
-        Geo = geo.Duplicate() as TextEntity
+        Geo = geo.Duplicate() as TextEntity,
+        Attributes = attributes.Duplicate()
       };
     }
 
@@ -1077,7 +1126,7 @@ public sealed class vTextAligned : Command
 
       SnapTolerance = Math.Max(doc.ModelAbsoluteTolerance * 3.0, 0.25);
       HoverSnapTolerance = SnapTolerance;
-      PreviewTemplateTextId = _activeTextId ?? (_textIds.Count > 0 ? _textIds[0] : (Guid?)null);
+      PreviewTemplateTextId = _activeTextId;
     }
 
     public CurveHit? HoverCurve { get; private set; }
@@ -1144,6 +1193,7 @@ public sealed class vTextAligned : Command
             t,
             point,
             _offset,
+            _text,
             _height,
             _rotate90,
             upAxis,
@@ -1170,7 +1220,7 @@ public sealed class vTextAligned : Command
             var oppCursor = curvePoint - sideBaseVec * (sideSign * 1000.0);
             if (BuildPlaneFromCurve(
                   _doc, curveToUse, t, oppCursor,
-                  _offset, _height, NormalizeRotate(_rotate90 + 2),
+                  _offset, _text, _height, NormalizeRotate(_rotate90 + 2),
                   upAxis, out var oppPlane, out _,
                   sideSignHint: 0, sideDeadband: 0.0,
                   PreviewTemplateTextId))
@@ -1280,7 +1330,6 @@ public sealed class vTextAligned : Command
     {
       var te = BuildTextEntity(_doc, _text, _height, plane);
       try { te.DrawForward = false; } catch { }
-      try { te.DimensionScale = 0.9; } catch { }
       return te;
     }
   }

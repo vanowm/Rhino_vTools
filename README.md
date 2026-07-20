@@ -1,4 +1,4 @@
-Tools  ·  v26.7.20.1302
+Tools  ·  v26.7.20.1350
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -282,8 +282,8 @@ Options persist to `vTools.config.json` under `vMatch`.
 1. **Notch** group options (panel and command line):
 
     - The `Notch` header checkbox controls notch geometry output. Notch and Label can both be enabled, but the command keeps at least one enabled.
-    - `Type`: three compact transparent icon buttons select `I` (single perpendicular line), `V`, or truncated-`V` `U`; the active icon is highlighted, and the V/U icon proportions update from the current Width and Length values.
-    - `Layer`: target layer for notch geometry, shown with its true layer color and alpha.
+    - `Type`: three checkbox-sized transparent vector buttons select `I` (single perpendicular line), `V`, or truncated-`V` `U`; the active icon is highlighted, and the crisp V/U proportions update from the current Width and Length values.
+    - `Layer`: target layer for notch geometry, using the same packed-ARGB swatches as vObjectPropertiesPlus.
     - `Length`, `Width`, and `Offset`: compact numeric steppers; width controls the arm separation used by `V` and `U` types.
     - Created notch curves are named `NOTCH` and carry `notches.db.*` user-string attributes describing their source curve, placement, dimensions, side, label settings, and layers.
 
@@ -293,7 +293,7 @@ Options persist to `vTools.config.json` under `vMatch`.
     - Value text box: the label string placed at the notch.
     - `AutoAdv`: when enabled, increments a trailing numeric suffix after each placement.
     - `FlipSide`: mirrors the label to the opposite side of the curve.
-    - `Layer`: target layer for label text, shown with its true layer color and alpha.
+    - `Layer`: target layer for label text, using the same packed-ARGB swatches as vObjectPropertiesPlus.
     - `Size`: manual label text height. `Auto` computes height proportionally from notch geometry; the adjacent percentage stepper scales the auto-computed height.
     - `Offset X` / `Offset Y`: numeric steppers for label position relative to the notch point (along-curve and across-curve).
 
@@ -314,6 +314,8 @@ Options persist to `vTools.config.json` under `vMatch`.
     - **Undo** / **Redo** buttons: step backward or forward through placements.
 
 1. Press Enter to finish and keep all placed notches. Press Esc to cancel and remove them.
+
+The floating panel adds scrollbars when resized below its content size.
 
 Options persist to `vTools.config.json` under the `vNotches` section.
 
@@ -486,8 +488,9 @@ Behavior:
 
     - `Text`: sets content for newly created text and active text edits.
     - `Height`: text height.
-    - `Offset`: signed side offset from curve toward text bounds.
+    - `Offset`: signed side offset from the curve to the true text bounds, including rotated and styled annotation bounds.
     - `Rotate`: rotates text orientation by 90 degrees each use.
+    - Newly created text inherits every group membership from the locked curve; local redo preserves those groups.
 
 ### vTextFlip flow
 
