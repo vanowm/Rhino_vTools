@@ -1493,55 +1493,80 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     double centerLen   = Clamp(lengthFromStart, 0.0, totalLength);
     double leftRaw     = centerLen - halfWidth;
     double rightRaw    = centerLen + halfWidth;
-    if (!TryNotchBase(curve, leftRaw, totalLength, tangent, out var leftBase, out var leftTangent) ||
-        !TryNotchBase(curve, rightRaw, totalLength, tangent, out var rightBase, out var rightTangent))
+    if (!TryNotchBase(curve, leftRaw, totalLength, tangent, out var leftBase) ||
+        !TryNotchBase(curve, rightRaw, totalLength, tangent, out var rightBase))
       return null;
 
     var tip = center + direction * notchLength;
-    if (notchOffset > 0.0)
-    {
-      // Offset V/U notches keep their original profile. One shared miter
-      // translation puts both outer endpoints on their local offset segments.
-      var translation = NotchOffsetTranslation(
-        direction, leftTangent, rightTangent, side, notchOffset);
-      leftBase += translation;
-      rightBase += translation;
-      tip = center - direction * notchLength + translation;
-    }
-
-    if (notchType == "V")
+    var offsetCurves = new List<Curve>();
+    try
     {
       if (notchOffset > 0.0)
       {
-        FitNotchLegsToActualOffset(curve, center + direction * notchOffset,
-          notchOffset, "V", tip, ref leftBase, tip, ref rightBase, logOffsetFit);
-      }
-      return new PolylineCurve(new[] { leftBase, tip, rightBase });
-    }
+        var expectedOffsetPoint = center + direction * notchOffset;
+        double offsetTolerance = Math.Max(
+          RhinoDoc.ActiveDoc?.ModelAbsoluteTolerance ?? 0.001,
+          RhinoMath.ZeroTolerance * 10.0);
+        offsetCurves = ClosestNotchOffsetCurves(
+          curve, expectedOffsetPoint, notchOffset, offsetTolerance);
 
-    if (notchType == "U")
-    {
-      // U is a V with its point truncated, not a parallel-sided channel.
-      double halfFlat = Math.Max(0.0, notchWidth * 0.1);
-      var leftTip  = tip - tangent * halfFlat;
-      var rightTip = tip + tangent * halfFlat;
-      if (notchOffset > 0.0)
+        var translation = direction * notchOffset;
+        bool centerHit = TryFindCenterOffsetContact(
+          offsetCurves, center, direction, expectedOffsetPoint,
+          offsetTolerance, out var centerContact);
+        if (centerHit)
+          translation = centerContact - center;
+
+        leftBase += translation;
+        rightBase += translation;
+        tip = center - direction * notchLength + translation;
+
+        if (logOffsetFit)
+        {
+          Log.Write("vNotches",
+            $"offset-center type={notchType} hit={centerHit} branches={offsetCurves.Count} " +
+            $"expectedError={(centerHit ? centerContact.DistanceTo(expectedOffsetPoint) : 0.0):0.######}");
+        }
+      }
+
+      if (notchType == "V")
       {
-        FitNotchLegsToActualOffset(curve, center + direction * notchOffset,
-          notchOffset, "U", leftTip, ref leftBase, rightTip, ref rightBase, logOffsetFit);
+        if (notchOffset > 0.0)
+        {
+          FitNotchLegsToActualOffset(curve, offsetCurves,
+            "V", tip, ref leftBase, tip, ref rightBase, logOffsetFit);
+        }
+        return new PolylineCurve(new[] { leftBase, tip, rightBase });
       }
-      return new PolylineCurve(new[] { leftBase, leftTip, rightTip, rightBase });
-    }
 
-    // Fallback
-    return new LineCurve(center, center + direction * notchLength);
+      if (notchType == "U")
+      {
+        // U is a V with its point truncated, not a parallel-sided channel.
+        double halfFlat = Math.Max(0.0, notchWidth * 0.1);
+        var leftTip  = tip - tangent * halfFlat;
+        var rightTip = tip + tangent * halfFlat;
+        if (notchOffset > 0.0)
+        {
+          FitNotchLegsToActualOffset(curve, offsetCurves,
+            "U", leftTip, ref leftBase, rightTip, ref rightBase, logOffsetFit);
+        }
+        return new PolylineCurve(new[] { leftBase, leftTip, rightTip, rightBase });
+      }
+
+      // Fallback
+      return new LineCurve(center, center + direction * notchLength);
+    }
+    finally
+    {
+      foreach (var offsetCurve in offsetCurves)
+        offsetCurve.Dispose();
+    }
   }
 
   static bool TryNotchBase(Curve curve, double rawLength, double totalLength,
-    Vector3d fallbackTangent, out Point3d basePoint, out Vector3d localTangent)
+    Vector3d fallbackTangent, out Point3d basePoint)
   {
     basePoint = Point3d.Unset;
-    localTangent = Vector3d.Unset;
     if (totalLength <= RhinoMath.ZeroTolerance)
       return false;
 
@@ -1563,7 +1588,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     if (parameter == null)
       return false;
 
-    localTangent = curve.TangentAt(parameter.Value);
+    var localTangent = curve.TangentAt(parameter.Value);
     localTangent.Z = 0.0;
     if (!localTangent.Unitize())
     {
@@ -1577,41 +1602,68 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return true;
   }
 
-  static Vector3d NotchOffsetTranslation(Vector3d fallbackDirection,
-    Vector3d leftTangent, Vector3d rightTangent, string side, double notchOffset)
+  static bool TryFindCenterOffsetContact(IEnumerable<Curve> offsetCurves,
+    Point3d center, Vector3d direction, Point3d expectedOffsetPoint,
+    double tolerance, out Point3d contactPoint)
   {
-    var fallback = fallbackDirection * notchOffset;
-    var leftNormal = Vector3d.CrossProduct(Vector3d.ZAxis, leftTangent);
-    var rightNormal = Vector3d.CrossProduct(Vector3d.ZAxis, rightTangent);
-    if (!leftNormal.Unitize() || !rightNormal.Unitize())
-      return fallback;
+    contactPoint = Point3d.Unset;
+    var centerDirection = new Vector3d(direction);
+    if (!centerDirection.Unitize())
+      return false;
 
-    if (side == "Right")
+    double expectedDistance = center.DistanceTo(expectedOffsetPoint);
+    double searchLength = Math.Max(expectedDistance * 4.0, tolerance * 100.0);
+    using var centerRay = new LineCurve(
+      center - centerDirection * tolerance,
+      center + centerDirection * searchLength);
+
+    bool found = false;
+    double bestScore = double.MaxValue;
+    foreach (var offsetCurve in offsetCurves)
     {
-      leftNormal = -leftNormal;
-      rightNormal = -rightNormal;
+      var events = Rhino.Geometry.Intersect.Intersection.CurveCurve(
+        centerRay, offsetCurve, tolerance, tolerance);
+      if (events == null)
+        continue;
+
+      foreach (var intersectionEvent in events)
+      {
+        if (!intersectionEvent.IsPoint)
+          continue;
+        var point = intersectionEvent.PointA;
+        double along = Vector3d.Multiply(point - center, centerDirection);
+        if (along <= tolerance)
+          continue;
+        double score = point.DistanceTo(expectedOffsetPoint);
+        if (score >= bestScore)
+          continue;
+        found = true;
+        bestScore = score;
+        contactPoint = point;
+      }
     }
 
-    // Find the one translation whose signed distance from both source
-    // segments is the requested offset. Parallel segments use the selected
-    // center direction, which is the same result without a miter correction.
-    double determinant = leftNormal.X * rightNormal.Y - leftNormal.Y * rightNormal.X;
-    if (Math.Abs(determinant) <= 1e-9)
-      return fallback;
+    if (found)
+      return true;
 
-    var translation = new Vector3d(
-      notchOffset * (rightNormal.Y - leftNormal.Y) / determinant,
-      notchOffset * (leftNormal.X - rightNormal.X) / determinant,
-      0.0);
+    foreach (var offsetCurve in offsetCurves)
+    {
+      if (!offsetCurve.ClosestPoint(expectedOffsetPoint, out double parameter))
+        continue;
+      var point = offsetCurve.PointAt(parameter);
+      double score = point.DistanceTo(expectedOffsetPoint);
+      if (score >= bestScore)
+        continue;
+      found = true;
+      bestScore = score;
+      contactPoint = point;
+    }
 
-    if (!translation.IsValid)
-      return fallback;
-
-    return translation;
+    return found;
   }
 
-  static void FitNotchLegsToActualOffset(Curve sourceCurve, Point3d expectedOffsetPoint,
-    double notchOffset, string notchType,
+  static void FitNotchLegsToActualOffset(Curve sourceCurve, List<Curve> offsetCurves,
+    string notchType,
     Point3d leftInner, ref Point3d leftOuter,
     Point3d rightInner, ref Point3d rightOuter,
     bool logOffsetFit)
@@ -1619,8 +1671,6 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     double tol = Math.Max(
       RhinoDoc.ActiveDoc?.ModelAbsoluteTolerance ?? 0.001,
       RhinoMath.ZeroTolerance * 10.0);
-    var offsetCurves = ClosestNotchOffsetCurves(
-      sourceCurve, expectedOffsetPoint, notchOffset, tol);
     if (offsetCurves.Count == 0)
     {
       if (logOffsetFit)
@@ -1628,32 +1678,24 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       return;
     }
 
-    try
-    {
-      bool leftHit = TryFitNotchLegEndpoint(
-        sourceCurve, offsetCurves, leftInner, leftOuter, tol,
-        out var fittedLeft, out double leftShift);
-      bool rightHit = TryFitNotchLegEndpoint(
-        sourceCurve, offsetCurves, rightInner, rightOuter, tol,
-        out var fittedRight, out double rightShift);
+    bool leftHit = TryFitNotchLegEndpoint(
+      sourceCurve, offsetCurves, leftInner, leftOuter, tol,
+      out var fittedLeft, out double leftShift);
+    bool rightHit = TryFitNotchLegEndpoint(
+      sourceCurve, offsetCurves, rightInner, rightOuter, tol,
+      out var fittedRight, out double rightShift);
 
-      if (leftHit)
-        leftOuter = fittedLeft;
-      if (rightHit)
-        rightOuter = fittedRight;
+    if (leftHit)
+      leftOuter = fittedLeft;
+    if (rightHit)
+      rightOuter = fittedRight;
 
-      if (logOffsetFit)
-      {
-        Log.Write("vNotches",
-          $"offset-fit type={notchType} offset={notchOffset:0.###} branches={offsetCurves.Count} " +
-          $"leftHit={leftHit} leftShift={leftShift:0.######} " +
-          $"rightHit={rightHit} rightShift={rightShift:0.######}");
-      }
-    }
-    finally
+    if (logOffsetFit)
     {
-      foreach (var offsetCurve in offsetCurves)
-        offsetCurve.Dispose();
+      Log.Write("vNotches",
+        $"offset-fit type={notchType} branches={offsetCurves.Count} " +
+        $"leftHit={leftHit} leftShift={leftShift:0.######} " +
+        $"rightHit={rightHit} rightShift={rightShift:0.######}");
     }
   }
 
