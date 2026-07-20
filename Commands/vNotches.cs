@@ -3026,6 +3026,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     readonly Button[]    _reverseButtons;
     readonly CheckBox[]  _enableChecks;
     readonly Label[]     _curveLengthLabels;
+    readonly Panel[]     _curveLengthBadges;
     readonly CurveRowHoverConduit _curveHoverConduit = new();
     Scrollable? _scrollable;
     Scrollable? _curveScrollable;
@@ -3256,6 +3257,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _reverseButtons = new Button[s.Curves.Count];
       _enableChecks   = new CheckBox[s.Curves.Count];
       _curveLengthLabels = new Label[s.Curves.Count];
+      _curveLengthBadges = new Panel[s.Curves.Count];
       for (int i = 0; i < s.Curves.Count; i++)
       {
         int ci = i;
@@ -3271,7 +3273,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
           Redraw();
           Persist();
         };
-        _reverseButtons[i] = new Button { Text = $"Reverse {i + 1}", Height = 26 };
+        _reverseButtons[i] = new Button { Text = $"Reverse {i + 1}", Height = 24 };
         _reverseButtons[i].Click += (_, __) =>
         {
           ReverseCurve(doc, s, ci);
@@ -3286,6 +3288,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
           Text = FormatPanelNumber(s.Curves[i].GetLength()),
           VerticalAlignment = VerticalAlignment.Center,
           TextAlignment = TextAlignment.Right,
+        };
+        _curveLengthBadges[i] = new Panel
+        {
+          Padding = new Eto.Drawing.Padding(3),
+          Content = _curveLengthLabels[i],
         };
         if (s.Curves.Count > 1)
         {
@@ -3448,9 +3455,15 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         if (_s.Curves.Count > 1 && _enableChecks[i] != null)
           row.Items.Add(new StackLayoutItem(_enableChecks[i], false));
         row.Items.Add(new StackLayoutItem(_sideChecks[i],   false));
-        row.Items.Add(new StackLayoutItem(_reverseButtons[i],false));
+        var reverseHost = new Panel
+        {
+          Height = 26,
+          Padding = new Eto.Drawing.Padding(0, 2, 0, 0),
+          Content = _reverseButtons[i],
+        };
+        row.Items.Add(new StackLayoutItem(reverseHost, false));
         row.Items.Add(new StackLayoutItem(null, true));
-        row.Items.Add(new StackLayoutItem(_curveLengthLabels[i], false));
+        row.Items.Add(new StackLayoutItem(_curveLengthBadges[i], false));
         row.MouseEnter += (_, __) => SetCurveRowHover(curveIndex);
         row.MouseLeave += (_, __) =>
         {
@@ -3466,9 +3479,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         Border = BorderType.None,
         ExpandContentWidth = true,
         ExpandContentHeight = false,
-        Height = curveViewportHeight,
+        Height = curveViewportHeight + 2,
+        Padding = new Eto.Drawing.Padding(0),
         Content = curveStack,
       };
+      _curveScrollable.Load += (_, __) => ConfigureCurveScroller();
 
       // ── Distance info ────────────────────────────────────────────────────
       var distTable = new TableLayout { Spacing = new Eto.Drawing.Size(6, 2) };
@@ -3514,6 +3529,38 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       root.Items.Add(new StackLayoutItem(infoRow,    false));
 
       return root;
+    }
+
+    void ConfigureCurveScroller()
+    {
+      var root = _curveScrollable?.ControlObject as System.Windows.DependencyObject;
+      var native = FindVisualChild<System.Windows.Controls.ScrollViewer>(root);
+      if (native == null)
+        return;
+
+      native.HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled;
+      native.VerticalScrollBarVisibility = _s.Curves.Count <= 2
+        ? System.Windows.Controls.ScrollBarVisibility.Hidden
+        : System.Windows.Controls.ScrollBarVisibility.Auto;
+    }
+
+    static T? FindVisualChild<T>(System.Windows.DependencyObject? root)
+      where T : System.Windows.DependencyObject
+    {
+      if (root == null)
+        return null;
+      if (root is T match)
+        return match;
+
+      int childCount = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+      for (int i = 0; i < childCount; i++)
+      {
+        var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+        var descendant = FindVisualChild<T>(child);
+        if (descendant != null)
+          return descendant;
+      }
+      return null;
     }
 
     static TableCell FL(string text) =>
@@ -4135,7 +4182,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       var foreground = new Eto.Drawing.Color(1.0f, 1.0f, 1.0f);
       for (int i = 0; i < _curveLengthLabels.Length; i++)
       {
-        _curveLengthLabels[i].BackgroundColor = backgrounds[groupByCurve[i] % backgrounds.Length];
+        _curveLengthBadges[i].BackgroundColor = backgrounds[groupByCurve[i] % backgrounds.Length];
         _curveLengthLabels[i].TextColor = foreground;
       }
     }
