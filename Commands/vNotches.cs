@@ -1438,14 +1438,20 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     double centerLen   = Clamp(lengthFromStart, 0.0, totalLength);
     double leftRaw     = centerLen - halfWidth;
     double rightRaw    = centerLen + halfWidth;
-    if (!TryOffsetNotchBase(curve, leftRaw, totalLength, notchOffset, side, tangent, out var leftBase) ||
-        !TryOffsetNotchBase(curve, rightRaw, totalLength, notchOffset, side, tangent, out var rightBase))
+    if (!TryNotchBase(curve, leftRaw, totalLength, tangent, out var leftBase, out var leftTangent) ||
+        !TryNotchBase(curve, rightRaw, totalLength, tangent, out var rightBase, out var rightTangent))
       return null;
 
     var tip = center + direction * notchLength;
     if (notchOffset > 0.0)
     {
-      tip       = center + direction * Math.Max(0.0, notchOffset - notchLength);
+      // Offset V/U notches keep their original profile. One shared miter
+      // translation puts both outer endpoints on their local offset segments.
+      var translation = NotchOffsetTranslation(
+        direction, leftTangent, rightTangent, side, notchOffset);
+      leftBase += translation;
+      rightBase += translation;
+      tip = center - direction * notchLength + translation;
     }
 
     if (notchType == "V")
@@ -1463,10 +1469,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     return new LineCurve(center, center + direction * notchLength);
   }
 
-  static bool TryOffsetNotchBase(Curve curve, double rawLength, double totalLength,
-    double notchOffset, string side, Vector3d fallbackTangent, out Point3d basePoint)
+  static bool TryNotchBase(Curve curve, double rawLength, double totalLength,
+    Vector3d fallbackTangent, out Point3d basePoint, out Vector3d localTangent)
   {
     basePoint = Point3d.Unset;
+    localTangent = Vector3d.Unset;
     if (totalLength <= RhinoMath.ZeroTolerance)
       return false;
 
@@ -1488,7 +1495,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     if (parameter == null)
       return false;
 
-    var localTangent = curve.TangentAt(parameter.Value);
+    localTangent = curve.TangentAt(parameter.Value);
     localTangent.Z = 0.0;
     if (!localTangent.Unitize())
     {
@@ -1499,17 +1506,40 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
     }
 
     basePoint = point + localTangent * extension;
-    if (notchOffset <= 0.0)
-      return true;
-
-    var localDirection = Vector3d.CrossProduct(Vector3d.ZAxis, localTangent);
-    if (!localDirection.Unitize())
-      return false;
-    if (side == "Right")
-      localDirection = -localDirection;
-
-    basePoint += localDirection * notchOffset;
     return true;
+  }
+
+  static Vector3d NotchOffsetTranslation(Vector3d fallbackDirection,
+    Vector3d leftTangent, Vector3d rightTangent, string side, double notchOffset)
+  {
+    var fallback = fallbackDirection * notchOffset;
+    var leftNormal = Vector3d.CrossProduct(Vector3d.ZAxis, leftTangent);
+    var rightNormal = Vector3d.CrossProduct(Vector3d.ZAxis, rightTangent);
+    if (!leftNormal.Unitize() || !rightNormal.Unitize())
+      return fallback;
+
+    if (side == "Right")
+    {
+      leftNormal = -leftNormal;
+      rightNormal = -rightNormal;
+    }
+
+    // Find the one translation whose signed distance from both source
+    // segments is the requested offset. Parallel segments use the selected
+    // center direction, which is the same result without a miter correction.
+    double determinant = leftNormal.X * rightNormal.Y - leftNormal.Y * rightNormal.X;
+    if (Math.Abs(determinant) <= 1e-9)
+      return fallback;
+
+    var translation = new Vector3d(
+      notchOffset * (rightNormal.Y - leftNormal.Y) / determinant,
+      notchOffset * (leftNormal.X - rightNormal.X) / determinant,
+      0.0);
+
+    if (!translation.IsValid)
+      return fallback;
+
+    return translation;
   }
 
   // ── Kink-aware tangent ────────────────────────────────────────────────────
