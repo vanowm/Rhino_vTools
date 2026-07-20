@@ -74,6 +74,7 @@
     "label_offset_y": 0.0,
     "label_auto_adv": true,
     "label_side_flip": false,
+    "keep_selection": false,
     "multiple_start_offset": 2.0,
     "multiple_end_offset": 2.0,
     "multiple_number": 2,

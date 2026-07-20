@@ -1,4 +1,4 @@
-Tools  ·  v26.7.20.1128
+Tools  ·  v26.7.20.1232
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -281,11 +281,10 @@ Options persist to `vTools.config.json` under `vMatch`.
 1. **Notch** group options (panel and command line):
 
     - The `Notch` header checkbox controls notch geometry output. Notch and Label can both be enabled, but the command keeps at least one enabled.
-    - `Type`: notch shape — `I` (single perpendicular line), `V`, or `U`.
-    - `Layer`: target layer for notch geometry.
-    - `Length`: notch arm length.
-    - `Width`: arm separation distance used by `V` and `U` types.
-    - `Offset`: signed distance to shift the notch along the curve from the clicked point.
+    - `Type`: three icon buttons select `I` (single perpendicular line), `V`, or `U`; the active shape stays pressed.
+    - `Layer`: target layer for notch geometry, shown with its layer color swatch.
+    - `Length`, `Width`, and `Offset`: compact numeric steppers; width controls the arm separation used by `V` and `U` types.
+    - Created notch curves are named `NOTCH` and carry `notches.db.*` user-string attributes describing their source curve, placement, dimensions, side, label settings, and layers.
 
 1. **Label** group options:
 
@@ -293,22 +292,22 @@ Options persist to `vTools.config.json` under `vMatch`.
     - Value text box: the label string placed at the notch.
     - `AutoAdv`: when enabled, increments a trailing numeric suffix after each placement.
     - `FlipSide`: mirrors the label to the opposite side of the curve.
-    - `Layer`: target layer for label text.
-    - `Size`: manual label text height. `Auto` computes height proportionally from notch geometry; when `Auto` is off, the adjacent percentage dropdown scales the auto-computed height.
-    - `Offset X` / `Offset Y`: label position offset relative to the notch point (along-curve and across-curve).
+    - `Layer`: target layer for label text, shown with its layer color swatch.
+    - `Size`: manual label text height. `Auto` computes height proportionally from notch geometry; the adjacent percentage stepper scales the auto-computed height.
+    - `Offset X` / `Offset Y`: numeric steppers for label position relative to the notch point (along-curve and across-curve).
 
 1. **Multiple** group options:
 
     - `Start offset` / `End offset`: numeric steppers for the distances from each curve's respective ends to the first and last notch.
     - `Number`: numeric stepper for the total number of notches, including the first and last positions.
-    - `Distance`: live spacing between notches, rounded to three decimal places. A range is shown when selected curves have different spacing.
+    - `Distance`: editable numeric stepper with a `1.0` button increment. Changing it updates `Number` and the end offset to fit as many exact intervals as possible. The shortest enabled curve is the spacing reference.
     - `Add`: creates an evenly spaced notch batch. When labels are enabled, only the first notch position receives the label and auto-advance runs once.
 
 1. Other panel controls:
 
     - `Percent`: display the click position as a percentage of total curve length in the distance readout.
     - `Group`: group each enabled notch and label output.
-    - `Select`: return to individual-curve selection to add curves or Shift-remove existing curves without selecting their groups or ending the command. Existing placed notches remain in the document, and a curve restores its remembered side when re-added.
+    - `Select`: return to individual-curve selection without selecting groups or ending the command. Its inset checkbox defaults unchecked: unchecked selection replaces the current curve set; checked selection keeps the current curves so others can be added or removed. The setting is saved immediately. Existing placed notches remain in the document, and a curve restores its remembered side when re-added.
     - Per-curve row — `Side N` checkbox: which side of the curve the notch and label are drawn on; `Reverse N` button: flip the curve's travel direction; the last column shows curve length rounded to three decimal places.
     - Distance info: **From start**, **From end**, **From previous** show arc-length values rounded to three decimal places.
     - **Undo** / **Redo** buttons: step backward or forward through placements.
