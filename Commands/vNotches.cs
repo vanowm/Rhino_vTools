@@ -3324,7 +3324,7 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       {
         Points = points,
         Stroke = stroke,
-        StrokeThickness = active ? 1.35 : 1.0,
+        StrokeThickness = 1.5,
         StrokeLineJoin = System.Windows.Media.PenLineJoin.Round,
         StrokeStartLineCap = System.Windows.Media.PenLineCap.Round,
         StrokeEndLineCap = System.Windows.Media.PenLineCap.Round,
