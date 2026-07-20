@@ -28,6 +28,8 @@ public sealed class vPointTrace : Command
   protected override Result RunCommand(RhinoDoc doc, RunMode mode)
   {
     var highlightedIds = new HashSet<Guid>();
+    int addedPointCount = 0;
+    vTools.Log.Write("vPointTrace", $"start document={doc.RuntimeSerialNumber}");
 
     // ── Pick source curve ────────────────────────────────────────────────────
     var goSource = new GetObject();
@@ -49,6 +51,8 @@ public sealed class vPointTrace : Command
 
     var sourceSelPt = sourceRef.SelectionPoint();
     sourceCurve = OrientFromSelectionPoint(sourceCurve, sourceSelPt);
+    vTools.Log.Write("vPointTrace",
+      $"source={sourceRef.ObjectId} length={sourceCurve.GetLength():0.###}");
 
     // ── Pick destination curve ───────────────────────────────────────────────
     var goDest = new GetObject();
@@ -81,6 +85,9 @@ public sealed class vPointTrace : Command
     destCurve = OrientFromSelectionPoint(destCurve, destSelPt);
 
     var destLength = destCurve.GetLength();
+    vTools.Log.Write("vPointTrace",
+      $"destination={destRef.ObjectId} length={destLength:0.###} " +
+      $"groups=[{string.Join(",", destGroupList)}]");
 
     // ── Pick-and-place loop ──────────────────────────────────────────────────
     while (true)
@@ -91,15 +98,12 @@ public sealed class vPointTrace : Command
       gp.AcceptNothing(true);
       gp.Constrain(sourceCurve, allowPickingPointOffObject: false);
 
-      Point3d? destPreviewPt = null;
-
       gp.DynamicDraw += (_, e) =>
       {
         var pt = MapToDestination(sourceCurve, destCurve, destLength, e.CurrentPoint);
         if (!pt.HasValue)
           return;
 
-        destPreviewPt = pt;
         e.Display.DrawPoint(pt.Value, System.Drawing.Color.LimeGreen);
       };
 
@@ -115,22 +119,52 @@ public sealed class vPointTrace : Command
       if (!destPt.HasValue)
       {
         RhinoApp.WriteLine("vPointTrace: could not map source point to destination curve.");
+        vTools.Log.Write("vPointTrace", $"map failed sourcePoint={FormatPoint(gp.Point())}");
         continue;
       }
 
-      if (destGroupList.Length > 0)
+      var pointId = AddTracePoint(doc, destPt.Value, destGroupList);
+      if (pointId == Guid.Empty)
       {
-        var attrs = new ObjectAttributes();
-        foreach (var g in destGroupList) attrs.AddToGroup(g);
-        doc.Objects.AddPoint(destPt.Value, attrs);
+        RhinoApp.WriteLine("vPointTrace: failed to add point to the document.");
+        vTools.Log.Write("vPointTrace",
+          $"add failed destinationPoint={FormatPoint(destPt.Value)} " +
+          $"currentLayer={doc.Layers.CurrentLayerIndex}");
+        continue;
       }
-      else
-        doc.Objects.AddPoint(destPt.Value);
+
+      addedPointCount++;
+      vTools.Log.Write("vPointTrace",
+        $"added point={pointId} location={FormatPoint(destPt.Value)} count={addedPointCount}");
+      doc.Views.Redraw();
     }
 
     HighlightObjects(doc, highlightedIds, false);
+    vTools.Log.Write("vPointTrace", $"end added={addedPointCount}");
     return Result.Success;
   }
+
+  private static Guid AddTracePoint(RhinoDoc doc, Point3d point, IReadOnlyList<int> groupIndices)
+  {
+    try
+    {
+      if (groupIndices.Count == 0)
+        return doc.Objects.AddPoint(point);
+
+      var attrs = new ObjectAttributes { LayerIndex = doc.Layers.CurrentLayerIndex };
+      foreach (int groupIndex in groupIndices)
+        attrs.AddToGroup(groupIndex);
+      return doc.Objects.AddPoint(point, attrs);
+    }
+    catch (Exception ex)
+    {
+      vTools.Log.Write("vPointTrace", $"AddPoint exception: {ex}");
+      return Guid.Empty;
+    }
+  }
+
+  private static string FormatPoint(Point3d point) =>
+    $"({point.X:0.###},{point.Y:0.###},{point.Z:0.###})";
 
   private static void HighlightPickedObject(RhinoDoc doc, ObjRef objRef, ISet<Guid> highlightedIds)
   {
