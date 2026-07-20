@@ -2793,7 +2793,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
         bool active = i == s.NotchTypeIndex;
         _typeButtons[i] = new ToggleButton
         {
-          Image = CreateNotchTypeIcon(typeName, active),
+          Image = CreateNotchTypeIcon(typeName, active,
+            s.NotchLengthOpt.CurrentValue, s.NotchWidthOpt.CurrentValue),
           ToolTip = $"{typeName} notch",
           Checked = active,
           BackgroundColor = Colors.Transparent,
@@ -2813,9 +2814,11 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       _widthStepper = MakeNumberStepper(s.NotchWidthOpt.CurrentValue,
         doc.ModelAbsoluteTolerance, 1e9, 0.1);
 
-      AttachNumericLive(_lengthStepper, v => s.NotchLengthOpt.CurrentValue = v);
+      AttachNumericLive(_lengthStepper, v => s.NotchLengthOpt.CurrentValue = v,
+        refreshTypeIcons: true);
       AttachNumericLive(_offsetStepper, v => s.NotchOffsetOpt.CurrentValue = v);
-      AttachNumericLive(_widthStepper, v => s.NotchWidthOpt.CurrentValue = v);
+      AttachNumericLive(_widthStepper, v => s.NotchWidthOpt.CurrentValue = v,
+        refreshTypeIcons: true);
 
       // Notch layer dropdown
       _notchLayerDrop = new DropDown();
@@ -3267,30 +3270,47 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
     static double RoundPanelNumber(double value) => RoundForDisplay(value, 3);
 
-    static Bitmap CreateNotchTypeIcon(string notchType, bool active)
+    static Bitmap CreateNotchTypeIcon(string notchType, bool active,
+      double notchLength, double notchWidth)
     {
       var bitmap = new Bitmap(16, 16, PixelFormat.Format32bppRgba);
       using var graphics = new Graphics(bitmap);
       graphics.Clear(Colors.Transparent);
       var color = active ? Color.FromArgb(0, 120, 215) : Color.FromArgb(75, 75, 75);
       using var pen = new Pen(color, active ? 2.0f : 1.5f);
+
+      const float center = 8.0f;
+      const float available = 13.0f;
+      double modelHeight = Math.Max(notchLength, RhinoMath.ZeroTolerance);
+      double modelWidth = Math.Max(notchWidth, RhinoMath.ZeroTolerance);
+      double scale = Math.Min(available / modelWidth, available / modelHeight);
+      float width = (float)(modelWidth * scale);
+      float height = (float)(modelHeight * scale);
+      float left = center - width * 0.5f;
+      float right = center + width * 0.5f;
+      float top = center - height * 0.5f;
+      float bottom = center + height * 0.5f;
+
       switch ((notchType ?? "I").ToUpperInvariant())
       {
         case "V":
           graphics.DrawLines(pen, new[]
           {
-            new PointF(2, 2), new PointF(8, 14), new PointF(14, 2),
+            new PointF(left, top), new PointF(center, bottom), new PointF(right, top),
           });
           break;
         case "U":
+          float halfFlat = width * 0.1f;
           graphics.DrawLines(pen, new[]
           {
-            new PointF(2, 2), new PointF(7, 13),
-            new PointF(9, 13), new PointF(14, 2),
+            new PointF(left, top), new PointF(center - halfFlat, bottom),
+            new PointF(center + halfFlat, bottom), new PointF(right, top),
           });
           break;
         default:
-          graphics.DrawLine(pen, new PointF(8, 1), new PointF(8, 15));
+          graphics.DrawLine(pen,
+            new PointF(center, center - available * 0.5f),
+            new PointF(center, center + available * 0.5f));
           break;
       }
       return bitmap;
@@ -3317,18 +3337,26 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       try
       {
         for (int i = 0; i < _typeButtons.Length; i++)
-        {
           _typeButtons[i].Checked = i == selected;
-          _typeButtons[i].Image = CreateNotchTypeIcon(
-            _s.NotchTypeValues[i], i == selected);
-        }
         _s.NotchTypeIndex = selected;
+        RefreshNotchTypeIcons();
       }
       finally { _suppress = false; }
 
       ApplyDynamic();
       Redraw();
       Persist();
+    }
+
+    void RefreshNotchTypeIcons()
+    {
+      for (int i = 0; i < _typeButtons.Length; i++)
+      {
+        bool active = i == _s.NotchTypeIndex;
+        _typeButtons[i].Image = CreateNotchTypeIcon(
+          _s.NotchTypeValues[i], active,
+          _s.NotchLengthOpt.CurrentValue, _s.NotchWidthOpt.CurrentValue);
+      }
     }
 
     void InstallCollapsibleGroupHeader(GroupBox group, Control content, string title,
@@ -3547,12 +3575,15 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       Persist();
     }
 
-    void AttachNumericLive(NumericStepper stepper, Action<double> apply)
+    void AttachNumericLive(NumericStepper stepper, Action<double> apply,
+      bool refreshTypeIcons = false)
     {
       stepper.ValueChanged += (_, __) =>
       {
         if (_suppress) return;
         apply(RoundPanelNumber(stepper.Value));
+        if (refreshTypeIcons)
+          RefreshNotchTypeIcons();
         Redraw();
         Persist();
       };
@@ -3821,11 +3852,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       try
       {
         for (int i = 0; i < _typeButtons.Length; i++)
-        {
           _typeButtons[i].Checked = i == _s.NotchTypeIndex;
-          _typeButtons[i].Image = CreateNotchTypeIcon(
-            _s.NotchTypeValues[i], i == _s.NotchTypeIndex);
-        }
+        RefreshNotchTypeIcons();
         _lengthStepper.Value            = _s.NotchLengthOpt.CurrentValue;
         _offsetStepper.Value            = _s.NotchOffsetOpt.CurrentValue;
         _widthStepper.Value             = _s.NotchWidthOpt.CurrentValue;

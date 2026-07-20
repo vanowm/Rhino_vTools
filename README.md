@@ -1,4 +1,4 @@
-Tools  ·  v26.7.20.1259
+Tools  ·  v26.7.20.1302
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -282,7 +282,7 @@ Options persist to `vTools.config.json` under `vMatch`.
 1. **Notch** group options (panel and command line):
 
     - The `Notch` header checkbox controls notch geometry output. Notch and Label can both be enabled, but the command keeps at least one enabled.
-    - `Type`: three compact transparent icon buttons select `I` (single perpendicular line), `V`, or truncated-`V` `U`; the active icon is highlighted.
+    - `Type`: three compact transparent icon buttons select `I` (single perpendicular line), `V`, or truncated-`V` `U`; the active icon is highlighted, and the V/U icon proportions update from the current Width and Length values.
     - `Layer`: target layer for notch geometry, shown with its true layer color and alpha.
     - `Length`, `Width`, and `Offset`: compact numeric steppers; width controls the arm separation used by `V` and `U` types.
     - Created notch curves are named `NOTCH` and carry `notches.db.*` user-string attributes describing their source curve, placement, dimensions, side, label settings, and layers.
