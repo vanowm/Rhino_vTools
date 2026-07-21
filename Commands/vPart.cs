@@ -163,9 +163,9 @@ public sealed class vPart : Command
     //  then falls back to endpoint joining + gap bridging.
 
     var perimLog = new List<string>();
-    var (perimeter, bridges, perimeterCurves) = BuildClosedPerimeter(
+    var (perimeter, bridges, perimeterCurves, boundaryTolerance) = BuildClosedPerimeter(
       perimList.Select(p => p.Crv).ToList(), plane, tol, perimLog);
-    L($"BuildClosedPerimeter: {(perimeter != null ? "OK" : "FAILED")}  bridges={bridges.Count}");
+    L($"BuildClosedPerimeter: {(perimeter != null ? "OK" : "FAILED")}  bridges={bridges.Count}  boundaryTol={boundaryTolerance:G6}");
     foreach (var entry in perimLog) L($"  perim: {entry}");
     if (perimeter == null)
     {
@@ -176,7 +176,7 @@ public sealed class vPart : Command
 
     // ── 4. Collect inside objects (all visible types, trimmed for curves) ──
 
-    var insideObjects = CollectInsideObjects(doc, perimIds, perimeter, plane, tol);
+    var insideObjects = CollectInsideObjects(doc, perimIds, perimeter, plane, boundaryTolerance);
     L($"insideObjects: {insideObjects.Count}");
 
     // ── 5. Assemble Part items ─────────────────────────────────────────────────────
@@ -192,8 +192,12 @@ public sealed class vPart : Command
         item.Attr))
       .ToList();
 
+    var trimmedPerimeter = TrimToPerimeter(
+      effectivePerimeter, perimeter!, plane, boundaryTolerance).ToList();
+    L($"trimmedPerimeter: {trimmedPerimeter.Count} piece(s) from {effectivePerimeter.Count} selected curve(s)");
+
     var partItems = new List<(GeometryBase Geom, ObjectAttributes Attr)>();
-    foreach (var (crv, attr) in TrimToPerimeter(effectivePerimeter, perimeter!, tol))
+    foreach (var (crv, attr) in trimmedPerimeter)
       partItems.Add((crv, attr));
     foreach (var bridge in bridges)
       partItems.Add((bridge, currentLayerAttr.Duplicate()));
@@ -313,7 +317,7 @@ public sealed class vPart : Command
   /// geometry is untouched; working copies may be extended to selected curves.
   /// Gap-bridging segments are returned separately for the output Part.
   /// </summary>
-  private static (Curve? Closed, List<LineCurve> Bridges, List<Curve> PerimeterCurves) BuildClosedPerimeter(
+  private static (Curve? Closed, List<LineCurve> Bridges, List<Curve> PerimeterCurves, double BoundaryTolerance) BuildClosedPerimeter(
     List<Curve> curves, Plane plane, double tol, List<string> log)
   {
     var bridges = new List<LineCurve>();
@@ -321,12 +325,13 @@ public sealed class vPart : Command
 
     // Single closed curve → nothing to do
     if (curves.Count == 1 && curves[0].IsClosed)
-      return (curves[0].DuplicateCurve(), bridges, workingCurves);
+      return (curves[0].DuplicateCurve(), bridges, workingCurves, tol);
 
     // Primary: CreateBooleanRegions handles curves that already meet or cross.
-    var boundary = TryCreateBooleanBoundary(workingCurves, plane, tol, "original", log);
+    var boundary = TryCreateBooleanBoundary(
+      workingCurves, plane, tol, "original", log, out var boundaryTolerance);
     if (boundary != null)
-      return (boundary, bridges, workingCurves);
+      return (boundary, bridges, workingCurves, boundaryTolerance);
 
     // If an open end stops short, extend it in its own end direction until it
     // reaches another selected perimeter curve. Only keep these working copies
@@ -334,9 +339,10 @@ public sealed class vPart : Command
     var extendedEnds = ExtendDisconnectedEndsToSelectedCurves(workingCurves, tol, log);
     if (extendedEnds > 0)
     {
-      boundary = TryCreateBooleanBoundary(workingCurves, plane, tol, "extended", log);
+      boundary = TryCreateBooleanBoundary(
+        workingCurves, plane, tol, "extended", log, out boundaryTolerance);
       if (boundary != null)
-        return (boundary, bridges, workingCurves);
+        return (boundary, bridges, workingCurves, boundaryTolerance);
     }
 
     log.Add("vPart[perim]: no closed Boolean region after end extension — trying endpoint join");
@@ -396,16 +402,16 @@ public sealed class vPart : Command
     log.Add($"vPart[perim]: join@tol×10 → {(joined == null ? "null" : $"{joined.Length} result(s), closed={joined.Any(c => c.IsClosed)}")} ");
     var joinedClosed = joined?.Where(c => c.IsClosed).OrderByDescending(ClosedCurveArea).FirstOrDefault();
     if (joinedClosed != null)
-      return (joinedClosed, bridges, workingCurves);
+      return (joinedClosed, bridges, workingCurves, tol * 10.0);
 
     var final = Curve.JoinCurves(pieces.ToArray(), tol * 100);
     log.Add($"vPart[perim]: join@tol×100 → {(final == null ? "null" : $"{final.Length} result(s), closed={final.Any(c => c.IsClosed)}")} ");
     var finalClosed = final?.Where(c => c.IsClosed).OrderByDescending(ClosedCurveArea).FirstOrDefault();
     if (finalClosed != null)
-      return (finalClosed, bridges, workingCurves);
+      return (finalClosed, bridges, workingCurves, tol * 100.0);
 
     log.Add("vPart[perim]: FAILED — endpoints not reachable or loop not closed");
-    return (null, bridges, workingCurves);
+    return (null, bridges, workingCurves, tol);
   }
 
   private static Curve? TryCreateBooleanBoundary(
@@ -413,8 +419,10 @@ public sealed class vPart : Command
     Plane plane,
     double tol,
     string stage,
-    List<string> log)
+    List<string> log,
+    out double usedTolerance)
   {
+    usedTolerance = tol;
     foreach (var multiplier in new[] { 1.0, 10.0, 100.0 })
     {
       var regionTolerance = tol * multiplier;
@@ -455,7 +463,10 @@ public sealed class vPart : Command
 
       log.Add($"vPart[perim]: {stage}@tol×{multiplier:G}: {regions.RegionCount} region(s), closed={bestBoundary != null}, area={Math.Max(0.0, bestArea):G6}");
       if (bestBoundary != null)
+      {
+        usedTolerance = regionTolerance;
         return bestBoundary;
+      }
     }
 
     return null;
@@ -666,13 +677,30 @@ public sealed class vPart : Command
   /// discarded.
   /// </summary>
   private static IEnumerable<(Curve Crv, ObjectAttributes Attr)> TrimToPerimeter(
-    List<(Curve Crv, ObjectAttributes Attr)> source, Curve boundary, double tol)
+    List<(Curve Crv, ObjectAttributes Attr)> source,
+    Curve boundary,
+    Plane plane,
+    double tol)
   {
     var crvs = source.Select(s => s.Crv).ToList();
+    var boundaryList = new List<Curve> { boundary };
+    var boundaryMatchTolerance = tol * 2.0;
     for (var si = 0; si < source.Count; si++)
     {
       var (crv, attr) = source[si];
       var splitParams  = new SortedSet<double>();
+      var keptCount = 0;
+      var parameterTolerance = Math.Max(RhinoMath.ZeroTolerance, tol * 0.1);
+
+      void AddSplitParameter(double parameter)
+      {
+        if (parameter <= crv.Domain.T0 + parameterTolerance
+            || parameter >= crv.Domain.T1 - parameterTolerance)
+          return;
+
+        splitParams.Add(parameter);
+      }
+
       for (var oi = 0; oi < crvs.Count; oi++)
       {
         if (oi == si) continue;
@@ -680,10 +708,18 @@ public sealed class vPart : Command
         if (events == null) continue;
         foreach (var ev in events)
         {
-          if (ev.IsOverlap) { splitParams.Add(ev.OverlapA.T0); splitParams.Add(ev.OverlapA.T1); }
-          else               splitParams.Add(ev.ParameterA);
+          if (ev.IsOverlap) { AddSplitParameter(ev.OverlapA.T0); AddSplitParameter(ev.OverlapA.T1); }
+          else               AddSplitParameter(ev.ParameterA);
         }
       }
+
+      var boundaryEvents = Intersection.CurveCurve(crv, boundary, tol, tol);
+      if (boundaryEvents != null)
+        foreach (var ev in boundaryEvents)
+        {
+          if (ev.IsOverlap) { AddSplitParameter(ev.OverlapA.T0); AddSplitParameter(ev.OverlapA.T1); }
+          else               AddSplitParameter(ev.ParameterA);
+        }
 
       if (splitParams.Count == 0)
       {
@@ -692,8 +728,11 @@ public sealed class vPart : Command
         // selected interior curves — they were in the user's selection so they
         // should appear in the output).
         var mid = crv.PointAtNormalizedLength(0.5);
-        if (IsOnCurve(mid, boundary, tol * 10) || IsInsideOrOn(mid, new List<Curve> { boundary }, Plane.WorldXY, tol))
+        if (IsOnCurve(mid, boundary, boundaryMatchTolerance) || IsInsideOrOn(mid, boundaryList, plane, tol))
+        {
           yield return (crv.DuplicateCurve(), attr);
+          keptCount++;
+        }
       }
       else
       {
@@ -702,10 +741,18 @@ public sealed class vPart : Command
         foreach (var seg in segs)
         {
           if (seg.GetLength() < tol) continue;
-          if (IsOnCurve(seg.PointAtNormalizedLength(0.5), boundary, tol * 10))
+          var mid = seg.PointAtNormalizedLength(0.5);
+          if (IsOnCurve(mid, boundary, boundaryMatchTolerance)
+              || IsInsideOrOn(mid, boundaryList, plane, tol))
+          {
             yield return (seg, attr);
+            keptCount++;
+          }
         }
       }
+
+
+      L($"trim source {si}: splitParams={splitParams.Count} kept={keptCount} length={crv.GetLength():G6}");
     }
   }
 
