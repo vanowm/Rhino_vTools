@@ -1133,6 +1133,25 @@ public sealed class vFacing : Command
     var side2OffsetDistance = side2Point.DistanceTo(offset2Point);
     var side2JunctionDistance = DistanceToCurve(offset, side2.PointAtStart);
 
+    if (!side1.ClosestPoint(side1Point, out var side1AtContact) ||
+        !side2.ClosestPoint(side2Point, out var side2AtContact))
+    {
+      failure = "could not locate closest points on the sides";
+      return false;
+    }
+
+    if (!(side1AtContact > side1.Domain.T0))
+    {
+      failure = "side1 contact is at its original base junction";
+      return false;
+    }
+
+    if (!(side2AtContact > side2.Domain.T0))
+    {
+      failure = "side2 contact is at its original base junction";
+      return false;
+    }
+
     if (!(side1OffsetDistance < side1JunctionDistance))
     {
       failure =
@@ -1149,13 +1168,6 @@ public sealed class vFacing : Command
       return false;
     }
 
-    if (!side1.ClosestPoint(side1Point, out var side1AtContact) ||
-        !side2.ClosestPoint(side2Point, out var side2AtContact))
-    {
-      failure = "could not locate closest points on the sides";
-      return false;
-    }
-
     side1Point = side1.PointAt((side1.Domain.T0 + side1AtContact) / 2.0);
     side2Point = side2.PointAt((side2.Domain.T0 + side2AtContact) / 2.0);
     offset1Point = offset.PointAt((offsetAtSide1 + offsetAtMiddle) / 2.0);
@@ -1164,6 +1176,7 @@ public sealed class vFacing : Command
     Log.Write("vFacing",
       $"  closest points offsetParameters=" +
       $"[{offsetAtSide1:F6}, {offsetAtMiddle:F6}, {offsetAtSide2:F6}] " +
+      $"sideParameters=[{side1AtContact:F6},{side2AtContact:F6}] " +
       $"side1Distances=[contact:{side1OffsetDistance:F6},junction:{side1JunctionDistance:F6}] " +
       $"side2Distances=[contact:{side2OffsetDistance:F6},junction:{side2JunctionDistance:F6}]");
     return true;
