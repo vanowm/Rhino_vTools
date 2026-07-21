@@ -837,43 +837,39 @@ public sealed class vFacing : Command
 
     OrientSides(ref baseJoined, ref s1Joined, ref s2Joined, tol);
 
+    var extLen = Math.Max(baseJoined.GetLength(), s1Joined.GetLength() + s2Joined.GetLength()) + size * 10;
+    var baseExt = TryExtend(baseJoined, CurveEnd.Both, extLen) ?? baseJoined.DuplicateCurve();
     var sideCenter  = (s1Joined.PointAtEnd + s2Joined.PointAtEnd) / 2.0;
-    var offsetCurve = OffsetTowardPoint(baseJoined, size, sideCenter, tol, cplane);
+    var offsetCurve = OffsetTowardPoint(baseExt, size, sideCenter, tol, cplane);
     if (offsetCurve == null)
     {
       RhinoApp.WriteLine("vFacing: could not offset base curve.");
       return false;
     }
 
-    var extLen = Math.Max(baseJoined.GetLength(), s1Joined.GetLength() + s2Joined.GetLength()) + size * 10;
     var s1Ext  = TryExtend(s1Joined,    CurveEnd.End,  extLen) ?? s1Joined.DuplicateCurve();
     var s2Ext  = TryExtend(s2Joined,    CurveEnd.End,  extLen) ?? s2Joined.DuplicateCurve();
-    var offExt = TryExtend(offsetCurve, CurveEnd.Both, extLen) ?? offsetCurve.DuplicateCurve();
 
-    double t1s1, t1off, t2s2, t2off;
-    var ev1 = Intersection.CurveCurve(s1Ext, offExt, tol, tol);
-    if (ev1 != null && ev1.Count > 0)
-      (t1s1, t1off) = (ev1[0].ParameterA, ev1[0].ParameterB);
-    else
-    {
-      if (!offExt.ClosestPoint(s1Joined.PointAtEnd, out t1off)) return false;
-      if (!s1Ext.ClosestPoint(offExt.PointAt(t1off), out t1s1)) return false;
-    }
+    Log.Write("vFacing",
+      $"BuildFacingPieces size={size:F3} baseLen={baseJoined.GetLength():F3} " +
+      $"baseChord={baseJoined.PointAtStart.DistanceTo(baseJoined.PointAtEnd):F3} extLen={extLen:F3}");
 
-    var ev2 = Intersection.CurveCurve(s2Ext, offExt, tol, tol);
-    if (ev2 != null && ev2.Count > 0)
-      (t2s2, t2off) = (ev2[0].ParameterA, ev2[0].ParameterB);
-    else
+    var foundS1 = TryFirstForwardIntersection(s1Ext, offsetCurve, tol,
+      out var t1s1, out var t1off, out var s1HitCount);
+    var foundS2 = TryFirstForwardIntersection(s2Ext, offsetCurve, tol,
+      out var t2s2, out var t2off, out var s2HitCount);
+    if (!foundS1 || !foundS2)
     {
-      if (!offExt.ClosestPoint(s2Joined.PointAtEnd, out t2off)) return false;
-      if (!s2Ext.ClosestPoint(offExt.PointAt(t2off), out t2s2)) return false;
+      Log.Write("vFacing",
+        $"  offset intersection failed side1Hits={s1HitCount} side2Hits={s2HitCount}");
+      return false;
     }
 
     var s1Trimmed = s1Ext.Trim(s1Ext.Domain.Min, t1s1);
     var s2Trimmed = s2Ext.Trim(s2Ext.Domain.Min, t2s2);
     if (s1Trimmed == null || s2Trimmed == null) return false;
 
-    var offTrimmed = offExt.Trim(Math.Min(t1off, t2off), Math.Max(t1off, t2off));
+    var offTrimmed = offsetCurve.Trim(Math.Min(t1off, t2off), Math.Max(t1off, t2off));
     if (offTrimmed == null) return false;
 
     if (offTrimmed.PointAtStart.DistanceTo(s2Trimmed.PointAtEnd) >
@@ -882,6 +878,13 @@ public sealed class vFacing : Command
 
     var s1Rev = s1Trimmed.DuplicateCurve();
     s1Rev.Reverse();
+
+    Log.Write("vFacing",
+      $"  result side1Hits={s1HitCount} side2Hits={s2HitCount} " +
+      $"side1Span={s1Trimmed.GetLength():F3} side2Span={s2Trimmed.GetLength():F3} " +
+      $"clearance1={DistanceToCurve(baseExt, s1Trimmed.PointAtEnd):F3} " +
+      $"clearance2={DistanceToCurve(baseExt, s2Trimmed.PointAtEnd):F3} " +
+      $"offsetLen={offTrimmed.GetLength():F3}");
 
     // Output pieces are ready; set them now so they are always returned on success.
     outPieces = new List<(Curve, int)>
@@ -906,6 +909,43 @@ public sealed class vFacing : Command
     }
     // boundaryCurve may remain null; caller handles that gracefully.
     return true;
+  }
+
+  private static bool TryFirstForwardIntersection(
+    Curve side, Curve offset, double tol,
+    out double sideParameter, out double offsetParameter, out int hitCount)
+  {
+    sideParameter = offsetParameter = 0.0;
+    hitCount = 0;
+
+    var events = Intersection.CurveCurve(side, offset, tol, tol);
+    if (events == null || events.Count == 0)
+      return false;
+
+    hitCount = events.Count;
+    var bestParameter = double.MaxValue;
+    for (var i = 0; i < events.Count; i++)
+    {
+      var candidate = events[i];
+      var candidateSideParameter = candidate.ParameterA;
+      if (candidateSideParameter < side.Domain.Min ||
+          candidateSideParameter > side.Domain.Max ||
+          candidateSideParameter >= bestParameter)
+        continue;
+
+      bestParameter = candidateSideParameter;
+      sideParameter = candidateSideParameter;
+      offsetParameter = candidate.ParameterB;
+    }
+
+    return bestParameter < double.MaxValue;
+  }
+
+  private static double DistanceToCurve(Curve curve, Point3d point)
+  {
+    return curve.ClosestPoint(point, out var parameter)
+      ? point.DistanceTo(curve.PointAt(parameter))
+      : double.NaN;
   }
 
   private static Curve? TryExtend(Curve crv, CurveEnd end, double length)

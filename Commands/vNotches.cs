@@ -3195,6 +3195,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
       // Notch layer dropdown
       _notchLayerDrop = new DropDown();
+      ConfigureLayerDropDown(_notchLayerDrop);
+      _notchLayerDrop.Load += (_, __) => ConfigureLayerDropDown(_notchLayerDrop);
       PopulateLayerDropDown(_notchLayerDrop, doc, s.NotchLayerName, true);
       _notchLayerRevision = LayerDropDownRevision(doc, s.NotchLayerName, true);
       _notchLayerDrop.SelectedIndexChanged += (_, __) =>
@@ -3269,6 +3271,8 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
       { if (_suppress) return; s.LabelSideFlip = _sideFlipCheck.Checked == true; Redraw(); Persist(); };
 
       _labelLayerDrop = new DropDown();
+      ConfigureLayerDropDown(_labelLayerDrop);
+      _labelLayerDrop.Load += (_, __) => ConfigureLayerDropDown(_labelLayerDrop);
       PopulateLayerDropDown(_labelLayerDrop, doc, s.LabelLayerName, false);
       _labelLayerRevision = LayerDropDownRevision(doc, s.LabelLayerName, false);
       _labelLayerDrop.SelectedIndexChanged += (_, __) =>
@@ -4522,6 +4526,26 @@ static void UpdateStaticDefaultsFromSession(NotchSession s)
 
       PopulateLayerDropDown(drop, doc, currentName, includeCurrentSpecial);
       return revision;
+    }
+
+    static void ConfigureLayerDropDown(DropDown drop)
+    {
+      if (drop.ControlObject is not System.Windows.Controls.ComboBox combo)
+        return;
+
+      System.Windows.Controls.VirtualizingPanel.SetIsVirtualizing(combo, true);
+      System.Windows.Controls.VirtualizingPanel.SetVirtualizationMode(
+        combo, System.Windows.Controls.VirtualizationMode.Recycling);
+      System.Windows.Controls.ScrollViewer.SetCanContentScroll(combo, true);
+
+      var itemPanel = new System.Windows.FrameworkElementFactory(
+        typeof(System.Windows.Controls.VirtualizingStackPanel));
+      itemPanel.SetValue(
+        System.Windows.Controls.VirtualizingPanel.IsVirtualizingProperty, true);
+      itemPanel.SetValue(
+        System.Windows.Controls.VirtualizingPanel.VirtualizationModeProperty,
+        System.Windows.Controls.VirtualizationMode.Recycling);
+      combo.ItemsPanel = new System.Windows.Controls.ItemsPanelTemplate(itemPanel);
     }
 
     static void PopulateLayerDropDown(DropDown drop, RhinoDoc doc, string currentName, bool includeCurrentSpecial)
