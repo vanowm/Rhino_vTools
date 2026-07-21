@@ -329,6 +329,20 @@ public sealed class vTextAligned : Command
       {
         if (ApplySettingsToTextObject(doc, activeTextId.Value, effTextPlace, effHeightPlace, plane))
         {
+          var activeTangent = curveToUse.TangentAt(t);
+          var activeNormal = upAxis;
+          if (!activeNormal.Unitize()) activeNormal = Vector3d.ZAxis;
+          var activeSideBase = Vector3d.CrossProduct(activeNormal, activeTangent);
+          var activeCurvePoint = curveToUse.PointAt(t);
+          if (activeTangent.Unitize() && activeSideBase.Unitize())
+          {
+            var activeSide = primarySideSign < 0 ? -activeSideBase : activeSideBase;
+            double activeNormalDistance = Math.Abs(
+              Vector3d.Multiply(clickPoint - activeCurvePoint, activeSideBase));
+            CorrectStoredTextPlacement(
+              doc, activeTextId.Value, activeCurvePoint, activeSide,
+              _offset, activeNormalDistance, "active");
+          }
           doc.Views.Redraw();
 
           var afterGeo = DupTextGeometry(doc, activeTextId.Value);
@@ -363,38 +377,53 @@ public sealed class vTextAligned : Command
         continue;
       }
 
-      if (_bothSides)
+      var tanVec = curveToUse.TangentAt(t);
+      var normVec = upAxis;
+      if (!normVec.Unitize()) normVec = Vector3d.ZAxis;
+      bool sideFrameValid = tanVec.Unitize();
+      var sideBaseVec = sideFrameValid
+        ? Vector3d.CrossProduct(normVec, tanVec)
+        : Vector3d.Unset;
+      sideFrameValid = sideFrameValid && sideBaseVec.Unitize();
+      var curvePoint = curveToUse.PointAt(t);
+      double normalDistance = sideFrameValid
+        ? Math.Abs(Vector3d.Multiply(clickPoint - curvePoint, sideBaseVec))
+        : 0.0;
+
+      if (sideFrameValid)
+      {
+        var primarySideVec = primarySideSign < 0 ? -sideBaseVec : sideBaseVec;
+        CorrectStoredTextPlacement(
+          doc, newId, curvePoint, primarySideVec,
+          _offset, normalDistance, "primary");
+      }
+
+      if (_bothSides && sideFrameValid)
       {
         // Compute the opposite-side cursor by mirroring across the curve along the side-base vector.
-        var tanVec = curveToUse.TangentAt(t);
-        var normVec = upAxis;
-        if (!normVec.Unitize()) normVec = Vector3d.ZAxis;
-        tanVec.Unitize();
-        var sideBaseVec = Vector3d.CrossProduct(normVec, tanVec);
-        if (sideBaseVec.Unitize())
+        double oppositeDistance = Math.Max(
+          normalDistance, Math.Max(placeSideDeadband, doc.ModelAbsoluteTolerance));
+        var oppCursor = curvePoint - sideBaseVec * (primarySideSign * oppositeDistance);
+        if (BuildPlaneFromCurve(doc, curveToUse, t, oppCursor, _offset,
+              effTextPlace, effHeightPlace,
+              NormalizeRotate(_rotate90 + 2), upAxis,
+              out var oppPlane, out var oppositeSideSign,
+              sideSignHint: 0, sideDeadband: 0.0,
+              previewTemplateTextId, logSolve: true,
+              boundsHint: getter.PreviewTextBounds))
         {
-          var curvePoint = curveToUse.PointAt(t);
-          double normalDistance = Math.Abs(
-            Vector3d.Multiply(clickPoint - curvePoint, sideBaseVec));
-          double oppositeDistance = Math.Max(
-            normalDistance, Math.Max(placeSideDeadband, doc.ModelAbsoluteTolerance));
-          var oppCursor = curvePoint - sideBaseVec * (primarySideSign * oppositeDistance);
-          if (BuildPlaneFromCurve(doc, curveToUse, t, oppCursor, _offset,
-                effTextPlace, effHeightPlace,
-                NormalizeRotate(_rotate90 + 2), upAxis,
-                out var oppPlane, out _, sideSignHint: 0, sideDeadband: 0.0,
-                previewTemplateTextId, logSolve: true,
-                boundsHint: getter.PreviewTextBounds))
+          var secEntity = BuildTextEntity(doc, effTextPlace, effHeightPlace, oppPlane);
+          var secAttributes = NewTextAttributes(doc, activeCurveId);
+          var secId = doc.Objects.AddText(secEntity, secAttributes);
+          if (secId != Guid.Empty)
           {
-            var secEntity = BuildTextEntity(doc, effTextPlace, effHeightPlace, oppPlane);
-            var secAttributes = NewTextAttributes(doc, activeCurveId);
-            var secId = doc.Objects.AddText(secEntity, secAttributes);
-            if (secId != Guid.Empty)
-            {
-              var secGeo = DupTextGeometry(doc, secId);
-              if (secGeo != null)
-                undoStack.Push(TextAction.CreateAdd(secId, secGeo, secAttributes));
-            }
+            var oppositeSideVec = oppositeSideSign < 0 ? -sideBaseVec : sideBaseVec;
+            CorrectStoredTextPlacement(
+              doc, secId, curvePoint, oppositeSideVec,
+              _offset, normalDistance, "opposite");
+            var secGeo = DupTextGeometry(doc, secId);
+            if (secGeo != null)
+              undoStack.Push(TextAction.CreateAdd(secId, secGeo, secAttributes));
           }
         }
       }
@@ -874,6 +903,83 @@ public sealed class vTextAligned : Command
       return false;
 
     return true;
+  }
+
+  private static void CorrectStoredTextPlacement(
+    RhinoDoc doc,
+    Guid textId,
+    Point3d curvePoint,
+    Vector3d sideVector,
+    double offsetValue,
+    double freeCenterDistance,
+    string role)
+  {
+    if (doc.Objects.FindId(textId)?.Geometry is not TextEntity stored)
+      return;
+    var bounds = CenteredLocalTextBounds(stored);
+    if (!bounds.HasValue)
+      return;
+
+    var side = sideVector;
+    if (!side.Unitize())
+      return;
+
+    var (plane, minx, maxx, miny, maxy) = bounds.Value;
+    var xAxis = plane.XAxis;
+    var yAxis = plane.YAxis;
+    if (!xAxis.Unitize() || !yAxis.Unitize())
+      return;
+
+    double centerU = 0.5 * (minx + maxx);
+    double centerV = 0.5 * (miny + maxy);
+    double halfW = 0.5 * (maxx - minx);
+    double halfH = 0.5 * (maxy - miny);
+    double halfSpan =
+      Math.Abs(Vector3d.Multiply(side, xAxis)) * halfW +
+      Math.Abs(Vector3d.Multiply(side, yAxis)) * halfH;
+    bool fixedOffset = Math.Abs(offsetValue) > RhinoMath.ZeroTolerance;
+    double targetGap = fixedOffset ? Math.Abs(offsetValue) : 0.0;
+    double desiredCenterDistance = fixedOffset
+      ? targetGap + halfSpan
+      : Math.Max(0.0, freeCenterDistance);
+    var actualBoundsCenter = plane.PointAt(centerU, centerV);
+    double beforeGap = Vector3d.Multiply(actualBoundsCenter - curvePoint, side) - halfSpan;
+    var desiredBoundsCenter = curvePoint + side * desiredCenterDistance;
+    var correctedOrigin = desiredBoundsCenter - xAxis * centerU - yAxis * centerV;
+    double correction = plane.Origin.DistanceTo(correctedOrigin);
+
+    var corrected = stored.Duplicate() as TextEntity;
+    if (corrected == null)
+      return;
+    corrected.Plane = new Plane(correctedOrigin, xAxis, yAxis);
+    corrected.DrawForward = false;
+    if (!doc.Objects.Replace(textId, corrected))
+      return;
+
+    double afterGap = double.NaN;
+    double centerError = double.NaN;
+    if (doc.Objects.FindId(textId)?.Geometry is TextEntity finalText)
+    {
+      var finalBounds = CenteredLocalTextBounds(finalText);
+      if (finalBounds.HasValue)
+      {
+        var (finalPlane, finalMinX, finalMaxX, finalMinY, finalMaxY) = finalBounds.Value;
+        double finalCenterU = 0.5 * (finalMinX + finalMaxX);
+        double finalCenterV = 0.5 * (finalMinY + finalMaxY);
+        var finalCenter = finalPlane.PointAt(finalCenterU, finalCenterV);
+        double finalHalfW = 0.5 * (finalMaxX - finalMinX);
+        double finalHalfH = 0.5 * (finalMaxY - finalMinY);
+        double finalHalfSpan =
+          Math.Abs(Vector3d.Multiply(side, finalPlane.XAxis)) * finalHalfW +
+          Math.Abs(Vector3d.Multiply(side, finalPlane.YAxis)) * finalHalfH;
+        afterGap = Vector3d.Multiply(finalCenter - curvePoint, side) - finalHalfSpan;
+        centerError = finalCenter.DistanceTo(desiredBoundsCenter);
+      }
+    }
+
+    Log.Write("vTextAligned",
+      $"stored {role} beforeGap={beforeGap:G9} afterGap={afterGap:G9} " +
+      $"targetGap={targetGap:G9} correction={correction:G9} centerError={centerError:G9}");
   }
 
   private static bool RestoreTextGeometry(RhinoDoc doc, Guid textId, TextEntity snapshot)
