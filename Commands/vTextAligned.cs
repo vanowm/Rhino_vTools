@@ -318,7 +318,8 @@ public sealed class vTextAligned : Command
             effTextPlace, effHeightPlace, _rotate90, upAxis,
             out var plane, out var primarySideSign,
             sideSignHint: placeSideSign, sideDeadband: placeSideDeadband,
-            previewTemplateTextId, logSolve: true))
+            previewTemplateTextId, logSolve: true,
+            boundsHint: getter.PreviewTextBounds))
       {
         RhinoApp.WriteLine("vTextAligned: could not compute text plane.");
         continue;
@@ -353,7 +354,7 @@ public sealed class vTextAligned : Command
         continue;
       }
 
-      var entity = BuildTextEntity(doc, _text, _height, plane);
+      var entity = BuildTextEntity(doc, effTextPlace, effHeightPlace, plane);
       var newAttributes = NewTextAttributes(doc, activeCurveId);
       var newId = doc.Objects.AddText(entity, newAttributes);
       if (newId == Guid.Empty)
@@ -361,8 +362,6 @@ public sealed class vTextAligned : Command
         RhinoApp.WriteLine("vTextAligned: failed to add text.");
         continue;
       }
-
-      _ = ForceTextObjectHeight(doc, newId, _height);
 
       if (_bothSides)
       {
@@ -375,18 +374,23 @@ public sealed class vTextAligned : Command
         if (sideBaseVec.Unitize())
         {
           var curvePoint = curveToUse.PointAt(t);
-          var oppCursor = curvePoint - sideBaseVec * (primarySideSign * 1000.0);
-          if (BuildPlaneFromCurve(doc, curveToUse, t, oppCursor, _offset, _text, _height,
+          double normalDistance = Math.Abs(
+            Vector3d.Multiply(clickPoint - curvePoint, sideBaseVec));
+          double oppositeDistance = Math.Max(
+            normalDistance, Math.Max(placeSideDeadband, doc.ModelAbsoluteTolerance));
+          var oppCursor = curvePoint - sideBaseVec * (primarySideSign * oppositeDistance);
+          if (BuildPlaneFromCurve(doc, curveToUse, t, oppCursor, _offset,
+                effTextPlace, effHeightPlace,
                 NormalizeRotate(_rotate90 + 2), upAxis,
                 out var oppPlane, out _, sideSignHint: 0, sideDeadband: 0.0,
-                previewTemplateTextId, logSolve: true))
+                previewTemplateTextId, logSolve: true,
+                boundsHint: getter.PreviewTextBounds))
           {
-            var secEntity = BuildTextEntity(doc, _text, _height, oppPlane);
+            var secEntity = BuildTextEntity(doc, effTextPlace, effHeightPlace, oppPlane);
             var secAttributes = NewTextAttributes(doc, activeCurveId);
             var secId = doc.Objects.AddText(secEntity, secAttributes);
             if (secId != Guid.Empty)
             {
-              _ = ForceTextObjectHeight(doc, secId, _height);
               var secGeo = DupTextGeometry(doc, secId);
               if (secGeo != null)
                 undoStack.Push(TextAction.CreateAdd(secId, secGeo, secAttributes));
@@ -527,38 +531,60 @@ public sealed class vTextAligned : Command
     return curveHit.HasValue && curveHit.Value.Distance <= snapTolerance;
   }
 
-  private static TextHit? FindClosestTextHit(RhinoDoc doc, IReadOnlyList<Guid> textIds, Point3d point, double toleranceScale, bool requireInside)
+  private static List<TextPickCacheItem> BuildTextPickCache(
+    RhinoDoc doc, IReadOnlyList<Guid> textIds)
+  {
+    var cache = new List<TextPickCacheItem>();
+    foreach (var id in textIds)
+    {
+      if (doc.Objects.FindId(id)?.Geometry is not TextEntity text)
+        continue;
+      var bounds = CenteredLocalTextBounds(text);
+      if (!bounds.HasValue)
+        continue;
+      var (plane, minx, maxx, miny, maxy) = bounds.Value;
+      cache.Add(new TextPickCacheItem(
+        id, plane, minx, maxx, miny, maxy,
+        TextEntityPickTolerance(doc, text, 1.0)));
+    }
+    return cache;
+  }
+
+  private static TextHit? FindClosestTextHit(
+    IReadOnlyList<TextPickCacheItem> cache, Point3d point,
+    double toleranceScale, bool requireInside)
   {
     Guid? bestId = null;
     double? bestDistance = null;
 
-    foreach (var id in textIds)
+    foreach (var item in cache)
     {
-      var obj = doc.Objects.FindId(id);
-      if (obj?.Geometry is not TextEntity text)
+      if (!item.Plane.ClosestParameter(point, out var u, out var v))
         continue;
 
-      var metrics = TextEntityPickMetrics(text, point);
-      if (metrics == null)
-        continue;
-
-      var tol = TextEntityPickTolerance(doc, text, toleranceScale);
+      bool insideU = u >= item.MinX && u <= item.MaxX;
+      bool insideV = v >= item.MinY && v <= item.MaxY;
+      bool inside = insideU && insideV;
+      double du = insideU ? 0.0 : Math.Min(Math.Abs(u - item.MinX), Math.Abs(u - item.MaxX));
+      double dv = insideV ? 0.0 : Math.Min(Math.Abs(v - item.MinY), Math.Abs(v - item.MaxY));
+      double planarOutside = Math.Sqrt((du * du) + (dv * dv));
+      double tol = item.BaseTolerance * Math.Max(toleranceScale, 0.1);
 
       if (requireInside)
       {
-        if (!metrics.Value.Inside)
+        if (!inside)
           continue;
       }
-      else if (!metrics.Value.Inside && metrics.Value.PlanarOutside > tol)
+      else if (!inside && planarOutside > tol)
       {
         continue;
       }
 
-      var dist = metrics.Value.PlanarOutside;
+      var dist = planarOutside;
       if (bestDistance == null || dist < bestDistance.Value)
       {
         bestDistance = dist;
-        bestId = id;
+        bestId = item.ObjectId;
       }
     }
 
@@ -585,31 +611,6 @@ public sealed class vTextAligned : Command
 
     var margin = Math.Max(tol * 2.0, curveSnapTolerance * 0.15);
     return textDist < (curveDist - margin);
-  }
-
-  private static PickMetrics? TextEntityPickMetrics(TextEntity textEntity, Point3d point)
-  {
-    var bounds = CenteredLocalTextBounds(textEntity);
-    if (bounds == null)
-      return null;
-
-    var (plane, minx, maxx, miny, maxy) = bounds.Value;
-
-    if (!plane.ClosestParameter(point, out var u, out var v))
-      return null;
-
-    var insideU = u >= minx && u <= maxx;
-    var insideV = v >= miny && v <= maxy;
-    var inside = insideU && insideV;
-
-    var du = insideU ? 0.0 : Math.Min(Math.Abs(u - minx), Math.Abs(u - maxx));
-    var dv = insideV ? 0.0 : Math.Min(Math.Abs(v - miny), Math.Abs(v - maxy));
-    var planarOutside = Math.Sqrt((du * du) + (dv * dv));
-
-    var planeDist = Math.Abs(plane.DistanceTo(point));
-    var total = Math.Sqrt((planarOutside * planarOutside) + (planeDist * planeDist));
-
-    return new PickMetrics(inside, total, planarOutside, planeDist);
   }
 
   private static double TextEntityPickTolerance(RhinoDoc doc, TextEntity textEntity, double toleranceScale)
@@ -673,6 +674,18 @@ public sealed class vTextAligned : Command
     }
   }
 
+  private static LocalTextBounds? MeasureLocalTextBounds(
+    RhinoDoc doc, string textValue, double heightValue, Guid? templateTextId)
+  {
+    var probe = BuildProbeTextEntity(
+      doc, textValue, heightValue, Plane.WorldXY, templateTextId);
+    var bounds = CenteredLocalTextBounds(probe);
+    if (!bounds.HasValue)
+      return null;
+    var (_, minx, maxx, miny, maxy) = bounds.Value;
+    return new LocalTextBounds(minx, maxx, miny, maxy);
+  }
+
   private static bool BuildPlaneFromCurve(
     RhinoDoc doc,
     Curve curve,
@@ -688,7 +701,8 @@ public sealed class vTextAligned : Command
     int sideSignHint,
     double sideDeadband,
     Guid? templateTextId,
-    bool logSolve = false)
+    bool logSolve = false,
+    LocalTextBounds? boundsHint = null)
   {
     plane = Plane.Unset;
     sideSign = 0;
@@ -748,74 +762,45 @@ public sealed class vTextAligned : Command
     }
 
     var offsetNumber = offsetValue;
+    bool fixedOffset = Math.Abs(offsetNumber) > RhinoMath.ZeroTolerance;
+    double targetGap = fixedOffset ? Math.Abs(offsetNumber) : 0.0;
+    var bounds = boundsHint ?? MeasureLocalTextBounds(
+      doc, textValue, Math.Max(heightValue, RhinoMath.ZeroTolerance), templateTextId);
     Point3d origin;
 
-    if (Math.Abs(offsetNumber) <= RhinoMath.ZeroTolerance)
+    if (bounds.HasValue)
     {
-      origin = cursorPoint;
-    }
-    else
-    {
-      var targetGap = Math.Abs(offsetNumber);
-      origin = curvePoint + sideVec * targetGap;
-
-      var textHeight = Math.Max(heightValue, RhinoMath.ZeroTolerance);
-      var solveTolerance = Math.Max(
-        RhinoMath.ZeroTolerance * 10.0,
-        Math.Max(1.0, Math.Max(textHeight, targetGap)) * 1e-9);
+      var metrics = bounds.Value;
+      double centerU = 0.5 * (metrics.MinX + metrics.MaxX);
+      double centerV = 0.5 * (metrics.MinY + metrics.MaxY);
+      double halfW = 0.5 * (metrics.MaxX - metrics.MinX);
+      double halfH = 0.5 * (metrics.MaxY - metrics.MinY);
+      double du = Math.Abs(Vector3d.Multiply(sideVec, xAxis));
+      double dv = Math.Abs(Vector3d.Multiply(sideVec, yAxis));
+      double halfSpan = (du * halfW) + (dv * halfH);
+      double centerDistance = fixedOffset
+        ? targetGap + halfSpan
+        : Math.Abs(sideMetric);
+      var desiredBoundsCenter = curvePoint + sideVec * centerDistance;
+      origin = desiredBoundsCenter - xAxis * centerU - yAxis * centerV;
 
       if (logSolve)
       {
+        double finalGap = centerDistance - halfSpan;
         Log.Write("vTextAligned",
-          $"solve begin textLength={textValue.Length} height={textHeight:G9} targetGap={targetGap:G9} " +
-          $"rotate={quarterTurns * 90} side={resolvedSideSign:G0} template={templateTextId?.ToString() ?? "none"}");
+          $"solve cached textLength={textValue.Length} height={heightValue:G9} " +
+          $"targetGap={targetGap:G9} finalGap={finalGap:G9} " +
+          $"rotate={quarterTurns * 90} side={resolvedSideSign:G0} " +
+          $"halfW={halfW:G9} halfH={halfH:G9} du={du:G9} dv={dv:G9}");
       }
-
-      try
-      {
-        for (var i = 0; i < 3; i++)
-        {
-          var probePlane = new Plane(origin, xAxis, yAxis);
-          var probe = BuildProbeTextEntity(doc, textValue, textHeight, probePlane, templateTextId);
-
-          var details = SideRayHitOnTextRect(curvePoint, sideVec, probe, returnDetails: true, clampNonnegative: false);
-          if (details == null)
-            break;
-
-          var measuredRaw = details.Value.Gap;
-          var delta = targetGap - measuredRaw;
-          if (logSolve)
-          {
-            Log.Write("vTextAligned",
-              $"solve pass={i + 1} gap={measuredRaw:G9} delta={delta:G9} " +
-              $"halfW={details.Value.HalfW:G9} halfH={details.Value.HalfH:G9} " +
-              $"du={details.Value.Du:G9} dv={details.Value.Dv:G9} " +
-              $"halfSpan={details.Value.HalfSize:G9} centerDistance={details.Value.CenterDistance:G9}");
-          }
-
-          if (Math.Abs(delta) <= solveTolerance)
-            break;
-
-          origin += sideVec * delta;
-        }
-
-        if (logSolve)
-        {
-          var finalPlane = new Plane(origin, xAxis, yAxis);
-          var finalProbe = BuildProbeTextEntity(doc, textValue, textHeight, finalPlane, templateTextId);
-          var finalDetails = SideRayHitOnTextRect(
-            curvePoint, sideVec, finalProbe, returnDetails: true, clampNonnegative: false);
-          Log.Write("vTextAligned",
-            finalDetails.HasValue
-              ? $"solve end finalGap={finalDetails.Value.Gap:G9} error={targetGap - finalDetails.Value.Gap:G9}"
-              : "solve end no final bounds");
-        }
-      }
-      catch (Exception ex)
-      {
-        if (logSolve)
-          Log.Write("vTextAligned", $"solve failed {ex.GetType().Name}: {ex.Message}");
-      }
+    }
+    else
+    {
+      origin = fixedOffset
+        ? curvePoint + sideVec * targetGap
+        : cursorPoint;
+      if (logSolve)
+        Log.Write("vTextAligned", "solve fallback: no text bounds");
     }
 
     plane = new Plane(origin, xAxis, yAxis);
@@ -855,42 +840,6 @@ public sealed class vTextAligned : Command
     }
 
     return BuildTextEntity(doc, textValue, heightValue, plane);
-  }
-
-  private static SideRayResult? SideRayHitOnTextRect(Point3d curvePoint, Vector3d sideVec, TextEntity textEntity, bool returnDetails, bool clampNonnegative)
-  {
-    var sv = sideVec;
-    if (!sv.Unitize())
-      return null;
-
-    var bounds = CenteredLocalTextBounds(textEntity);
-    if (bounds == null)
-      return null;
-
-    var (plane, minx, maxx, miny, maxy) = bounds.Value;
-
-    var ux = plane.XAxis;
-    var uy = plane.YAxis;
-    if (!ux.Unitize() || !uy.Unitize())
-      return null;
-
-    var centerU = 0.5 * (minx + maxx);
-    var centerV = 0.5 * (miny + maxy);
-    var boundsCenter = plane.PointAt(centerU, centerV);
-    var centerDist = Vector3d.Multiply(boundsCenter - curvePoint, sv);
-    var halfW = 0.5 * (maxx - minx);
-    var halfH = 0.5 * (maxy - miny);
-    var du = Math.Abs(Vector3d.Multiply(sv, ux));
-    var dv = Math.Abs(Vector3d.Multiply(sv, uy));
-    var halfSpan = (du * halfW) + (dv * halfH);
-
-    var rawGap = centerDist - halfSpan;
-    var gap = rawGap;
-    if (clampNonnegative && gap < 0.0)
-      gap = 0.0;
-
-    var hit = curvePoint + (sv * gap);
-    return new SideRayResult(hit, gap, halfW, halfH, du, dv, halfSpan, centerDist, rawGap);
   }
 
   private static bool SetTextEntityValue(TextEntity textEntity, string value)
@@ -991,20 +940,6 @@ public sealed class vTextAligned : Command
     te.SetOverrideDimStyle(overrideStyle);
   }
 
-  private static bool ForceTextObjectHeight(RhinoDoc doc, Guid objectId, double height)
-  {
-    var obj = doc.Objects.FindId(objectId);
-    if (obj?.Geometry is not TextEntity te)
-      return false;
-
-    var dup = te.Duplicate() as TextEntity;
-    if (dup == null)
-      return false;
-
-    ApplyHeightOverride(doc, dup, height);
-    return doc.Objects.Replace(objectId, dup);
-  }
-
   private static bool ApplyUndoAction(RhinoDoc doc, TextAction action, double currentHeight)
   {
     if (action.Kind == TextActionKind.Add)
@@ -1087,18 +1022,20 @@ public sealed class vTextAligned : Command
 
   private readonly record struct TextHit(Guid ObjectId, double Distance);
 
-  private readonly record struct PickMetrics(bool Inside, double TotalDistance, double PlanarOutside, double PlaneDistance);
+  private readonly record struct TextPickCacheItem(
+    Guid ObjectId,
+    Plane Plane,
+    double MinX,
+    double MaxX,
+    double MinY,
+    double MaxY,
+    double BaseTolerance);
 
-  private readonly record struct SideRayResult(
-    Point3d Hit,
-    double Gap,
-    double HalfW,
-    double HalfH,
-    double Du,
-    double Dv,
-    double HalfSize,
-    double CenterDistance,
-    double RawGap);
+  private readonly record struct LocalTextBounds(
+    double MinX,
+    double MaxX,
+    double MinY,
+    double MaxY);
 
   private enum TextActionKind
   {
@@ -1147,7 +1084,8 @@ public sealed class vTextAligned : Command
     private readonly int _rotate90;
 
     private readonly List<CurveObjectCacheItem> _curveCache;
-    private readonly List<Guid> _textIds;
+    private readonly List<TextPickCacheItem> _textPickCache;
+    private readonly TextEntity _previewTextTemplate;
 
     private readonly Guid? _activeCurveId;
     private readonly Guid? _activeTextId;
@@ -1155,6 +1093,7 @@ public sealed class vTextAligned : Command
     private readonly bool _bothSides;
 
     private int _lastSideSign;
+    private Point3d _lastStatePoint = Point3d.Unset;
 
     public MainPointGetter(
       RhinoDoc doc,
@@ -1176,7 +1115,7 @@ public sealed class vTextAligned : Command
       _rotate90 = rotate90;
 
       _curveCache = curveCache;
-      _textIds = textIds;
+      _textPickCache = BuildTextPickCache(doc, textIds);
       _activeCurveId = activeCurveId;
       _activeTextId = activeTextId;
       _curveIsLocked = curveIsLocked;
@@ -1185,6 +1124,15 @@ public sealed class vTextAligned : Command
       SnapTolerance = Math.Max(doc.ModelAbsoluteTolerance * 3.0, 0.25);
       HoverSnapTolerance = SnapTolerance;
       PreviewTemplateTextId = _activeTextId;
+      _previewTextTemplate = BuildProbeTextEntity(
+        doc, text, height, Plane.WorldXY, PreviewTemplateTextId);
+      PreviewTextBounds = null;
+      var previewBounds = CenteredLocalTextBounds(_previewTextTemplate);
+      if (previewBounds.HasValue)
+      {
+        var (_, minx, maxx, miny, maxy) = previewBounds.Value;
+        PreviewTextBounds = new LocalTextBounds(minx, maxx, miny, maxy);
+      }
     }
 
     public CurveHit? HoverCurve { get; private set; }
@@ -1193,6 +1141,7 @@ public sealed class vTextAligned : Command
     public Plane? PreviewPlane { get; private set; }
     public Plane? PreviewPlaneOpp { get; private set; }
     public Guid? PreviewTemplateTextId { get; }
+    public LocalTextBounds? PreviewTextBounds { get; }
     public Point3d? LastCursorPoint { get; private set; }
     public int LastSideSign => _lastSideSign;
 
@@ -1212,10 +1161,17 @@ public sealed class vTextAligned : Command
 
     private void UpdateState(Point3d point)
     {
+      if (_lastStatePoint.IsValid &&
+          _lastStatePoint.DistanceToSquared(point) <= RhinoMath.ZeroTolerance * RhinoMath.ZeroTolerance)
+        return;
+      _lastStatePoint = point;
       LastCursorPoint = point;
 
-      var curveHit = FindClosestCurveHit(_curveCache, point);
-      var textHit = FindClosestTextHit(_doc, _textIds, point, toleranceScale: 1.25, requireInside: false);
+      var curveHit = _curveIsLocked
+        ? null
+        : FindClosestCurveHit(_curveCache, point);
+      var textHit = FindClosestTextHit(
+        _textPickCache, point, toleranceScale: 1.25, requireInside: false);
       var snappedCurveHit = IsCurveSnapped(curveHit, HoverSnapTolerance) ? curveHit : null;
 
       HoverCurve = snappedCurveHit;
@@ -1259,7 +1215,8 @@ public sealed class vTextAligned : Command
             out var sideSign,
             _lastSideSign,
             sideDeadband,
-            PreviewTemplateTextId))
+            PreviewTemplateTextId,
+            boundsHint: PreviewTextBounds))
       {
         PreviewPlane = plane;
         if (sideSign is 1 or -1)
@@ -1275,13 +1232,16 @@ public sealed class vTextAligned : Command
           if (sideBaseVec.Unitize())
           {
             var curvePoint = curveToUse.PointAt(t);
-            var oppCursor = curvePoint - sideBaseVec * (sideSign * 1000.0);
+            double normalDistance = Math.Abs(Vector3d.Multiply(point - curvePoint, sideBaseVec));
+            double oppositeDistance = Math.Max(normalDistance, sideDeadband);
+            var oppCursor = curvePoint - sideBaseVec * (sideSign * oppositeDistance);
             if (BuildPlaneFromCurve(
                   _doc, curveToUse, t, oppCursor,
                   _offset, _text, _height, NormalizeRotate(_rotate90 + 2),
                   upAxis, out var oppPlane, out _,
                   sideSignHint: 0, sideDeadband: 0.0,
-                  PreviewTemplateTextId))
+                  PreviewTemplateTextId,
+                  boundsHint: PreviewTextBounds))
             {
               PreviewPlaneOpp = oppPlane;
             }
@@ -1297,13 +1257,6 @@ public sealed class vTextAligned : Command
       if (PreviewPlane.HasValue && _activeTextId.HasValue && _curveIsLocked)
       {
         _ = ApplySettingsToTextObject(_doc, _activeTextId.Value, _text, _height, PreviewPlane.Value);
-        try
-        {
-          _doc.Views.Redraw();
-        }
-        catch
-        {
-        }
       }
 
       base.OnMouseMove(e);
@@ -1334,10 +1287,10 @@ public sealed class vTextAligned : Command
         {
           try
           {
-            var bounds = CenteredLocalTextBounds(activeText);
+            var bounds = PreviewTextBounds;
             if (bounds.HasValue)
             {
-              var (_, minx, maxx, miny, maxy) = bounds.Value;
+              var (minx, maxx, miny, maxy) = bounds.Value;
               // Use the current-frame preview plane so the box stays in sync with
               // the floating cursor preview, not the one-frame-behind doc object.
               var boxPlane = PreviewPlane ?? activeText.Plane;
@@ -1386,7 +1339,9 @@ public sealed class vTextAligned : Command
 
     private TextEntity BuildPreviewText(Plane plane)
     {
-      var te = BuildTextEntity(_doc, _text, _height, plane);
+      var te = _previewTextTemplate.Duplicate() as TextEntity ??
+        BuildTextEntity(_doc, _text, _height, plane);
+      te.Plane = plane;
       try { te.DrawForward = false; } catch { }
       return te;
     }

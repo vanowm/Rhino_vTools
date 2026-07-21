@@ -1,4 +1,4 @@
-Tools  ·  v26.7.20.2040
+Tools  ·  v26.7.20.2127
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -490,6 +490,7 @@ Behavior:
     - `Height`: text height.
     - `Offset`: signed side offset from the curve to the true text bounds, including rotated and styled annotation bounds.
     - `Rotate`: rotates text orientation by 90 degrees each use.
+    - `BothSides`: previews and creates a mirrored text pair with both visible text bounds centered at the same curve position and offset equally from the curve.
     - Newly created text inherits every group membership from the locked curve; local redo preserves those groups.
 
 ### vTextFlip flow
