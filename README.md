@@ -1,4 +1,4 @@
-Tools  ·  v26.7.22.1100
+Tools  ·  v26.7.22.1133
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -29,7 +29,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vPointTrace](#vpointtrace-flow) *(26.4.30.1044)* — maps arc-length positions from a source curve onto a destination curve: pick points along the source and a corresponding point is placed on the destination at the same proportional arc-length position
   - [vRectangle](#vrectangle-flow) *(26.4.27.2259)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
-  - [vSetPt](#vsetpt-flow) *(26.5.28.1145)* — previews and aligns preselected control points or cursor-nearest endpoints of selected open curves using the built-in SetPt
+  - [vSetPt](#vsetpt-flow) *(26.5.28.1145)* — previews and aligns preselected on-curve edit-point grips or cursor-nearest endpoints of selected open curves using the built-in SetPt
   - [vSplit](#vsplit-flow) *(26.7.9.1647)* — interactively splits selected curves at picked real point markers with cyan remove preview and point snapping
   - [vSplitAtCorners](#vsplitatcorners-flow) *(26.4.27.2125)* — splits curves at detected corners with interactive per-corner toggle preview
   - [vTangent](#vtangent-flow) *(26.5.5.757)* — moves a curve rigidly so one or both endpoints align tangentially to selected driver curves
@@ -435,9 +435,9 @@ Behavior:
 
 ### vSetPt flow
 
-1. Select open curves to align. Preselected curves seed the editable selection; add or remove curves before pressing Enter. A preselected control point also seeds its owning curve and overrides endpoint detection for that curve. Closed curves are ignored.
-1. Cyan temporary curves preview the SetPt result: each preselected control point, or otherwise the endpoint nearest to the viewport cursor, moves to a common target that follows the cursor at the selected points' view depth. The chosen points and complete curve preview update continuously while the cursor moves.
-1. Control-point grips are enabled temporarily and the identified grips are selected automatically. Each curve's original control-point visibility is restored when SetPt finishes or is cancelled.
+1. Select open curves to align. Preselected curves seed the editable selection; add or remove curves before pressing Enter. A preselected on-curve edit-point grip also seeds its owning curve and overrides endpoint detection for that curve. Closed curves are ignored.
+1. Cyan temporary curves preview the SetPt result: each preselected edit point, or otherwise the endpoint nearest to the viewport cursor, moves to a common target that follows the cursor at the selected points' view depth. Edit-point previews rebuild the curve through the moved point so the curves meet at the target.
+1. Grips are enabled temporarily and the identified grips are selected automatically. Each curve's original grip visibility is restored when SetPt finishes or is cancelled.
 1. The built-in `-SetPt` command launches with `XSet=Yes YSet=Yes ZSet=Yes Alignment=World Copy=No`; click the target location to commit.
 1. Press Enter to repeat `vSetPt`.
 
