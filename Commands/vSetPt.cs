@@ -1,22 +1,28 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
 using Rhino;
 using Rhino.Commands;
+using Rhino.Display;
 using Rhino.DocObjects;
 using Rhino.Geometry;
+using Rhino.Input;
 using Rhino.Input.Custom;
+using Rhino.UI;
 
 namespace vTools.Commands;
 
 /// <summary>
-/// Automatically detects the closest-together endpoints of the selected
-/// open curves and forwards those control-point grips to the built-in
-/// -SetPt command, so the user only has to click the target location.
+/// Previews the result of moving the cursor-nearest endpoint control point of
+/// every selected open curve to a cursor-driven target, then forwards those
+/// grips to the built-in -SetPt command so the user can set the final target.
 ///
 /// Workflow:
-///   1. Select curves (or use pre-selection).
-///   2. The command finds which endpoint of each curve is nearest to the
-///      tightest cluster of endpoints across all selected curves.
+///   1. Select curves, starting with any pre-selected curves, and freely
+///      add or remove curves before accepting the selection.
+///   2. The command previews the curves with the cursor-nearest endpoint
+///      control points aligned at a target that follows the viewport cursor.
 ///   3. Grips are turned on and the identified endpoint grips are selected.
 ///   4. Control is transferred to -SetPt with the defaults
 ///      XSet=Yes YSet=Yes ZSet=Yes Alignment=World Copy=No.
@@ -52,21 +58,68 @@ public sealed class vSetPt : Command
     go.GeometryFilter  = ObjectType.Curve;
     go.GroupSelect     = true;
     go.SubObjectSelect = false;
-    go.GetMultiple(1, 0);
+    go.EnablePreSelect(true, true);
+    go.AlreadySelectedObjectSelect = true;
+    go.EnableClearObjectsOnEntry(false);
+    go.EnableUnselectObjectsOnExit(false);
+    go.DeselectAllBeforePostSelect = false;
+    go.AcceptNothing(true);
 
-    if (go.CommandResult() != Result.Success)
+    var preview = new EndpointPreviewConduit { Enabled = true };
+    var cursorTracker = new EndpointCursorCallback(doc, preview) { Enabled = true };
+    var preselectedWaitingForConfirmation = false;
+
+    EventHandler<RhinoObjectSelectionEventArgs> onSelectionChanged = (_, e) =>
     {
-      Log.Write(Tag, "selection cancelled");
-      return go.CommandResult();
+      if (e.Document == doc)
+        cursorTracker.RefreshFromSelection();
+    };
+
+    RhinoDoc.SelectObjects   += onSelectionChanged;
+    RhinoDoc.DeselectObjects += onSelectionChanged;
+    cursorTracker.InitializeFromCurrentCursor();
+
+    try
+    {
+      while (true)
+      {
+        var getResult = go.GetMultiple(1, 0);
+        cursorTracker.RefreshFromSelection();
+
+        if (go.CommandResult() != Result.Success)
+        {
+          Log.Write(Tag, "selection cancelled");
+          return go.CommandResult();
+        }
+
+        if (getResult == GetResult.Object &&
+            go.ObjectsWerePreselected &&
+            !preselectedWaitingForConfirmation)
+        {
+          preselectedWaitingForConfirmation = true;
+          go.EnablePreSelect(false, true);
+          continue;
+        }
+
+        if (getResult == GetResult.Object || getResult == GetResult.Nothing)
+          break;
+      }
+    }
+    finally
+    {
+      RhinoDoc.SelectObjects   -= onSelectionChanged;
+      RhinoDoc.DeselectObjects -= onSelectionChanged;
+      cursorTracker.Enabled = false;
+      preview.Enabled = false;
+      doc.Views.Redraw();
     }
 
-    // Collect open curves only — closed curves have no distinct endpoints.
     var curveData = new List<(Guid id, Curve c)>();
-    foreach (var objRef in go.Objects())
+    var seenIds = new HashSet<Guid>();
+    foreach (var obj in doc.Objects.GetSelectedObjects(false, false))
     {
-      var obj = doc.Objects.FindId(objRef.ObjectId);
-      if (obj?.Geometry is Curve c && !c.IsClosed)
-        curveData.Add((objRef.ObjectId, c));
+      if (obj?.Geometry is Curve c && !c.IsClosed && seenIds.Add(obj.Id))
+        curveData.Add((obj.Id, c));
     }
 
     Log.Write(Tag, $"  open curves: {curveData.Count}");
@@ -77,55 +130,18 @@ public sealed class vSetPt : Command
       return Result.Nothing;
     }
 
-    // Build all endpoint candidates: (curveIndex, isStart, position).
-    var eps = new List<(int idx, bool isStart, Point3d pt)>();
-    for (int i = 0; i < curveData.Count; i++)
-    {
-      var c = curveData[i].c;
-      eps.Add((i, true,  c.PointAtStart));
-      eps.Add((i, false, c.PointAtEnd));
-    }
-
-    // Find the globally closest pair of endpoints from different curves.
-    int bestA = -1, bestB = -1;
-    double bestDist = double.MaxValue;
-    for (int a = 0; a < eps.Count; a++)
-    for (int b = a + 1; b < eps.Count; b++)
-    {
-      if (eps[a].idx == eps[b].idx) continue; // same curve
-      var d = eps[a].pt.DistanceTo(eps[b].pt);
-      if (d < bestDist) { bestDist = d; bestA = a; bestB = b; }
-    }
-
-    if (bestA < 0)
-    {
-      RhinoApp.WriteLine("vSetPt: could not find a closest endpoint pair.");
-      return Result.Nothing;
-    }
-
-    // Centroid of the closest pair = the "meeting point".
-    var pA     = eps[bestA].pt;
-    var pB     = eps[bestB].pt;
-    var meetPt = pA + (pB - pA) * 0.5;
-
-    Log.Write(Tag,
-      $"  meet=({meetPt.X:F3},{meetPt.Y:F3},{meetPt.Z:F3}) gap={bestDist:G4}");
-
-    // For every selected open curve, pick the endpoint closer to the meeting
-    // point.  The user's selection is the explicit intent — no radius filter.
+    var cursorPicks = cursorTracker.SnapshotPicks();
+    var fallbackPicks = BuildClosestClusterPicks(curveData);
     var picks = new List<(Guid id, bool isStart)>();
     for (int i = 0; i < curveData.Count; i++)
     {
-      var c            = curveData[i].c;
-      var dStart       = meetPt.DistanceTo(c.PointAtStart);
-      var dEnd         = meetPt.DistanceTo(c.PointAtEnd);
-      bool chooseStart = dStart <= dEnd;
+      var id = curveData[i].id;
+      var chooseStart = cursorPicks.TryGetValue(id, out var previewPick)
+        ? previewPick
+        : fallbackPicks[id];
 
-      Log.Write(Tag,
-        $"  curve[{i}] dStart={dStart:G4} dEnd={dEnd:G4}" +
-        $" pick={( chooseStart ? "start" : "end" )}");
-
-      picks.Add((curveData[i].id, chooseStart));
+      Log.Write(Tag, $"  curve[{i}] cursor pick={(chooseStart ? "start" : "end")}");
+      picks.Add((id, chooseStart));
     }
 
     if (picks.Count == 0)
@@ -141,6 +157,202 @@ public sealed class vSetPt : Command
     _pendingIdleHandler = OnIdleLaunch;
     RhinoApp.Idle      += _pendingIdleHandler;
     return Result.Success;
+  }
+
+  private sealed class EndpointPreviewConduit : DisplayConduit
+  {
+    private readonly List<Curve> _curves = new();
+
+    public void SetCurves(IEnumerable<Curve> curves)
+    {
+      _curves.Clear();
+      _curves.AddRange(curves);
+    }
+
+    protected override void DrawOverlay(DrawEventArgs e)
+    {
+      foreach (var curve in _curves)
+        e.Display.DrawCurve(curve, Color.Cyan, 3);
+    }
+  }
+
+  private sealed class EndpointCursorCallback : MouseCallback
+  {
+    private readonly RhinoDoc _doc;
+    private readonly EndpointPreviewConduit _preview;
+    private readonly Dictionary<Guid, (bool IsStart, Point3d Point)> _picks = new();
+    private RhinoView? _view;
+    private Point2d _cursor;
+    private bool _hasCursor;
+
+    public EndpointCursorCallback(RhinoDoc doc, EndpointPreviewConduit preview)
+    {
+      _doc = doc;
+      _preview = preview;
+    }
+
+    public void InitializeFromCurrentCursor()
+    {
+      var view = _doc.Views.ActiveView;
+      if (view == null)
+        return;
+
+      var client = view.ScreenToClient(System.Windows.Forms.Cursor.Position);
+      SetCursor(view, client.X, client.Y);
+    }
+
+    public Dictionary<Guid, bool> SnapshotPicks()
+    {
+      return _picks.ToDictionary(pair => pair.Key, pair => pair.Value.IsStart);
+    }
+
+    public void RefreshFromSelection()
+    {
+      if (!_hasCursor || _view?.ActiveViewport == null)
+        return;
+
+      var viewport = _view.ActiveViewport;
+      var next = new Dictionary<Guid, (bool IsStart, Point3d Point)>();
+      var curves = new Dictionary<Guid, Curve>();
+      foreach (var obj in _doc.Objects.GetSelectedObjects(false, false))
+      {
+        if (obj?.Geometry is not Curve curve || curve.IsClosed)
+          continue;
+
+        try
+        {
+          var start = viewport.WorldToClient(curve.PointAtStart);
+          var end = viewport.WorldToClient(curve.PointAtEnd);
+          var startDx = start.X - _cursor.X;
+          var startDy = start.Y - _cursor.Y;
+          var endDx = end.X - _cursor.X;
+          var endDy = end.Y - _cursor.Y;
+          var chooseStart =
+            (startDx * startDx) + (startDy * startDy) <=
+            (endDx * endDx) + (endDy * endDy);
+          next[obj.Id] = (
+            chooseStart,
+            chooseStart ? curve.PointAtStart : curve.PointAtEnd);
+          curves[obj.Id] = curve;
+        }
+        catch
+        {
+        }
+      }
+
+      _picks.Clear();
+      foreach (var pair in next)
+        _picks[pair.Key] = pair.Value;
+
+      var previews = new List<Curve>();
+      if (_picks.Count > 0)
+      {
+        var x = 0.0;
+        var y = 0.0;
+        var z = 0.0;
+        foreach (var pick in _picks.Values)
+        {
+          x += pick.Point.X;
+          y += pick.Point.Y;
+          z += pick.Point.Z;
+        }
+
+        var anchor = new Point3d(
+          x / _picks.Count,
+          y / _picks.Count,
+          z / _picks.Count);
+        var target = anchor;
+        var cursorRay = viewport.ClientToWorld(_cursor);
+        var cursorPlane = new Plane(anchor, viewport.CameraDirection);
+        if (Rhino.Geometry.Intersect.Intersection.LinePlane(
+              cursorRay, cursorPlane, out var rayParameter))
+        {
+          target = cursorRay.PointAt(rayParameter);
+        }
+
+        foreach (var pair in _picks)
+        {
+          if (!curves.TryGetValue(pair.Key, out var curve))
+            continue;
+
+          var result = CreateSetPtPreview(curve, pair.Value.IsStart, target);
+          if (result != null)
+            previews.Add(result);
+        }
+      }
+
+      _preview.SetCurves(previews);
+      _doc.Views.Redraw();
+    }
+
+    protected override void OnMouseMove(MouseCallbackEventArgs e)
+    {
+      if (e.View != null)
+        SetCursor(e.View, e.ViewportPoint.X, e.ViewportPoint.Y);
+
+      base.OnMouseMove(e);
+    }
+
+    private void SetCursor(RhinoView view, double x, double y)
+    {
+      _view = view;
+      _cursor = new Point2d(x, y);
+      _hasCursor = true;
+      RefreshFromSelection();
+    }
+  }
+
+  private static Curve? CreateSetPtPreview(Curve curve, bool isStart, Point3d target)
+  {
+    var result = curve.ToNurbsCurve();
+    if (result == null || result.Points.Count == 0)
+      return null;
+
+    var index = isStart ? 0 : result.Points.Count - 1;
+    var controlPoint = result.Points[index];
+    return result.Points.SetPoint(index, target, controlPoint.Weight)
+      ? result
+      : null;
+  }
+
+  private static Dictionary<Guid, bool> BuildClosestClusterPicks(
+    List<(Guid id, Curve c)> curveData)
+  {
+    var endpoints = new List<(int CurveIndex, Point3d Point)>();
+    for (var i = 0; i < curveData.Count; i++)
+    {
+      endpoints.Add((i, curveData[i].c.PointAtStart));
+      endpoints.Add((i, curveData[i].c.PointAtEnd));
+    }
+
+    var bestA = 0;
+    var bestB = 1;
+    var bestDistance = double.MaxValue;
+    for (var a = 0; a < endpoints.Count; a++)
+    for (var b = a + 1; b < endpoints.Count; b++)
+    {
+      if (endpoints[a].CurveIndex == endpoints[b].CurveIndex)
+        continue;
+
+      var distance = endpoints[a].Point.DistanceTo(endpoints[b].Point);
+      if (distance >= bestDistance)
+        continue;
+
+      bestDistance = distance;
+      bestA = a;
+      bestB = b;
+    }
+
+    var meetingPoint = endpoints[bestA].Point +
+      ((endpoints[bestB].Point - endpoints[bestA].Point) * 0.5);
+    var result = new Dictionary<Guid, bool>();
+    foreach (var (id, curve) in curveData)
+    {
+      result[id] = meetingPoint.DistanceTo(curve.PointAtStart) <=
+                   meetingPoint.DistanceTo(curve.PointAtEnd);
+    }
+
+    return result;
   }
 
   private static void CancelPending()
