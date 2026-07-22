@@ -22,7 +22,7 @@ public sealed class vShow : Command
 
   private static readonly MethodInfo? ObjectPointerMethod =
     typeof(RhinoObject).GetMethod(
-      "NonConstPointer_I_KnowWhatImDoing",
+      "ConstPointer",
       BindingFlags.Instance | BindingFlags.NonPublic);
 
   private static readonly MethodInfo? HideSetNameMethod =
@@ -68,13 +68,19 @@ public sealed class vShow : Command
     };
 
     var showAllNamedSets = string.IsNullOrEmpty(hideSetName);
-    var hiddenIds = doc.Objects.GetObjectList(settings)
+    var objectHidden = doc.Objects.GetObjectList(settings)
+      .Where(obj => obj.Attributes.Mode == ObjectMode.Hidden)
+      .ToList();
+    var hiddenIds = objectHidden
       .Where(obj => TryGetHideSetName(obj, out var objectSetName) &&
         (showAllNamedSets
           ? !string.IsNullOrEmpty(objectSetName)
           : string.Equals(objectSetName, hideSetName, StringComparison.OrdinalIgnoreCase)))
       .Select(obj => obj.Id)
       .ToList();
+    Log.Write(Tag,
+      $"  object-hidden candidates={objectHidden.Count}" +
+      $" named matches={hiddenIds.Count}");
     if (hiddenIds.Count == 0)
     {
       var setDescription = showAllNamedSets
@@ -139,8 +145,11 @@ public sealed class vShow : Command
       var found = (bool)(HideSetNameMethod.Invoke(
         null,
         new object[] { objectPointer, value.NonConstPointer() }) ?? false);
-      hideSetName = found ? value.ToStringSafe() ?? string.Empty : string.Empty;
-      return true;
+      if (!found)
+        return false;
+
+      hideSetName = value.ToStringSafe() ?? string.Empty;
+      return !string.IsNullOrEmpty(hideSetName);
     }
     catch (Exception ex)
     {
