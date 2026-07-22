@@ -12,7 +12,7 @@ $buttons = @(
     Name = "vIsolate"
     Set = $null
     Id = "1119e14d-9a8e-40bc-a985-c2aacf2435d6"
-    ShowId = $null
+    ShowId = "fec0ae7a-3fbd-4402-b439-003ab9e96ebc"
     Icon = "vIsolate.svg"
   },
   @{
@@ -166,12 +166,19 @@ try {
       $writer.WriteStartElement("macro_item")
       $writer.WriteAttributeString("guid", $button.ShowId)
       $writer.WriteAttributeString("bitmap_id", $button.Id)
+      $showName = if ($button.Set) { "vShow $($button.Set)" } else { "vShow" }
       foreach ($element in @("text", "tooltip", "help_text", "button_text", "menu_text")) {
         $writer.WriteStartElement($element)
-        $writer.WriteElementString("locale_1033", "Show $($button.Set)")
+        $writer.WriteElementString("locale_1033", $showName)
         $writer.WriteEndElement()
       }
-      $writer.WriteElementString("script", "'_-Show `"$($button.Set)`"")
+      $showScript = if ($button.Set) {
+        "'_vShow `"$($button.Set)`""
+      }
+      else {
+        "'_vShow"
+      }
+      $writer.WriteElementString("script", $showScript)
       $writer.WriteEndElement()
     }
   }
