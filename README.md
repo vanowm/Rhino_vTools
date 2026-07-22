@@ -1,4 +1,4 @@
-Tools  ·  v26.7.22.1818
+Tools  ·  v26.7.22.1901
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -31,7 +31,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vRectangle](#vrectangle-flow) *(26.4.27.2259)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
   - [vSetPt](#vsetpt-flow) *(26.5.28.1145)* — previews and aligns preselected edit-point or control-point grips, or cursor-nearest endpoints, using the built-in SetPt
-  - [vShow](#vshow-flow) *(26.7.22.1818)* — shows an unnamed or named hidden-object set without cancelling the command already in progress
+  - [vShow](#vshow-flow) *(26.7.22.1818)* — shows one named hidden-object set, or all named sets, without cancelling the command already in progress
   - [vSplit](#vsplit-flow) *(26.7.9.1647)* — interactively splits selected curves at picked real point markers with cyan remove preview and point snapping
   - [vSplitAtCorners](#vsplitatcorners-flow) *(26.4.27.2125)* — splits curves at detected corners with interactive per-corner toggle preview
   - [vTangent](#vtangent-flow) *(26.5.5.757)* — moves a curve rigidly so one or both endpoints align tangentially to selected driver curves
@@ -205,7 +205,7 @@ Options:
 
 1. Preselect objects to keep visible, or run `vIsolate` and select them. Prompted selection includes whole groups and excludes subobjects.
 1. Enter an optional Rhino hide-set name, or press Enter for no named set.
-1. Every other visible, unlocked normal object is hidden natively and the isolated objects remain selected.
+1. Every other visible, unlocked normal object is hidden natively and the isolated objects remain selected. Blank input uses Rhino's ordinary unnamed hide behavior, matching `_Isolate`.
 1. `vIsolate` is transparent and can run without cancelling the command already in progress.
 1. The packaged `vTools` toolbar and tab include general `vIsolate` and named `vIsolate A` through `vIsolate E` buttons. Left-click isolates into the matching set; every right-click uses transparent `vShow` to restore that set.
 
@@ -454,7 +454,7 @@ Behavior:
 ### vShow flow
 
 1. Run `vShow` while another command is active or from the normal command prompt.
-1. Enter the hidden-object set name, or press Enter to target the unnamed set.
+1. Enter a hidden-object set name, or press Enter to show every named hidden set while leaving ordinary unnamed hidden objects untouched.
 1. Matching hidden objects are shown directly and the interrupted command remains active.
 1. The `vTools` toolbar passes A-E directly as set-name input when a named isolate button is right-clicked.
 

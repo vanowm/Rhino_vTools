@@ -26,42 +26,42 @@
           <locale_1033>vIsolate</locale_1033>
         </text>
         <left_macro_id>1119e14d-9a8e-40bc-a985-c2aacf2435d6</left_macro_id>
-        <right_macro_id>fec0ae7a-3fbd-4402-b439-003ab9e96ebc</right_macro_id>
+        <right_macro_id>87976eef-39e5-4f85-856f-69f74a5021cb</right_macro_id>
       </tool_bar_item>
       <tool_bar_item guid="43aef707-2579-4959-9eea-a790dfb1a157" button_display_mode="control_only" button_style="normal">
         <text>
           <locale_1033>vIsolate A</locale_1033>
         </text>
-        <left_macro_id>43aef707-2579-4959-9eea-a790dfb1a157</left_macro_id>
-        <right_macro_id>6dac69f7-798c-4280-8118-3578595b69f5</right_macro_id>
+        <left_macro_id>da8cb468-f80d-48b9-b6f0-a346f12f9016</left_macro_id>
+        <right_macro_id>93d12f9e-b57b-41cc-a335-412e5348136b</right_macro_id>
       </tool_bar_item>
       <tool_bar_item guid="b5c58f34-5a56-49fa-8d83-c57ba9c5e0cb" button_display_mode="control_only" button_style="normal">
         <text>
           <locale_1033>vIsolate B</locale_1033>
         </text>
-        <left_macro_id>b5c58f34-5a56-49fa-8d83-c57ba9c5e0cb</left_macro_id>
-        <right_macro_id>44397787-82f4-42ac-ac6e-6c2d13485759</right_macro_id>
+        <left_macro_id>ff335263-1574-4707-9ea5-762bf2ad18c2</left_macro_id>
+        <right_macro_id>b415a8de-d031-406d-8590-b44a23a4f654</right_macro_id>
       </tool_bar_item>
       <tool_bar_item guid="3991bed5-68c9-4858-ad7d-dd6db0c3dd90" button_display_mode="control_only" button_style="normal">
         <text>
           <locale_1033>vIsolate C</locale_1033>
         </text>
-        <left_macro_id>3991bed5-68c9-4858-ad7d-dd6db0c3dd90</left_macro_id>
-        <right_macro_id>7349c359-ffdf-400a-a79e-21ba69ec2071</right_macro_id>
+        <left_macro_id>74d18e5f-d7e6-47a1-8e5c-5076cbb262db</left_macro_id>
+        <right_macro_id>b26b871a-cd89-4cff-be93-343de0063a2a</right_macro_id>
       </tool_bar_item>
       <tool_bar_item guid="3d3669d6-a07d-413b-ac7b-59ffc3e2490c" button_display_mode="control_only" button_style="normal">
         <text>
           <locale_1033>vIsolate D</locale_1033>
         </text>
-        <left_macro_id>3d3669d6-a07d-413b-ac7b-59ffc3e2490c</left_macro_id>
-        <right_macro_id>8ac0f5df-8ec8-438e-8c62-8185246c5a1d</right_macro_id>
+        <left_macro_id>66b5f703-a129-41b0-970e-592af28d6889</left_macro_id>
+        <right_macro_id>58a85580-d367-4e52-9ed1-5f233c072ee6</right_macro_id>
       </tool_bar_item>
       <tool_bar_item guid="7e0dae8b-91a1-48b8-aaf3-ba3fa26069ad" button_display_mode="control_only" button_style="normal">
         <text>
           <locale_1033>vIsolate E</locale_1033>
         </text>
-        <left_macro_id>7e0dae8b-91a1-48b8-aaf3-ba3fa26069ad</left_macro_id>
-        <right_macro_id>4af6fb26-2cb0-408c-9be2-80f4b1a775fe</right_macro_id>
+        <left_macro_id>e757c304-347e-4b92-8bb8-481816cb83a6</left_macro_id>
+        <right_macro_id>481d3c31-714c-4b25-a465-36c10a976761</right_macro_id>
       </tool_bar_item>
     </tool_bar>
   </tool_bars>
@@ -84,7 +84,7 @@
       </menu_text>
       <script>'_vIsolate</script>
     </macro_item>
-    <macro_item guid="fec0ae7a-3fbd-4402-b439-003ab9e96ebc" bitmap_id="1119e14d-9a8e-40bc-a985-c2aacf2435d6">
+    <macro_item guid="87976eef-39e5-4f85-856f-69f74a5021cb" bitmap_id="1119e14d-9a8e-40bc-a985-c2aacf2435d6">
       <text>
         <locale_1033>vShow</locale_1033>
       </text>
@@ -102,7 +102,7 @@
       </menu_text>
       <script>'_vShow</script>
     </macro_item>
-    <macro_item guid="43aef707-2579-4959-9eea-a790dfb1a157" bitmap_id="43aef707-2579-4959-9eea-a790dfb1a157">
+    <macro_item guid="da8cb468-f80d-48b9-b6f0-a346f12f9016" bitmap_id="43aef707-2579-4959-9eea-a790dfb1a157">
       <text>
         <locale_1033>vIsolate A</locale_1033>
       </text>
@@ -118,9 +118,9 @@
       <menu_text>
         <locale_1033>vIsolate A</locale_1033>
       </menu_text>
-      <script>'_vIsolate _A</script>
+      <script>'_vIsolate "A"</script>
     </macro_item>
-    <macro_item guid="6dac69f7-798c-4280-8118-3578595b69f5" bitmap_id="43aef707-2579-4959-9eea-a790dfb1a157">
+    <macro_item guid="93d12f9e-b57b-41cc-a335-412e5348136b" bitmap_id="43aef707-2579-4959-9eea-a790dfb1a157">
       <text>
         <locale_1033>vShow A</locale_1033>
       </text>
@@ -138,7 +138,7 @@
       </menu_text>
       <script>'_vShow "A"</script>
     </macro_item>
-    <macro_item guid="b5c58f34-5a56-49fa-8d83-c57ba9c5e0cb" bitmap_id="b5c58f34-5a56-49fa-8d83-c57ba9c5e0cb">
+    <macro_item guid="ff335263-1574-4707-9ea5-762bf2ad18c2" bitmap_id="b5c58f34-5a56-49fa-8d83-c57ba9c5e0cb">
       <text>
         <locale_1033>vIsolate B</locale_1033>
       </text>
@@ -154,9 +154,9 @@
       <menu_text>
         <locale_1033>vIsolate B</locale_1033>
       </menu_text>
-      <script>'_vIsolate _B</script>
+      <script>'_vIsolate "B"</script>
     </macro_item>
-    <macro_item guid="44397787-82f4-42ac-ac6e-6c2d13485759" bitmap_id="b5c58f34-5a56-49fa-8d83-c57ba9c5e0cb">
+    <macro_item guid="b415a8de-d031-406d-8590-b44a23a4f654" bitmap_id="b5c58f34-5a56-49fa-8d83-c57ba9c5e0cb">
       <text>
         <locale_1033>vShow B</locale_1033>
       </text>
@@ -174,7 +174,7 @@
       </menu_text>
       <script>'_vShow "B"</script>
     </macro_item>
-    <macro_item guid="3991bed5-68c9-4858-ad7d-dd6db0c3dd90" bitmap_id="3991bed5-68c9-4858-ad7d-dd6db0c3dd90">
+    <macro_item guid="74d18e5f-d7e6-47a1-8e5c-5076cbb262db" bitmap_id="3991bed5-68c9-4858-ad7d-dd6db0c3dd90">
       <text>
         <locale_1033>vIsolate C</locale_1033>
       </text>
@@ -190,9 +190,9 @@
       <menu_text>
         <locale_1033>vIsolate C</locale_1033>
       </menu_text>
-      <script>'_vIsolate _C</script>
+      <script>'_vIsolate "C"</script>
     </macro_item>
-    <macro_item guid="7349c359-ffdf-400a-a79e-21ba69ec2071" bitmap_id="3991bed5-68c9-4858-ad7d-dd6db0c3dd90">
+    <macro_item guid="b26b871a-cd89-4cff-be93-343de0063a2a" bitmap_id="3991bed5-68c9-4858-ad7d-dd6db0c3dd90">
       <text>
         <locale_1033>vShow C</locale_1033>
       </text>
@@ -210,7 +210,7 @@
       </menu_text>
       <script>'_vShow "C"</script>
     </macro_item>
-    <macro_item guid="3d3669d6-a07d-413b-ac7b-59ffc3e2490c" bitmap_id="3d3669d6-a07d-413b-ac7b-59ffc3e2490c">
+    <macro_item guid="66b5f703-a129-41b0-970e-592af28d6889" bitmap_id="3d3669d6-a07d-413b-ac7b-59ffc3e2490c">
       <text>
         <locale_1033>vIsolate D</locale_1033>
       </text>
@@ -226,9 +226,9 @@
       <menu_text>
         <locale_1033>vIsolate D</locale_1033>
       </menu_text>
-      <script>'_vIsolate _D</script>
+      <script>'_vIsolate "D"</script>
     </macro_item>
-    <macro_item guid="8ac0f5df-8ec8-438e-8c62-8185246c5a1d" bitmap_id="3d3669d6-a07d-413b-ac7b-59ffc3e2490c">
+    <macro_item guid="58a85580-d367-4e52-9ed1-5f233c072ee6" bitmap_id="3d3669d6-a07d-413b-ac7b-59ffc3e2490c">
       <text>
         <locale_1033>vShow D</locale_1033>
       </text>
@@ -246,7 +246,7 @@
       </menu_text>
       <script>'_vShow "D"</script>
     </macro_item>
-    <macro_item guid="7e0dae8b-91a1-48b8-aaf3-ba3fa26069ad" bitmap_id="7e0dae8b-91a1-48b8-aaf3-ba3fa26069ad">
+    <macro_item guid="e757c304-347e-4b92-8bb8-481816cb83a6" bitmap_id="7e0dae8b-91a1-48b8-aaf3-ba3fa26069ad">
       <text>
         <locale_1033>vIsolate E</locale_1033>
       </text>
@@ -262,9 +262,9 @@
       <menu_text>
         <locale_1033>vIsolate E</locale_1033>
       </menu_text>
-      <script>'_vIsolate _E</script>
+      <script>'_vIsolate "E"</script>
     </macro_item>
-    <macro_item guid="4af6fb26-2cb0-408c-9be2-80f4b1a775fe" bitmap_id="7e0dae8b-91a1-48b8-aaf3-ba3fa26069ad">
+    <macro_item guid="481d3c31-714c-4b25-a465-36c10a976761" bitmap_id="7e0dae8b-91a1-48b8-aaf3-ba3fa26069ad">
       <text>
         <locale_1033>vShow E</locale_1033>
       </text>

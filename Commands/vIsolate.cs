@@ -76,7 +76,10 @@ public sealed class vIsolate : Command
     foreach (var obj in objectsToHide)
     {
       using var objRef = new ObjRef(doc, obj.Id);
-      if (doc.Objects.Hide(objRef, false, hideSetName))
+      var hidden = string.IsNullOrEmpty(hideSetName)
+        ? doc.Objects.Hide(objRef, false)
+        : doc.Objects.Hide(objRef, false, hideSetName);
+      if (hidden)
         hiddenCount++;
     }
 

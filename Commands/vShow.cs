@@ -18,7 +18,7 @@ public sealed class vShow : Command
 {
   private const string Tag = "vShow";
   private const string SetPrompt =
-    "Name of object set to show. Press Enter to show the unnamed set.";
+    "Name of object set to show. Press Enter to show all named sets.";
 
   private static readonly MethodInfo? ObjectPointerMethod =
     typeof(RhinoObject).GetMethod(
@@ -67,15 +67,18 @@ public sealed class vShow : Command
       VisibleFilter = false
     };
 
+    var showAllNamedSets = string.IsNullOrEmpty(hideSetName);
     var hiddenIds = doc.Objects.GetObjectList(settings)
       .Where(obj => TryGetHideSetName(obj, out var objectSetName) &&
-        string.Equals(objectSetName, hideSetName, StringComparison.OrdinalIgnoreCase))
+        (showAllNamedSets
+          ? !string.IsNullOrEmpty(objectSetName)
+          : string.Equals(objectSetName, hideSetName, StringComparison.OrdinalIgnoreCase)))
       .Select(obj => obj.Id)
       .ToList();
     if (hiddenIds.Count == 0)
     {
-      var setDescription = string.IsNullOrEmpty(hideSetName)
-        ? "the unnamed set"
+      var setDescription = showAllNamedSets
+        ? "any named set"
         : $"set {hideSetName}";
       RhinoApp.WriteLine($"vShow: no hidden objects in {setDescription}.");
       Log.Write(Tag, $"  no hidden objects hideSet={setDescription}");
@@ -92,7 +95,7 @@ public sealed class vShow : Command
     doc.Views.Redraw();
     Log.Write(Tag,
       $"  shown={shownCount}/{hiddenIds.Count}" +
-      $" hideSet={(string.IsNullOrEmpty(hideSetName) ? "<unnamed>" : hideSetName)}");
+      $" hideSet={(showAllNamedSets ? "<all named>" : hideSetName)}");
     RhinoApp.WriteLine($"vShow: shown {shownCount} object(s).");
 
     return shownCount > 0 ? Result.Success : Result.Failure;
