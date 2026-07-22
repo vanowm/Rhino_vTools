@@ -46,6 +46,10 @@
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </Content>
+    <Content Include="vTools.rui">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <Target Name="MergeRuntimeConfigDefaults" BeforeTargets="Build">

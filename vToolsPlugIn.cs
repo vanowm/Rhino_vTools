@@ -2,6 +2,7 @@ using Rhino;
 using Rhino.PlugIns;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace vTools;
@@ -29,12 +30,55 @@ public class vToolsPlugIn : PlugIn
 
     Log.Initialize();
     Log.Write($"startup  version={version}  dll={asm.Location}");
+    EnsureToolbarLoaded(asm.Location);
 
     var commandNames = CollectRegisteredCommandNames();
     Log.Write($"startup  commands ({commandNames.Count}): {string.Join(", ", commandNames)}");
 
     RhinoApp.WriteLine($"vTools v{version} loaded — {commandNames.Count} commands: {string.Join(", ", commandNames)}.");
     return LoadReturnCode.Success;
+  }
+
+  private static void EnsureToolbarLoaded(string assemblyLocation)
+  {
+    try
+    {
+      var assemblyDirectory = Path.GetDirectoryName(assemblyLocation);
+      if (string.IsNullOrEmpty(assemblyDirectory))
+        return;
+
+      var toolbarPath = Path.Combine(assemblyDirectory, "vTools.rui");
+      if (!File.Exists(toolbarPath))
+      {
+        Log.Write($"startup  toolbar missing path={toolbarPath}");
+        return;
+      }
+
+      var toolbarFile = RhinoApp.ToolbarFiles.FindByName("vTools", true) ??
+        RhinoApp.ToolbarFiles.FindByPath(toolbarPath);
+      var openedNow = toolbarFile == null;
+      toolbarFile ??= RhinoApp.ToolbarFiles.Open(toolbarPath);
+      if (toolbarFile == null)
+      {
+        Log.Write($"startup  toolbar open failed path={toolbarPath}");
+        return;
+      }
+
+      if (openedNow)
+      {
+        var group = toolbarFile.GetGroup("vTools Isolate");
+        if (group != null)
+          group.Visible = true;
+      }
+
+      Log.Write(
+        $"startup  toolbar={(openedNow ? "opened" : "already open")}" +
+        $" path={toolbarFile.Path}");
+    }
+    catch (Exception ex)
+    {
+      Log.Write("startup toolbar", ex.ToString());
+    }
   }
 
   private List<string> CollectRegisteredCommandNames()

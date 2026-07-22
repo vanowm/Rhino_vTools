@@ -1565,6 +1565,14 @@ public sealed class vLine : Command
         candidates.Add((parameters[i], values[i]));
     }
 
+    if (values.Count > 1)
+    {
+      if (values[0] <= values[1])
+        candidates.Add((parameters[0], values[0]));
+      if (values[^1] <= values[^2])
+        candidates.Add((parameters[^1], values[^1]));
+    }
+
     if (candidates.Count == 0)
     {
       var bestIndex = 0;
@@ -1581,17 +1589,40 @@ public sealed class vLine : Command
       candidates.Add((parameters[bestIndex], values[bestIndex]));
     }
 
-    candidates.Sort((x, y) => x.Error.CompareTo(y.Error));
+    candidates.Sort((x, y) =>
+    {
+      var px = curve.PointAt(x.T);
+      var py = curve.PointAt(y.T);
+      var distanceComparison = px.DistanceToSquared(hintPoint)
+        .CompareTo(py.DistanceToSquared(hintPoint));
+      if (distanceComparison != 0)
+        return distanceComparison;
+
+      var errorComparison = x.Error.CompareTo(y.Error);
+      if (errorComparison != 0)
+        return errorComparison;
+
+      return Math.Abs(x.T - hintT).CompareTo(Math.Abs(y.T - hintT));
+    });
 
     var refined = new List<(double T, double Error, Point3d Point)>();
-    for (var i = 0; i < candidates.Count && i < 16; i++)
+    var maxCandidatesToRefine = Math.Min(candidates.Count, 64);
+    for (var i = 0; i < maxCandidatesToRefine; i++)
     {
       var seedT = candidates[i].T;
       var window = Math.Max(dt * 4.0, (b - a) * 0.01);
       var t0 = Math.Max(a, seedT - window);
       var t1 = Math.Min(b, seedT + window);
       var refinedResult = RefineTangentParameter(curve, startPoint, cplane, t0, t1, refineIterations);
-      refined.Add((refinedResult.Parameter, refinedResult.Error, curve.PointAt(refinedResult.Parameter)));
+      if (candidates[i].Error < refinedResult.Error)
+      {
+        refined.Add((seedT, candidates[i].Error, curve.PointAt(seedT)));
+      }
+      else
+      {
+        refined.Add((refinedResult.Parameter, refinedResult.Error,
+          curve.PointAt(refinedResult.Parameter)));
+      }
     }
 
     if (refined.Count == 0)
@@ -1614,6 +1645,12 @@ public sealed class vLine : Command
     }
 
     var valid = unique.FindAll(v => v.Error <= 0.015);
+    if (_debugMode)
+    {
+      DebugLog(
+        $"TangentSolver: candidates={candidates.Count} refined={refined.Count}" +
+        $" unique={unique.Count} valid={valid.Count}");
+    }
     if (valid.Count == 0)
       return null;
 

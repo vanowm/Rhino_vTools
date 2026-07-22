@@ -1,4 +1,4 @@
-Tools  ·  v26.7.22.1133
+Tools  ·  v26.7.22.1515
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -13,6 +13,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vFacing](#vfacing-flow) *(26.5.29.1333)* — builds a four-piece closed facing boundary from a base curve and two side curves by offsetting the base inward by a specified size; collects inside objects and places the result with a DynamicDraw preview
   - [vFitBox](#vfitbox-flow) *(26.4.24.934)* — finds the minimum bounding box for selected objects by optimizing rotation angle
   - [vGroup](#vgroup-flow) *(26.5.27.1300)* — groups selected objects by closed-curve boundaries; each boundary is grouped with the objects inside it
+  - [vIsolate](#visolate-flow) *(26.7.22.1515)* — keeps selected objects visible while hiding every other visible normal object, optionally in a named Rhino hide set
   - [vLine](#vline-flow) *(26.4.27.2125)* — draws lines with chain modes, angle lock, length constraint, and perp/tangent endpoint solving
   - [vLineLength](#vlinelength-flow) *(26.4.27.2125)* — resizes an open curve to a target total, additive, or subtractive length
   - [vMatch](#vmatch-flow) *(26.7.1.1535)* — click near an edge-mate dot produced by vUnrollSrf to align the neighbouring flat part; Auto mode assembles a whole BFS selection with optional randomisation
@@ -29,7 +30,7 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
   - [vPointTrace](#vpointtrace-flow) *(26.4.30.1044)* — maps arc-length positions from a source curve onto a destination curve: pick points along the source and a corresponding point is placed on the destination at the same proportional arc-length position
   - [vRectangle](#vrectangle-flow) *(26.4.27.2259)* — creates an axis-aligned rectangle polyline from width/height inputs driven by numeric value or selected curve lengths
   - [vScallop](#vscallop-flow) *(26.4.27.2125)* — creates an arc scallop between two points or along a selected line
-  - [vSetPt](#vsetpt-flow) *(26.5.28.1145)* — previews and aligns preselected on-curve edit-point grips or cursor-nearest endpoints of selected open curves using the built-in SetPt
+  - [vSetPt](#vsetpt-flow) *(26.5.28.1145)* — previews and aligns preselected edit-point or control-point grips, or cursor-nearest endpoints, using the built-in SetPt
   - [vSplit](#vsplit-flow) *(26.7.9.1647)* — interactively splits selected curves at picked real point markers with cyan remove preview and point snapping
   - [vSplitAtCorners](#vsplitatcorners-flow) *(26.4.27.2125)* — splits curves at detected corners with interactive per-corner toggle preview
   - [vTangent](#vtangent-flow) *(26.5.5.757)* — moves a curve rigidly so one or both endpoints align tangentially to selected driver curves
@@ -87,7 +88,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands: [vBiminiParts](#vbiminiparts-flow), [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFacing](#vfacing-flow), [vFitBox](#vfitbox-flow), [vGroup](#vgroup-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMatch](#vmatch-flow), [vMiddleCurve](#vmiddlecurve-flow), [vNotches](#vnotches-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vOverlaps](#voverlaps-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vProjectToSurface](#vprojecttosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSetPt](#vsetpt-flow), [vSplit](#vsplit-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTitle](#vtitle-flow), [vToggleAxes](#vtoggleaxes-flow), [vToggleControlPoints](#vtogglecontrolpoints-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
+Native commands: [vBiminiParts](#vbiminiparts-flow), [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFacing](#vfacing-flow), [vFitBox](#vfitbox-flow), [vGroup](#vgroup-flow), [vIsolate](#visolate-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMatch](#vmatch-flow), [vMiddleCurve](#vmiddlecurve-flow), [vNotches](#vnotches-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vOverlaps](#voverlaps-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vProjectToSurface](#vprojecttosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSetPt](#vsetpt-flow), [vSplit](#vsplit-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTitle](#vtitle-flow), [vToggleAxes](#vtoggleaxes-flow), [vToggleControlPoints](#vtogglecontrolpoints-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -199,6 +200,14 @@ Options:
 1. For each closed boundary, all selected objects whose representative point falls inside it are collected. Original curves that defined the boundary (e.g. crossing lines whose midpoint lies outside the inner polygon) are included via source-curve tracking.
 1. Each boundary and its interior objects are added to a Rhino group (minimum 2 members required).
 
+### vIsolate flow
+
+1. Preselect objects to keep visible, or run `vIsolate` and select them. Prompted selection includes whole groups and excludes subobjects.
+1. Enter an optional Rhino hide-set name, or press Enter for no named set.
+1. Every other visible, unlocked normal object is hidden natively and the isolated objects remain selected.
+1. `vIsolate` is transparent and can run without cancelling the command already in progress.
+1. The packaged `vTools Isolate` toolbar provides `Isolate A`, `Isolate B`, and `Isolate C` buttons. Left-click isolates into the matching named hide set; right-click shows that set.
+
 ### vLine flow
 
 1. Run `vLine`.
@@ -217,9 +226,9 @@ Options:
 1. End-point options:
 
     - `Perp`: solve endpoint perpendicular to the hovered curve under cursor.
-    - `Tangent`: solve endpoint tangent to the hovered curve under cursor.
+    - `Tangent`: solve against the hovered curve and use the valid tangent point nearest the cursor.
     - `PerpNear`: solve perpendicular against nearest curve.
-    - `TanNear`: solve tangent against nearest curve.
+    - `TanNear`: solve against the nearest curve and use the valid tangent point nearest the cursor.
     - `Auto`: choose perpendicular/tangent solution using `Priority`.
     - `Priority`: auto-mode choice policy.
       - `Closest`: whichever solution is closer to cursor.
@@ -435,8 +444,8 @@ Behavior:
 
 ### vSetPt flow
 
-1. Select open curves to align. Preselected curves seed the editable selection; add or remove curves before pressing Enter. A preselected on-curve edit-point grip also seeds its owning curve and overrides endpoint detection for that curve. Closed curves are ignored.
-1. Cyan temporary curves preview the SetPt result: each preselected edit point, or otherwise the endpoint nearest to the viewport cursor, moves to a common target that follows the cursor at the selected points' view depth. Edit-point previews rebuild the curve through the moved point so the curves meet at the target.
+1. Select open curves to align. Preselected curves seed the editable selection; add or remove curves before pressing Enter. Any preselected edit-point or control-point grip also seeds its owning curve and overrides endpoint detection for that curve. Closed curves are ignored.
+1. Cyan temporary curves preview the SetPt result: each preselected grip, or otherwise the endpoint nearest to the viewport cursor, moves to a common target that follows the cursor at the selected points' view depth. Edit-point previews rebuild the curve through the target; control-point previews move the selected CV directly.
 1. Grips are enabled temporarily and the identified grips are selected automatically. Each curve's original grip visibility is restored when SetPt finishes or is cancelled.
 1. The built-in `-SetPt` command launches with `XSet=Yes YSet=Yes ZSet=Yes Alignment=World Copy=No`; click the target location to commit.
 1. Press Enter to repeat `vSetPt`.
