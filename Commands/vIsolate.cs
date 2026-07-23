@@ -72,15 +72,43 @@ public sealed class vIsolate : Command
     }
 
     doc.Objects.UnselectAll();
+    var hideSetOrder = string.IsNullOrEmpty(hideSetName)
+      ? 0
+      : DateTime.UtcNow.Ticks;
     var hiddenCount = 0;
+    var trackedCount = 0;
+    var clearedCount = 0;
     foreach (var obj in objectsToHide)
     {
+      var hasTrackedName = !string.IsNullOrEmpty(HideSetState.GetTrackedName(obj));
+      var trackingReady = HideSetState.SetTrackedName(
+        doc,
+        obj.Id,
+        hideSetName ?? string.Empty,
+        hideSetOrder);
+      if (string.IsNullOrEmpty(hideSetName))
+      {
+        var currentObject = doc.Objects.FindId(obj.Id);
+        var nativeCleared = currentObject != null &&
+          HideSetState.RemoveNativeName(currentObject);
+        if ((hasTrackedName && trackingReady) || nativeCleared)
+          clearedCount++;
+      }
+
       using var objRef = new ObjRef(doc, obj.Id);
       var hidden = string.IsNullOrEmpty(hideSetName)
         ? doc.Objects.Hide(objRef, false)
         : doc.Objects.Hide(objRef, false, hideSetName);
-      if (hidden)
-        hiddenCount++;
+      if (!hidden)
+      {
+        if (!string.IsNullOrEmpty(hideSetName))
+          HideSetState.SetTrackedName(doc, obj.Id, string.Empty);
+        continue;
+      }
+
+      hiddenCount++;
+      if (!string.IsNullOrEmpty(hideSetName) && trackingReady)
+        trackedCount++;
     }
 
     RestoreSelection(doc, isolateIds);
@@ -88,7 +116,8 @@ public sealed class vIsolate : Command
 
     Log.Write(Tag,
       $"  hidden={hiddenCount}/{objectsToHide.Count}" +
-      $" hideSet={(string.IsNullOrEmpty(hideSetName) ? "<none>" : hideSetName)}");
+      $" hideSet={(string.IsNullOrEmpty(hideSetName) ? "<none>" : hideSetName)}" +
+      $" tracked={trackedCount} cleared={clearedCount}");
 
     if (hiddenCount != objectsToHide.Count)
     {

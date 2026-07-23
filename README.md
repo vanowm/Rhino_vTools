@@ -1,4 +1,4 @@
-Tools  ·  v26.7.22.1913
+Tools  ·  v26.7.22.1959
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
@@ -205,7 +205,7 @@ Options:
 
 1. Preselect objects to keep visible, or run `vIsolate` and select them. Prompted selection includes whole groups and excludes subobjects.
 1. Enter an optional Rhino hide-set name, or press Enter for no named set.
-1. Every other visible, unlocked normal object is hidden natively and the isolated objects remain selected. Blank input uses Rhino's ordinary unnamed hide behavior, matching `_Isolate`.
+1. Every other visible, unlocked normal object is hidden natively and the isolated objects remain selected. Named isolation records active set membership; blank input clears any prior membership and uses Rhino's ordinary unnamed hide behavior, matching `_Isolate`.
 1. `vIsolate` is transparent and can run without cancelling the command already in progress.
 1. The packaged `vTools` toolbar and tab include general `vIsolate` and named `vIsolate A` through `vIsolate E` buttons. Left-click isolates into the matching set; every right-click uses transparent `vShow` to restore that set.
 
@@ -454,8 +454,8 @@ Behavior:
 ### vShow flow
 
 1. Run `vShow` while another command is active or from the normal command prompt.
-1. Enter a hidden-object set name, or press Enter to show every named hidden set while leaving ordinary unnamed hidden objects untouched.
-1. Matching hidden objects are shown directly and the interrupted command remains active.
+1. Choose one of up to ten most-recent active set options, enter any set name directly, or press Enter to show every named hidden set while leaving ordinary unnamed hidden objects untouched.
+1. Matching active set members are shown directly, their completed set membership is cleared, and the interrupted command remains active.
 1. The `vTools` toolbar passes A-E directly as set-name input when a named isolate button is right-clicked.
 
 ### vSplit flow

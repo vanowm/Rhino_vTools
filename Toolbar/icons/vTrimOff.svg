@@ -1,22 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vTrimOff toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path class="soft" d="M4 14H15M33 14H44M4 34H15M33 34H44M15 5V14M33 5V14M15 34V43M33 34V43"/>
-    <rect x="15" y="14" width="18" height="20"/>
-    <path class="accent" d="M7 8L12 13M12 8L7 13M36 36L41 41M41 36L36 41"/>
-    <path class="accent" d="M15 14H33V34H15Z"/>
-  </g>
+  <svg height="40" viewBox="0 0 48 48" width="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="2" y="2"><clipPath id="a"><path clip-rule="evenodd" d="m0 0h36v36h-36z" /></clipPath><clipPath id="b"><path d="m3.709 15.142h17.149v17.149h-17.149z" /></clipPath><clipPath id="c"><path d="m10.855 3.71h21.436v21.436h-21.436z" /></clipPath><clipPath id="d"><path d="m10.076 14.439h11.484v11.479h-11.484z" /></clipPath><clipPath id="e"><path d="m3 3.001h30v29.999h-30z" /></clipPath><g clip-path="url(#a)" transform="matrix(1.3333333 0 0 -1.3333333 0 48)"><g clip-path="url(#b)" opacity=".2"><path d="m3.709 15.142v17.149h17.149v-7.181l-.381-.019c-5.042-.513-9.055-4.526-9.567-9.567l-.02-.382z" fill-rule="evenodd" /></g><g clip-path="url(#c)" opacity=".2"><path d="m21.573 3.71c-5.917 0-10.718 4.802-10.718 10.718l.035.714h9.968v9.968l.715.036c5.916 0 10.718-4.801 10.718-10.718 0-5.916-4.802-10.718-10.718-10.718z" fill-rule="evenodd" /></g><g clip-path="url(#d)" opacity=".996078"><path d="m10.076 14.439.096 1.854.003.035c.508 5.007 4.49 8.987 9.497 9.496l.037.003 1.851.091v-11.479zm8.649 2.835v5.497l-.104-.024c-2.59-.737-4.634-2.78-5.37-5.37l-.025-.103z" fill="#fff" /></g><g clip-path="url(#e)" opacity=".996078"><path d="m10.146 14.429-7.146.004v18.567h18.567l.004-7.145c6.309 0 11.429-5.119 11.429-11.427s-5.12-11.427-11.427-11.427c-6.309 0-11.427 5.119-11.427 11.428zm21.436-.001c0 5.525-4.485 10.009-10.009 10.009h-1.424v7.145h-15.731v-15.731h7.216l-.07-1.431.051-1.015c.513-5.045 4.777-8.986 9.958-8.986 5.524 0 10.009 4.484 10.009 10.009z" /></g></g></svg>
+  <path class="vt-soft" d="M4 12H14M34 12H44M4 36H14M34 36H44"/><rect class="vt-op" x="14" y="12" width="20" height="24"/><path class="vt-op" d="M5 8L10 13M10 8L5 13M38 35L43 40M43 35L38 40"/>
 </svg>

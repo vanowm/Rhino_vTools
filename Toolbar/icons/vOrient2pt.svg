@@ -1,25 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vOrient2pt toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M7 36L20 28"/>
-    <circle class="node" cx="7" cy="36" r="3"/>
-    <circle class="node" cx="20" cy="28" r="3"/>
-    <path class="accent" d="M28 20L41 8"/>
-    <circle class="accent-fill" cx="28" cy="20" r="3"/>
-    <circle class="accent-fill" cx="41" cy="8" r="3"/>
-    <path class="accent" d="M16 23C19 15 25 11 32 11M32 11L27 8M32 11L30 16"/>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <radialGradient id="RadialGradient" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="6.849" gradientTransform="matrix(-0.76796 -0.640503 0.25592 -1.92145 2.004 1.254)">
+   <stop offset="0" stop-color="#ffffff" />
+   <stop offset="0.1" stop-color="#fcfcfc" />
+   <stop offset="0.2" stop-color="#f7f7f7" />
+   <stop offset="0.3" stop-color="#f2f2f2" />
+   <stop offset="0.4" stop-color="#ebebeb" />
+   <stop offset="0.5" stop-color="#e2e2e2" />
+   <stop offset="0.6" stop-color="#d9d9d9" />
+   <stop offset="0.7" stop-color="#d2d2d2" />
+   <stop offset="0.8" stop-color="#cdcdcd" />
+   <stop offset="0.9" stop-color="#c8c8c8" />
+   <stop offset="1" stop-color="#c5c5c5" />
+  </radialGradient>
+  <linearGradient id="LinearGradient" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1.071" y2="22.495" gradientTransform="matrix(-0.707108 -0.707108 0.707108 -0.707108 -7.297 7.742)">
+   <stop offset="0" stop-color="#6582fc" />
+   <stop offset="0.1" stop-color="#6a86fc" />
+   <stop offset="0.2" stop-color="#718cfc" />
+   <stop offset="0.3" stop-color="#7992fc" />
+   <stop offset="0.4" stop-color="#839bfc" />
+   <stop offset="0.5" stop-color="#92a6fc" />
+   <stop offset="0.6" stop-color="#a0b1fc" />
+   <stop offset="0.7" stop-color="#aabafc" />
+   <stop offset="0.8" stop-color="#b2c0fc" />
+   <stop offset="0.9" stop-color="#b9c6fc" />
+   <stop offset="1" stop-color="#becafc" />
+  </linearGradient>
+  <style type="text/css">@import url('https://themes.googleusercontent.com/fonts/css?family=Open Sans:400,600');</style>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <g id="Group" stroke="none">
+   <rect x="-3.755" y="-3.755" width="7.51" height="7.51" transform="translate(7.5 7.5) rotate(90)" stroke-linejoin="miter" fill="url(#RadialGradient)" />
+   <path d="M 3,3 L 3,12 L 12,12 L 12,3 L 3,3 Z M 10.51,4.49 L 10.51,10.51 L 4.49,10.51 L 4.49,4.49 L 10.51,4.49 Z" stroke-width="0.5" fill="#231f20" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
   </g>
+  <g id="Group_1" stroke="none">
+   <rect x="-9.498" y="-9.497" width="18.996" height="18.995" transform="translate(18.076 19.427) rotate(135)" stroke-linejoin="miter" fill="url(#LinearGradient)" />
+   <path d="M 18.076,4.95 L 3.6,19.426 L 18.076,33.901 L 32.551,19.426 L 18.076,4.95 Z M 18.076,7.037 L 30.464,19.426 L 18.076,31.814 L 5.687,19.426 L 18.076,7.037 Z" stroke-width="0.5" fill="#231f20" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+ </g>
+</svg>
+  <circle class="vt-node" cx="7" cy="39" r="3"/><circle class="vt-dot" cx="39" cy="9" r="3"/><path class="vt-op" d="M10 37L36 12M25 13C31 8 36 8 40 10"/>
 </svg>

@@ -1,24 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vScallop toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M6 32H42"/>
-    <path class="accent" d="M6 32Q24 5 42 32"/>
-    <rect class="node" x="3" y="29" width="6" height="6"/>
-    <rect class="node" x="39" y="29" width="6" height="6"/>
-    <path class="soft" d="M24 32V14"/>
-    <path class="accent-fill no-stroke" d="M20 19L24 12L28 19Z"/>
-  </g>
+  <svg height="40" viewBox="0 0 48 48" width="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="2" y="2"><clipPath id="a"><path clip-rule="evenodd" d="m0 0h36v36h-36z" /></clipPath><clipPath id="b"><path d="m6.376 4.563h23.971v14.167h-23.971z" /></clipPath><clipPath id="c"><path d="m5.994 5.222h1.491v27.057h-1.491z" /></clipPath><g clip-path="url(#a)" transform="matrix(1.3333333 0 0 -1.3333333 0 48)"><path d="m6.713 30.03v1.491c10.085 0 18.851-5.686 23.26-14.023l-1.317-.697c-4.163 7.869-12.433 13.229-21.943 13.229z" /><g clip-path="url(#b)" opacity=".498039"><path d="m7.097 4.563-.721 1.305 23.25 12.862.721-1.305z" /></g><g clip-path="url(#c)" opacity=".498039"><path d="m5.994 5.222v27.057h1.491v-27.057z" /></g><path d="m9.720867 8.229574v-4.485148h-4.483734v4.485148z" fill="#fff" fill-rule="evenodd" /><path d="m4.49 2.999v5.975h5.975v-5.975zm4.484 1.491v2.993h-2.993v-2.993z" /><path d="m9.720867 32.254574v-4.485148h-4.483734v4.485148z" fill="#fff" fill-rule="evenodd" /><path d="m4.49 27.024v5.975h5.975v-5.975zm4.484 1.491v2.993h-2.993v-2.993z" /><path d="m30.764304 20.254304v-4.510608h-4.510608v4.510608z" fill="#fff" fill-rule="evenodd" /><path d="m25.508 14.998v6.001h6.001v-6.001zm4.51 1.491v3.019h-3.019v-3.019z" /></g></svg>
+  <path class="vt-soft" d="M6 38H42"/><path class="vt-op" d="M6 38Q24 13 42 38M24 38V20M24 20L20 26M24 20L28 26"/>
 </svg>

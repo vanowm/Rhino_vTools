@@ -1,22 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
-  <title id="title">vUzip toolbar icon</title>
-  <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
-  </style>
-  <g class="main">
-    <path d="M8 7V27Q8 41 24 41Q40 41 40 27V7"/>
-    <path class="accent" d="M14 8V27Q14 35 24 35Q34 35 34 27V8"/>
-    <path d="M10 12H16M10 17H16M10 22H16M32 12H38M32 17H38M32 22H38"/>
-    <path class="accent-fill no-stroke" d="M20 24H28L26 31H22Z"/>
+<svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" xmlns="http://www.w3.org/2000/svg" width="36pt" height="36pt" viewBox="0 -36 36 36">
+  <defs>
+    <linearGradient id="zipBlue" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e1e4ff"/><stop offset="0.5" stop-color="#8c96ff"/><stop offset="1" stop-color="#4a60ff"/></linearGradient>
+  </defs>
+  <g transform="scale(1 -1)">
+    <path d="M6.5 31V15.5C6.5 7.3 11.2 2.8 18 2.8S29.5 7.3 29.5 15.5V31H24.9V15.5C24.9 10.1 22.3 7.2 18 7.2S11.1 10.1 11.1 15.5V31Z" fill="url(#zipBlue)" stroke="#231f20" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M9 27.5H13.2M9 23.5H13.2M9 19.5H13.2M9.4 15.5H13.7M22.8 27.5H27M22.8 23.5H27M22.8 19.5H27M22.3 15.5H26.6" stroke="#231f20" stroke-width="1.1"/>
+    <path d="M15.4 8.5L18 4.7L20.6 8.5L19.4 13H16.6Z" fill="#4a60ff" stroke="#231f20" stroke-width="0.9"/>
+    <path d="M4.25 28.75V33.25H8.75V28.75ZM7.25 30.25V31.75H5.75V30.25ZM27.25 28.75V33.25H31.75V28.75ZM30.25 30.25V31.75H28.75V30.25Z" fill="#231f20" stroke="none"/>
   </g>
 </svg>

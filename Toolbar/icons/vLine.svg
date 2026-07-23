@@ -1,22 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vLine toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M8 38L40 10"/>
-    <rect class="node" x="5" y="35" width="6" height="6"/>
-    <rect class="node" x="37" y="7" width="6" height="6"/>
-    <path class="accent" d="M15 34L36 15"/>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <style type="text/css">@import url('https://themes.googleusercontent.com/fonts/css?family=Open Sans:400,600');</style>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <path d="M 10.238,9.183 L 9.183,10.238 L 27.988,29.043 L 29.043,27.988 L 10.238,9.183 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+  <g id="Group" stroke="none">
+   <rect x="-2.244" y="-2.244" width="4.488" height="4.488" transform="translate(26.999 26.999) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 24.009,24.009 L 24.009,29.989 L 29.989,29.989 L 29.989,24.009 L 24.009,24.009 Z M 28.497,25.501 L 28.497,28.497 L 25.501,28.497 L 25.501,25.501 L 28.497,25.501 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
   </g>
+  <g id="Group_1" stroke="none">
+   <rect x="-2.244" y="-2.244" width="4.488" height="4.488" transform="translate(8.99 8.99) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 6,6 L 6,11.98 L 11.98,11.98 L 11.98,6 L 6,6 Z M 10.488,7.492 L 10.488,10.488 L 7.492,10.488 L 7.492,7.492 L 10.488,7.492 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+ </g>
+</svg>
+  <path class="vt-op" d="M29 30H37V22M30 10A13 13 0 0 1 42 22"/><path class="vt-fill" d="M40 17L44 23L37 22Z"/>
 </svg>

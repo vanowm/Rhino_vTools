@@ -1,12 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using Rhino;
 using Rhino.Commands;
 using Rhino.DocObjects;
 using Rhino.Input;
 using Rhino.Input.Custom;
-using Rhino.Runtime.InteropWrappers;
 
 namespace vTools.Commands;
 
@@ -16,21 +15,22 @@ namespace vTools.Commands;
 [CommandStyle(Style.Transparent)]
 public sealed class vShow : Command
 {
+  private sealed class ActiveHideSet
+  {
+    public ActiveHideSet(string name, long order)
+    {
+      Name = name;
+      Order = order;
+    }
+
+    public string Name { get; }
+    public long Order { get; set; }
+    public List<Guid> ObjectIds { get; } = new();
+  }
+
   private const string Tag = "vShow";
   private const string SetPrompt =
     "Name of object set to show. Press Enter to show all named sets.";
-
-  private static readonly MethodInfo? ObjectPointerMethod =
-    typeof(RhinoObject).GetMethod(
-      "ConstPointer",
-      BindingFlags.Instance | BindingFlags.NonPublic);
-
-  private static readonly MethodInfo? HideSetNameMethod =
-    typeof(RhinoApp).Assembly
-      .GetType("UnsafeNativeMethods", false)
-      ?.GetMethod(
-        "CRhinoObject_AttachHideGetName",
-        BindingFlags.Static | BindingFlags.NonPublic);
 
   public override string EnglishName => Tag;
 
@@ -38,20 +38,81 @@ public sealed class vShow : Command
   {
     Log.Write(Tag, "--- run start ---");
 
-    var hideSetName = GetHideSetName(out var getResult);
-    if (getResult != Result.Success || hideSetName == null)
-    {
-      Log.Write(Tag, $"  set prompt ended result={getResult}");
-      return getResult;
-    }
-
-    if (ObjectPointerMethod == null || HideSetNameMethod == null)
+    if (!HideSetState.NativeAccessAvailable)
     {
       RhinoApp.WriteLine("vShow: named hide-set access is unavailable.");
       Log.Write(Tag, "  Rhino hide-set attachment API unavailable");
       return Result.Failure;
     }
 
+    var activeSets = GetActiveHideSets(
+      doc,
+      out var objectHiddenCount,
+      out var nativeNamedCount);
+    var recentSets = activeSets
+      .OrderByDescending(set => set.Order)
+      .ThenBy(set => set.Name, StringComparer.OrdinalIgnoreCase)
+      .Take(10)
+      .ToList();
+    Log.Write(Tag,
+      $"  object-hidden candidates={objectHiddenCount}" +
+      $" native-named={nativeNamedCount}" +
+      $" active sets={activeSets.Count}" +
+      $" recent=[{string.Join(", ", recentSets.Select(set => set.Name))}]");
+
+    var hideSetName = GetHideSetName(recentSets, out var getResult);
+    if (getResult != Result.Success || hideSetName == null)
+    {
+      Log.Write(Tag, $"  set prompt ended result={getResult}");
+      return getResult;
+    }
+
+    var showAllNamedSets = string.IsNullOrEmpty(hideSetName);
+    var hiddenIds = activeSets
+      .Where(set => showAllNamedSets ||
+        string.Equals(set.Name, hideSetName, StringComparison.OrdinalIgnoreCase))
+      .SelectMany(set => set.ObjectIds)
+      .ToList();
+    Log.Write(Tag, $"  named matches={hiddenIds.Count}");
+    if (hiddenIds.Count == 0)
+    {
+      var setDescription = showAllNamedSets
+        ? "any named set"
+        : $"set {hideSetName}";
+      RhinoApp.WriteLine($"vShow: no hidden objects in {setDescription}.");
+      Log.Write(Tag, $"  no hidden objects hideSet={setDescription}");
+      return Result.Nothing;
+    }
+
+    var shownCount = 0;
+    var clearedCount = 0;
+    foreach (var objectId in hiddenIds)
+    {
+      if (!doc.Objects.Show(objectId, false))
+        continue;
+
+      shownCount++;
+      HideSetState.SetTrackedName(doc, objectId, string.Empty);
+      var shownObject = doc.Objects.FindId(objectId);
+      if (shownObject != null && HideSetState.RemoveNativeName(shownObject))
+        clearedCount++;
+    }
+
+    doc.Views.Redraw();
+    Log.Write(Tag,
+      $"  shown={shownCount}/{hiddenIds.Count}" +
+      $" cleared={clearedCount}" +
+      $" hideSet={(showAllNamedSets ? "<all named>" : hideSetName)}");
+    RhinoApp.WriteLine($"vShow: shown {shownCount} object(s).");
+
+    return shownCount > 0 ? Result.Success : Result.Failure;
+  }
+
+  private static List<ActiveHideSet> GetActiveHideSets(
+    RhinoDoc doc,
+    out int objectHiddenCount,
+    out int nativeNamedCount)
+  {
     var settings = new ObjectEnumeratorSettings
     {
       NormalObjects = false,
@@ -67,52 +128,58 @@ public sealed class vShow : Command
       VisibleFilter = false
     };
 
-    var showAllNamedSets = string.IsNullOrEmpty(hideSetName);
     var objectHidden = doc.Objects.GetObjectList(settings)
       .Where(obj => obj.Attributes.Mode == ObjectMode.Hidden)
       .ToList();
-    var hiddenIds = objectHidden
-      .Where(obj => TryGetHideSetName(obj, out var objectSetName) &&
-        (showAllNamedSets
-          ? !string.IsNullOrEmpty(objectSetName)
-          : string.Equals(objectSetName, hideSetName, StringComparison.OrdinalIgnoreCase)))
-      .Select(obj => obj.Id)
-      .ToList();
-    Log.Write(Tag,
-      $"  object-hidden candidates={objectHidden.Count}" +
-      $" named matches={hiddenIds.Count}");
-    if (hiddenIds.Count == 0)
+    objectHiddenCount = objectHidden.Count;
+    nativeNamedCount = 0;
+    var sets = new Dictionary<string, ActiveHideSet>(
+      StringComparer.OrdinalIgnoreCase);
+    foreach (var obj in objectHidden)
     {
-      var setDescription = showAllNamedSets
-        ? "any named set"
-        : $"set {hideSetName}";
-      RhinoApp.WriteLine($"vShow: no hidden objects in {setDescription}.");
-      Log.Write(Tag, $"  no hidden objects hideSet={setDescription}");
-      return Result.Nothing;
+      if (!HideSetState.TryGetNativeName(obj, out var nativeName))
+        continue;
+
+      nativeNamedCount++;
+      var trackedName = HideSetState.GetTrackedName(obj);
+      if (!string.Equals(nativeName, trackedName, StringComparison.OrdinalIgnoreCase))
+        continue;
+
+      var order = HideSetState.GetTrackedOrder(obj);
+      if (!sets.TryGetValue(nativeName, out var set))
+      {
+        set = new ActiveHideSet(nativeName, order);
+        sets.Add(nativeName, set);
+      }
+
+      set.Order = Math.Max(set.Order, order);
+      set.ObjectIds.Add(obj.Id);
     }
 
-    var shownCount = 0;
-    foreach (var objectId in hiddenIds)
-    {
-      if (doc.Objects.Show(objectId, false))
-        shownCount++;
-    }
-
-    doc.Views.Redraw();
-    Log.Write(Tag,
-      $"  shown={shownCount}/{hiddenIds.Count}" +
-      $" hideSet={(showAllNamedSets ? "<all named>" : hideSetName)}");
-    RhinoApp.WriteLine($"vShow: shown {shownCount} object(s).");
-
-    return shownCount > 0 ? Result.Success : Result.Failure;
+    return sets.Values.ToList();
   }
 
-  private static string? GetHideSetName(out Result commandResult)
+  private static string? GetHideSetName(
+    IReadOnlyList<ActiveHideSet> recentSets,
+    out Result commandResult)
   {
     using var getter = new GetString();
     getter.SetCommandPrompt(SetPrompt);
     getter.AcceptNothing(true);
     getter.EnableTransparentCommands(true);
+
+    var optionSets = new Dictionary<int, string>();
+    var optionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    for (var i = 0; i < recentSets.Count; i++)
+    {
+      var setName = recentSets[i].Name;
+      var optionName = OptionName(setName, i + 1, optionNames);
+      var optionIndex = string.Equals(optionName, setName, StringComparison.Ordinal)
+        ? getter.AddOption(optionName)
+        : getter.AddOption(optionName, setName);
+      if (optionIndex > 0)
+        optionSets[optionIndex] = setName;
+    }
 
     var result = getter.Get();
     commandResult = getter.CommandResult();
@@ -122,39 +189,38 @@ public sealed class vShow : Command
     if (result == GetResult.Nothing)
       return string.Empty;
 
+    if (result == GetResult.Option &&
+        optionSets.TryGetValue(getter.Option().Index, out var selectedSet))
+    {
+      return selectedSet;
+    }
+
     return result == GetResult.String
       ? (getter.StringResult() ?? string.Empty).Trim()
       : null;
   }
 
-  private static bool TryGetHideSetName(
-    RhinoObject obj,
-    out string hideSetName)
+  private static string OptionName(
+    string setName,
+    int position,
+    HashSet<string> usedNames)
   {
-    hideSetName = string.Empty;
-    if (ObjectPointerMethod == null || HideSetNameMethod == null)
-      return false;
+    var characters = setName.Where(IsAsciiLetterOrDigit).ToArray();
+    var candidate = new string(characters);
+    if (string.IsNullOrEmpty(candidate) || !IsAsciiLetter(candidate[0]))
+      candidate = $"Set{position}";
 
-    try
-    {
-      var objectPointer = (IntPtr)(ObjectPointerMethod.Invoke(obj, null) ?? IntPtr.Zero);
-      if (objectPointer == IntPtr.Zero)
-        return false;
-
-      using var value = new StringHolder();
-      var found = (bool)(HideSetNameMethod.Invoke(
-        null,
-        new object[] { objectPointer, value.NonConstPointer() }) ?? false);
-      if (!found)
-        return false;
-
-      hideSetName = value.ToStringSafe() ?? string.Empty;
-      return !string.IsNullOrEmpty(hideSetName);
-    }
-    catch (Exception ex)
-    {
-      Log.Write(Tag, $"  hide-set lookup failed object={obj.Id}: {ex.Message}");
-      return false;
-    }
+    var uniqueName = candidate;
+    var suffix = 2;
+    while (!usedNames.Add(uniqueName))
+      uniqueName = $"{candidate}{suffix++}";
+    return uniqueName;
   }
+
+  private static bool IsAsciiLetterOrDigit(char value) =>
+    IsAsciiLetter(value) || value is >= '0' and <= '9';
+
+  private static bool IsAsciiLetter(char value) =>
+    value is >= 'A' and <= 'Z' or >= 'a' and <= 'z';
+
 }

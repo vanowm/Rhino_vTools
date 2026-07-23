@@ -1,22 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vOffset toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M5 34C13 13 27 12 43 21"/>
-    <path class="accent" d="M5 25C14 5 29 5 43 13"/>
-    <path class="soft" d="M14 25L11 15M28 17L26 8"/>
-    <path class="accent-fill no-stroke" d="M8 16L13 10L15 18ZM23 9L28 4L29 12Z"/>
-  </g>
+  <svg height="40" viewBox="0 0 48 48" width="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="2" y="2"><clipPath id="a"><path clip-rule="evenodd" d="m0 0h36v36h-36z" /></clipPath><clipPath id="b"><path d="m7.505 7.474h13.746v13.967h-13.746z" /></clipPath><clipPath id="c"><path d="m18.672765 3.672765h3.12447v3.12447h-3.12447z" /></clipPath><clipPath id="d"><path d="m17.984 2.984h4.501v4.501h-4.501z" /></clipPath><clipPath id="e"><path d="m3.696765 18.687765h3.12447v3.12447h-3.12447z" /></clipPath><clipPath id="f"><path d="m3.008 17.999h4.501v4.501h-4.501z" /></clipPath><g clip-path="url(#a)" transform="matrix(1.3333333 0 0 -1.3333333 0 48)"><path d="m31.502 8.222-3.009.105c.068 1.921-.016 5.693-1.198 8.694-2.703 6.099-11.747 14.131-20.918 11.505l-.829 2.893c11.176 3.201 21.427-6.246 24.524-13.237 1.442-3.657 1.5-7.945 1.43-9.96z" /><path d="m8.312813 32.247813v-4.551626h-4.551626v4.551626z" fill="#fff" fill-rule="evenodd" /><path d="m3.009 26.944v6.055h6.055v-6.055zm4.551 1.504v3.047h-3.047v-3.047z" /><path d="m32.273813 8.274813v-4.551626h-4.551626v4.551626z" fill="#fff" fill-rule="evenodd" /><path d="m26.97 2.971v6.055h6.055v-6.055zm4.551 1.504v3.047h-3.047v-3.047z" /><g clip-path="url(#b)" opacity=".498039"><path d="m21.247 7.474-1.829.005c.002 1.239-.189 3.199-.807 4.769-1.406 3.173-6.291 7.358-11.093 7.325l-.013 1.829c5.661.039 11.132-4.697 12.795-8.447.748-1.902.951-4.116.947-5.481z" /></g><g clip-path="url(#c)" opacity=".498039"><path d="m21.797235 6.797235v-3.12447h-3.12447v3.12447z" fill="#fff" fill-rule="evenodd" /></g><g clip-path="url(#d)" opacity=".498039"><path d="m17.984 2.984v4.501h4.501v-4.501zm3.124 1.377v1.747h-1.747v-1.747z" /></g><g clip-path="url(#e)" opacity=".498039"><path d="m6.821235 21.812235v-3.12447h-3.12447v3.12447z" fill="#fff" fill-rule="evenodd" /></g><g clip-path="url(#f)" opacity=".498039"><path d="m3.008 17.999v4.501h4.501v-4.501zm3.124 1.377v1.747h-1.747v-1.747z" /></g></g></svg>
+  <path class="vt-op" d="M9 38C16 31 32 31 39 38M39 38L32 37M39 38L37 31"/>
 </svg>

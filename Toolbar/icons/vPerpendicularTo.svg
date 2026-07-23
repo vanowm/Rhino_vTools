@@ -1,23 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vPerpendicularTo toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M5 34C17 28 31 37 43 29"/>
-    <path class="accent" d="M24 31L24 8"/>
-    <path class="accent" d="M24 25H30V31"/>
-    <rect class="node" x="21" y="5" width="6" height="6"/>
-    <circle class="accent-fill" cx="24" cy="31" r="2.5"/>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <style type="text/css">@import url('https://themes.googleusercontent.com/fonts/css?family=Open Sans:400,600');</style>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <path d="M 11.773,10.712 L 10.712,11.773 L 24.151,25.212 L 25.212,24.151 L 11.773,10.712 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+  <path d="M 1.537,13.495 L 1.537,16.457 C 9.772,16.457 16.457,9.772 16.457,1.537 L 13.495,1.537 C 13.495,8.137 8.137,13.495 1.537,13.495 Z" stroke-width="0.5" stroke="none" fill="#231f20" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.498039" />
+  <path d="M 19.468,34.387 L 22.43,34.387 C 22.43,27.786 27.786,22.43 34.387,22.43 L 34.387,19.468 C 26.151,19.468 19.468,26.151 19.468,34.387 Z" stroke-width="0.5" stroke="none" fill="#231f20" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.498039" />
+  <g id="Group" stroke="none">
+   <rect x="-2.24" y="-2.24" width="4.48" height="4.48" transform="translate(12.016 11.99) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 9.026,9 L 9.026,14.979 L 15.005,14.979 L 15.005,9 L 9.026,9 Z M 13.505,10.5 L 13.505,13.479 L 10.526,13.479 L 10.526,10.5 L 13.505,10.5 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
   </g>
+  <g id="Group_1" stroke="none">
+   <rect x="-2.244" y="-2.244" width="4.488" height="4.488" transform="translate(24.001 24.001) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 21,21 L 21,27.001 L 27.001,27.001 L 27.001,21 L 21,21 Z M 25.489,22.512 L 25.489,25.489 L 22.512,25.489 L 22.512,22.512 L 25.489,22.512 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+ </g>
+</svg>
+  <path class="vt-op" d="M24 28H31V35M31 12C37 16 39 21 38 27M38 27L34 22M38 27L42 23"/>
 </svg>

@@ -1,22 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vTangent toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M6 34C15 31 18 18 25 17C32 16 37 23 42 10"/>
-    <path class="accent" d="M9 31L34 18"/>
-    <circle class="accent-fill" cx="25" cy="17" r="3"/>
-    <path class="accent" d="M29 14L35 15L32 21"/>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <style type="text/css">@import url('https://themes.googleusercontent.com/fonts/css?family=Open Sans:400,600');</style>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <path d="M 1.487,12.007 L 1.487,14.985 C 6.05,14.985 9.756,18.69 9.756,23.255 C 9.756,27.818 6.05,31.524 1.487,31.524 L 1.487,34.502 C 7.695,34.502 12.734,29.463 12.734,23.255 C 12.734,17.045 7.695,12.007 1.487,12.007 Z" stroke-width="0.5" stroke="none" fill="#231f20" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.498039" />
+  <path d="M 23.266,12.746 C 23.266,18.954 28.304,23.993 34.513,23.993 L 34.513,21.015 C 29.949,21.015 26.244,17.309 26.244,12.746 C 26.244,8.182 29.949,4.477 34.513,4.477 L 34.513,1.499 C 28.304,1.499 23.266,6.537 23.266,12.746 Z" stroke-width="0.5" stroke="none" fill="#231f20" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.498039" />
+  <path d="M 25.656,6.3 L 9.142,28.818 L 10.343,29.699 L 26.857,7.181 L 25.656,6.3 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+  <g id="Group" stroke="none">
+   <rect x="-2.239" y="-2.239" width="4.478" height="4.478" transform="translate(10.481 28.496) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 7.497,25.512 L 7.497,31.479 L 13.464,31.479 L 13.464,25.512 L 7.497,25.512 Z M 11.975,27.001 L 11.975,29.99 L 8.986,29.99 L 8.986,27.001 L 11.975,27.001 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
   </g>
+  <g id="Group_1" stroke="none">
+   <rect x="-2.252" y="-2.252" width="4.504" height="4.504" transform="translate(25.481 7.492) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 22.484,4.495 L 22.484,10.487 L 28.476,10.487 L 28.476,4.495 L 22.484,4.495 Z M 26.987,5.984 L 26.987,8.998 L 23.973,8.998 L 23.973,5.984 L 26.987,5.984 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+ </g>
+</svg>
+  <path class="vt-op" d="M11 39L37 25M30 19C37 20 41 24 42 30M42 30L37 25M42 30L36 32"/>
 </svg>

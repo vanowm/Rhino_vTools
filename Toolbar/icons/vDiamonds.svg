@@ -1,21 +1,55 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vDiamonds toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <rect x="5" y="8" width="38" height="32"/>
-    <path d="M5 24L15 8L25 24L35 8L43 21M5 24L15 40L25 24L35 40L43 27"/>
-    <path class="accent" d="M15 8L5 24L15 40L25 24Z"/>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <style type="text/css">@import url('https://themes.googleusercontent.com/fonts/css?family=Open Sans:400,600');</style>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <path d="M 16.712,9.22 L 7.72,18.213 C 7.426,18.507 7.426,18.984 7.72,19.278 L 16.721,28.28 C 17.015,28.574 17.492,28.574 17.786,28.28 L 26.779,19.287 C 27.073,18.993 27.073,18.516 26.779,18.222 L 17.777,9.22 C 17.483,8.926 17.006,8.926 16.712,9.22 Z M 17.245,10.817 L 25.182,18.755 L 17.254,26.683 L 9.317,18.745 L 17.245,10.817 Z" stroke-width="0.5" stroke="none" fill="#ff0000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  <g id="Group" stroke="none">
+   <rect x="-1.501" y="-1.501" width="3.003" height="3.003" transform="translate(8.283 27.773) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 6.033,25.523 L 6.033,30.023 L 10.533,30.023 L 10.533,25.523 L 6.033,25.523 Z M 9.037,27.019 L 9.037,28.527 L 7.529,28.527 L 7.529,27.019 L 9.037,27.019 Z" stroke-width="0.5" fill="#7f7f7f" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
   </g>
+  <g id="Group_1" stroke="none">
+   <rect x="-1.501" y="-1.501" width="3.003" height="3.003" transform="translate(8.25 18.759) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 6,16.509 L 6,21.009 L 10.5,21.009 L 10.5,16.509 L 6,16.509 Z M 9.004,18.005 L 9.004,19.513 L 7.496,19.513 L 7.496,18.005 L 9.004,18.005 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+  <g id="Group_2" stroke="none">
+   <rect x="-1.501" y="-1.501" width="3.003" height="3.003" transform="translate(26.25 27.779) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 24,25.529 L 24,30.029 L 28.5,30.029 L 28.5,25.529 L 24,25.529 Z M 27.004,27.025 L 27.004,28.533 L 25.496,28.533 L 25.496,27.025 L 27.004,27.025 Z" stroke-width="0.5" fill="#7f7f7f" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+  <g id="Group_3" stroke="none">
+   <rect x="-1.501" y="-1.501" width="3.003" height="3.003" transform="translate(26.25 18.75) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 24,16.5 L 24,21 L 28.5,21 L 28.5,16.5 L 24,16.5 Z M 27.004,17.996 L 27.004,19.504 L 25.496,19.504 L 25.496,17.996 L 27.004,17.996 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+  <g id="Group_4" stroke="none">
+   <rect x="-1.501" y="-1.501" width="3.003" height="3.003" transform="translate(17.283 27.758) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 15.033,25.508 L 15.033,30.008 L 19.533,30.008 L 19.533,25.508 L 15.033,25.508 Z M 18.037,27.004 L 18.037,28.512 L 16.529,28.512 L 16.529,27.004 L 18.037,27.004 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+  <g id="Group_5" stroke="none">
+   <rect x="-1.501" y="-1.501" width="3.003" height="3.003" transform="translate(17.25 18.75) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 15,16.5 L 15,21 L 19.5,21 L 19.5,16.5 L 15,16.5 Z M 18.004,17.996 L 18.004,19.504 L 16.496,19.504 L 16.496,17.996 L 18.004,17.996 Z" stroke-width="0.5" fill="#7f7f7f" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+  <g id="Group_6" stroke="none">
+   <rect x="-1.501" y="-1.501" width="3.003" height="3.003" transform="translate(8.25 9.765) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 6,7.515 L 6,12.015 L 10.5,12.015 L 10.5,7.515 L 6,7.515 Z M 9.004,9.011 L 9.004,10.519 L 7.496,10.519 L 7.496,9.011 L 9.004,9.011 Z" stroke-width="0.5" fill="#7f7f7f" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+  <g id="Group_7" stroke="none">
+   <rect x="-1.501" y="-1.501" width="3.003" height="3.003" transform="translate(26.25 9.75) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 24,7.5 L 24,12 L 28.5,12 L 28.5,7.5 L 24,7.5 Z M 27.004,8.996 L 27.004,10.504 L 25.496,10.504 L 25.496,8.996 L 27.004,8.996 Z" stroke-width="0.5" fill="#7f7f7f" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+  <g id="Group_8" stroke="none">
+   <rect x="-1.501" y="-1.501" width="3.003" height="3.003" transform="translate(17.25 9.75) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 15,7.5 L 15,12 L 19.5,12 L 19.5,7.5 L 15,7.5 Z M 18.004,8.996 L 18.004,10.504 L 16.496,10.504 L 16.496,8.996 L 18.004,8.996 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+ </g>
+</svg>
+  <rect class="vt-soft" x="5" y="5" width="38" height="38"/><path class="vt-op" d="M6 24L15 15L24 24L33 15L42 24L33 33L24 24L15 33Z"/>
 </svg>

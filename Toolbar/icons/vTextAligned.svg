@@ -1,21 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vTextAligned toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M5 36C17 27 30 37 43 25"/>
-    <path class="accent" d="M14 27L20 10L26 27M17 20H23M29 12V28M25 12H33"/>
-    <path class="soft" d="M11 31L36 22"/>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <style type="text/css">@import url('https://themes.googleusercontent.com/fonts/css?family=Open Sans:400,600');</style>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <g id="Group" stroke="none">
+   <rect x="-2.24" y="-2.24" width="4.481" height="4.481" transform="translate(22.49 29.99) rotate(180)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 19.5,27 L 19.5,32.981 L 25.481,32.981 L 25.481,27 L 19.5,27 Z M 23.981,28.5 L 23.981,31.481 L 21,31.481 L 21,28.5 L 23.981,28.5 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
   </g>
+  <g id="Group_1" stroke="none">
+   <rect x="-2.24" y="-2.24" width="4.481" height="4.481" transform="translate(7.49 14.99) rotate(180)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 4.5,12 L 4.5,17.981 L 10.481,17.981 L 10.481,12 L 4.5,12 Z M 8.981,13.5 L 8.981,16.481 L 6,16.481 L 6,13.5 L 8.981,13.5 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+  <path d="M 33.737,17.728 L 24.153,27.312 L 25.214,28.373 L 34.798,18.789 L 33.737,17.728 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+  <path d="M 18.768,2.983 L 9.184,12.566 L 10.245,13.627 L 19.829,4.044 L 18.768,2.983 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+  <path d="M 20.054,7.144 L 18.993,8.205 L 29.314,18.526 L 30.375,17.465 L 20.054,7.144 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+  <path d="M 29.832,15.037 L 29.832,17.974 L 26.896,17.974 L 26.896,19.474 L 31.332,19.474 L 31.332,15.037 L 29.832,15.037 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+  <path d="M 18.037,6.188 L 18.037,10.624 L 19.537,10.624 L 19.537,7.688 L 22.473,7.688 L 22.473,6.188 L 18.037,6.188 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+ </g>
+</svg>
+  <path class="vt-soft" d="M5 39C18 29 30 40 43 28"/><path class="vt-op" d="M29 30L33 17L37 30M31 25H35"/>
 </svg>

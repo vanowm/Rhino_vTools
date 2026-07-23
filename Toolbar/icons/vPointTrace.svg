@@ -1,22 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vPointTrace toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M5 14C14 5 29 18 43 9M5 38C17 26 31 43 43 31"/>
-    <path class="accent dash" d="M20 12L24 35"/>
-    <circle class="accent-fill" cx="20" cy="12" r="3"/>
-    <circle class="accent-fill" cx="24" cy="35" r="3"/>
-  </g>
+  <svg height="40" viewBox="0 0 48 48" width="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="2" y="2"><clipPath id="a"><path clip-rule="evenodd" d="m0 0h36v36h-36z" /></clipPath><g clip-path="url(#a)" fill-opacity=".996078" transform="matrix(1.3333333 0 0 -1.3333333 0 48)"><path d="m17.239 18.013c6.215 0 12.764 6.526 12.764 12.739h1.488c0-7.038-7.218-14.227-14.252-14.227-6.156 0-11.251-5.751-11.251-12.026h-1.488c0 6.974 5.644 13.514 12.739 13.514z" /><path d="m27.751 30.756c0 1.656 1.344 3 3 3s3-1.344 3-3-1.344-3-3-3-3 1.344-3 3z" fill="#fff" fill-rule="evenodd" /><path d="m27.007 30.756c0 2.066 1.677 3.744 3.744 3.744 2.066 0 3.744-1.678 3.744-3.744 0-2.067-1.678-3.744-3.744-3.744-2.067 0-3.744 1.677-3.744 3.744zm6 0c0 1.245-1.011 2.256-2.256 2.256-1.246 0-2.256-1.011-2.256-2.256 0-1.246 1.01-2.256 2.256-2.256 1.245 0 2.256 1.01 2.256 2.256z" /><path d="m2.248 5.243c0 1.656 1.344 3 3 3s3-1.344 3-3-1.344-3-3-3-3 1.344-3 3z" fill="#fff" fill-rule="evenodd" /><path d="m1.504 5.243c0 2.066 1.677 3.744 3.744 3.744 2.066 0 3.744-1.678 3.744-3.744 0-2.067-1.678-3.744-3.744-3.744-2.067 0-3.744 1.677-3.744 3.744zm6 0c0 1.245-1.011 2.256-2.256 2.256-1.246 0-2.256-1.011-2.256-2.256 0-1.246 1.01-2.256 2.256-2.256 1.245 0 2.256 1.01 2.256 2.256z" /><path d="m8.239 15.754c0 1.656 1.344 3 3 3s3-1.344 3-3-1.344-3-3-3-3 1.344-3 3z" fill="#fff" fill-rule="evenodd" /><path d="m7.495 15.754c0 2.066 1.677 3.744 3.744 3.744 2.066 0 3.744-1.678 3.744-3.744 0-2.067-1.678-3.744-3.744-3.744-2.067 0-3.744 1.677-3.744 3.744zm6 0c0 1.245-1.011 2.256-2.256 2.256-1.246 0-2.256-1.011-2.256-2.256 0-1.246 1.01-2.256 2.256-2.256 1.245 0 2.256 1.01 2.256 2.256z" /><path d="m21.751 20.255c0 1.656 1.344 3 3 3s3-1.344 3-3-1.344-3-3-3-3 1.344-3 3z" fill="#fff" fill-rule="evenodd" /><path d="m21.007 20.255c0 2.066 1.677 3.744 3.744 3.744 2.066 0 3.744-1.678 3.744-3.744 0-2.067-1.678-3.744-3.744-3.744-2.067 0-3.744 1.677-3.744 3.744zm6 0c0 1.245-1.011 2.256-2.256 2.256-1.246 0-2.256-1.011-2.256-2.256 0-1.246 1.01-2.256 2.256-2.256 1.245 0 2.256 1.01 2.256 2.256z" /></g></svg>
+  <path class="vt-soft" d="M5 39C17 27 30 43 43 32"/><path class="vt-op" stroke-dasharray="3 2" d="M19 17L25 36"/><circle class="vt-dot" cx="25" cy="36" r="3"/>
 </svg>

@@ -1,22 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vOverlaps toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path class="soft" d="M5 31C15 10 28 39 43 15"/>
-    <path class="accent" d="M5 27C15 6 28 35 43 11"/>
-    <path d="M5 29C15 8 28 37 43 13"/>
-    <circle class="accent-fill" cx="23" cy="23" r="3"/>
-  </g>
+  <svg height="40" viewBox="0 0 48 48" width="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="2" y="2"><clipPath id="a"><path clip-rule="evenodd" d="m0 0h36v36h-36z" /></clipPath><g clip-path="url(#a)" transform="matrix(1.3333333 0 0 -1.3333333 0 48)"><g fill-rule="evenodd"><path d="m6.746 12.248 12.671-4.001v13.338l-12.671 4.002z" fill="#c5c5c5" /><path d="m6.746 25.587 12.671-4.002 8.67 6.67-12.671 4.001z" fill="#fff" /><path d="m19.417 21.585v-13.338l8.67 6.669v13.339z" fill="#585858" /></g><path d="m19.574 7.416-13.573 4.286v14.251l9.264 7.126 13.233-4.024v-14.412zm-.315 1.661 7.75 6.277v12.598l-11.443 3.48-8.076-6.212v-12.427z" /><path d="m33.011 28.503v4.508h-4.507v1.489h5.996v-5.997z" /><path d="m1.499 1.499v5.997h1.489v-4.508h4.508v-1.489z" /><path d="m9.747 7.747 12.671-4.002v13.339l-12.671 4.001z" fill="#ffea00" fill-rule="evenodd" /><path d="m9.747 21.085 12.671-4.001 8.67 6.669-12.671 4.001z" fill="#fff7a2" fill-rule="evenodd" /><path d="m22.418 17.084v-13.339l8.67 6.67v13.338z" fill="#d78900" fill-rule="evenodd" /><path d="m22.575 2.914-13.573 4.287v14.25l9.264 7.126 13.233-4.023v-14.412zm-.315 1.661 7.75 6.278v12.598l-11.443 3.479-8.076-6.212v-12.426z" /></g></svg>
+  <path class="vt-soft" d="M5 39C15 28 27 44 43 30"/><path class="vt-op" d="M5 36C15 25 27 41 43 27"/>
 </svg>

@@ -1,22 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vNotches toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M5 31C16 23 31 34 43 23"/>
-    <path class="accent" d="M12 27L12 15M20 27L16 17L24 17L20 27M30 28L30 14M26 14H34M38 26L35 17L41 17Z"/>
-    <circle class="accent-fill" cx="12" cy="27" r="2"/>
-    <circle class="accent-fill" cx="30" cy="28" r="2"/>
-  </g>
+  <svg height="40" viewBox="0 0 48 48" width="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="2" y="2"><clipPath id="a"><path clip-rule="evenodd" d="m0 0h36v36h-36z" /></clipPath><g clip-path="url(#a)" transform="matrix(1.3333333 0 0 -1.3333333 0 48)"><path d="m7.769 2.991-2.083 2.083c4.432 4.433 6.28 7.033 7.089 9.138.804 2.09.645 3.774.645 6.895v1.473h1.473c3.12 0 4.804-.16 6.894.644 2.106.809 4.706 2.657 9.138 7.089l2.083-2.083c-4.476-4.475-7.444-6.71-10.164-7.756-2.052-.789-3.914-.867-5.905-.857l-.562.004.005-.561c.01-1.992-.068-3.854-.857-5.905-1.046-2.72-3.281-5.688-7.756-10.164z" /><path d="m11.169 24.831v-4.454h4.454v4.454z" fill="#fff" fill-rule="evenodd" /><path d="m10.432 19.64v5.927h5.927v-5.927zm4.454 1.473v2.981h-2.981v-2.981z" /><path d="m5.978 25.573v7.424h1.473v-7.424z" /><path d="m3.003 28.548v1.473h7.424v-1.473z" /></g></svg>
+  <path class="vt-op" d="M9 38V27M18 36L14 27L22 27ZM32 35V25M27 25H37"/><circle class="vt-dot" cx="9" cy="38" r="2"/>
 </svg>

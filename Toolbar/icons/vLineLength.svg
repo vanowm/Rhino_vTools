@@ -1,22 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vLineLength toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M7 17H41"/>
-    <rect class="node" x="4" y="14" width="6" height="6"/>
-    <rect class="node" x="38" y="14" width="6" height="6"/>
-    <path class="accent" d="M7 33H41M7 28V38M41 28V38M7 33L13 29M7 33L13 37M41 33L35 29M41 33L35 37"/>
-  </g>
+  <svg height="40" viewBox="0 0 48 48" width="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="2" y="2"><clipPath id="a"><path clip-rule="evenodd" d="m0 0h36v36h-36z" /></clipPath><g clip-path="url(#a)" transform="matrix(1.3333333 0 0 -1.3333333 0 48)"><path d="m5.97 5.747-2.941.451c2.082 13.576 6.05 19.897 11.222 20.683 5.027.763 9.696-3.961 12.504-8.375l-2.511-1.597c-2.804 4.407-6.513 7.49-9.546 7.03-2.868-.436-6.617-4.433-8.728-18.192z" /><path d="m1.5 5.979v1.488h33v-1.488z" fill-opacity=".498039" /><path d="m29.25 8.223v-4.5h4.5v4.5z" fill="#fff" fill-rule="evenodd" /><path d="m28.506 2.979v5.988h5.988v-5.988zm4.5 1.488v3.012h-3.012v-3.012z" /><path d="m2.251 8.223v-4.5h4.5v4.5z" fill="#fff" fill-rule="evenodd" /><path d="m1.507 2.979v5.988h5.988v-5.988zm4.5 1.488v3.012h-3.012v-3.012z" /><path d="m23.25 20.223v-4.5h4.5v4.5z" fill="#fff" fill-rule="evenodd" /><path d="m22.506 14.979v5.988h5.988v-5.988zm4.5 1.488v3.012h-3.012v-3.012z" /><path d="m15.006 7.473v12.029h1.488v-12.029z" /><path d="m12.185 18.104 3.596 4.235 3.501-4.274z" fill-rule="evenodd" /><path d="m19.464 17.977-7.464.042 3.782 4.454zm-.365.175-3.32 4.052-3.41-4.016z" /></g></svg>
+  <path class="vt-op" d="M7 41H41M7 37V45M41 37V45M7 41L13 37M7 41L13 45M41 41L35 37M41 41L35 45"/>
 </svg>

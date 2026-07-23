@@ -1,23 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vProjectToSurface toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M5 31L17 23L43 27L31 39Z"/>
-    <path class="soft" d="M10 31L36 28M18 24L30 38"/>
-    <path d="M8 10C18 4 29 18 41 8"/>
-    <path class="accent" d="M11 31C20 26 29 35 38 28"/>
-    <path class="accent" d="M15 13V23M15 23L11 19M15 23L19 19M33 14V24M33 24L29 20M33 24L37 20"/>
-  </g>
+  <svg height="40" viewBox="0 0 48 48" width="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="2" y="2"><clipPath id="a"><path clip-rule="evenodd" d="m0 0h36v36h-36z" /></clipPath><clipPath id="b"><path d="m2.242 2.245h31.515v19.508h-31.515z" /></clipPath><clipPath id="c"><path clip-rule="evenodd" d="m2.242 21.753v-15.007c10.505-6.002 21.01-6.002 31.515 0v15.007c-10.505-6.002-21.01-6.002-31.515 0z" /></clipPath><mask id="d" height="1" maskUnits="userSpaceOnUse" width="1" x="0" y="0"><image height="1" image-rendering="optimizeSpeed" preserveAspectRatio="none" width="1" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEIAAAApCAAAAACkDKCtAAAAAXNCSVQI5gpbmQAAAHhJREFUSInt1rERw0AIRNF/3CpQLRqPq3ZDDhWoDCU6jAO5Ai7zQL5vFiLa6zEUQJCb9a3nFi2ZBsBPjRg9gKzTFy1NUy0+lxxX9g4AJhmWXuKuYTMNAGiCgMifk9AtzbSwifBviiiiiCKKKKKIfyK0O+by/IdyfAF99xwbglIhUAAAAABJRU5ErkJggg==" /></mask><g clip-path="url(#a)" transform="matrix(1.3333333 0 0 -1.3333333 0 48)"><path d="m24.896 27.943c1.549 1.073 1.886 2.528.411 3.811-1.172 1.018-3.012 1.547-4.532 1.795-2.846.462-7.181.251-9.673-1.477-1.548-1.074-1.887-2.529-.412-3.811 1.174-1.019 3.013-1.548 4.533-1.794 2.845-.464 7.181-.253 9.673 1.476z" style="fill:none;stroke:#000;stroke-width:1.489;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10" /><g clip-path="url(#b)"><g clip-path="url(#c)"><image height="1" image-rendering="optimizeSpeed" mask="url(#d)" preserveAspectRatio="none" transform="matrix(31.515 0 0 -19.508 2.242 21.753)" width="1" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEIAAAApCAYAAACBZ/9xAAAABHNCSVQICAgIfAhkiAAAAkdJREFUaIHtmlGW2yAMRa+E2712Hd22kfqBwITYybQz6eRD9xwfYywwPONIQOTX793BUFW0OJsWyuZsKohUtiKRL2gxCoIWoRRBFX6oo0o7ChTRG/tNBVUb9ahqK1cEVcEdzIzdoNaKVcEM9uqYKbs5VtvZDaopZtZsDPYKu4PVVk+1ubywG1hVqjt1b3XWWqmuuFd+lg1RUBIghRikEEEKEaQQQQoRpBCBuvu4EJHL48pmZr1+hLszPfpDmFmUO47P0tucIyJIIYIUIkghghQiSCGCQwj5vCtq2AfuX9noSTrOLrzyvSkYIoKqIiJPffRNvtjww/NZxBF1wAEDaZ2fbfq6xLO4YM4/4hSNQ05t1/p6eo1zVHXY/KPE6xu1i/xH5VbbeQTMo2C+t6a/jvyNCLbvbsB30z7lHBGDFCJIIYIUgvY7sa3+u/nae3/e1x9UFFmCr9k/r3Wptv2PZnLvy2df38/u/frv1jfO2tu7ctQ7xybHM3NEBClEkEIEKUSQQgQpRPBGQhwzWJeWtnDT/bpNRh/NcOUk3WeyZ7NaxjqMzvsTfQJytW9x+ugHexsfKb8u0/hFkTneMYE61hwENwHkJpZY1yTOYp2jj/ZOI+IWG6Ognw8ROueizW++d+9pofcVYuD/p4nvKcT8PQNny3JfzXsKMXht52feRIh5BDxrUq5ZvpQ3EGJqwpXvHPdfuK/R/evVvsIaZ6z59z75sDtbI2j7GTruR/LUz5vdB0/uPuKGLswc97j7+B/FWu6sb+4O5vwBxKtUffd2PgAAAAAASUVORK5CYII=" /></g></g><path d="m1.872 6.099c-.232.133-.375.379-.375.647v15.007c0 .57.618.929 1.114.646 10.276-5.871 20.5-5.871 30.776 0 .496.283 1.114-.076 1.114-.646v-15.007c0-.268-.143-.514-.375-.647-10.734-6.133-21.52-6.133-32.254 0zm31.14 1.092v13.318l-.9-.482c-9.397-4.695-18.83-4.695-28.227 0l-.899.482-.001-13.318-.374.201c9.633-5.505 19.221-5.849 28.849-1.033z" /><path d="m24.282 7.679c1.411 1.074 1.718 2.529.374 3.812-1.067 1.018-2.744 1.547-4.129 1.795-2.592.462-6.541.251-8.811-1.478-1.411-1.073-1.719-2.528-.375-3.81 1.068-1.019 2.744-1.548 4.129-1.794 2.591-.464 6.542-.253 8.812 1.475z" style="fill:none;stroke:#fff;stroke-width:2.977;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10" /></g></svg>
+  <path class="vt-soft" d="M7 11C17 4 30 18 41 8"/><path class="vt-op" d="M14 14V26M14 26L10 21M14 26L18 21M34 14V26M34 26L30 21M34 26L38 21"/>
 </svg>

@@ -1,23 +1,73 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vFacing toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M7 8V37H41V8"/>
-    <path class="accent" d="M14 11V30H34V11"/>
-    <path class="soft" d="M7 37L14 30M41 37L34 30"/>
-    <rect class="node" x="4" y="5" width="6" height="6"/>
-    <rect class="node" x="38" y="5" width="6" height="6"/>
-  </g>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <radialGradient id="RadialGradient" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="23.89" gradientTransform="translate(18.068 18.996) rotate(1.60226) scale(1 0.220134)">
+   <stop offset="0" stop-color="#304ab6" />
+   <stop offset="1" stop-color="#6582fc" />
+  </radialGradient>
+  <linearGradient id="LinearGradient" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="2.502" y2="0" gradientTransform="matrix(-0.790817 -0.99971 1.0123 0.0151672 0.487 0.725)">
+   <stop offset="0" stop-color="#7f7f7f" />
+   <stop offset="1" stop-color="#000000" />
+  </linearGradient>
+  <linearGradient id="LinearGradient_1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="2.501" y2="0" gradientTransform="matrix(-0.667633 0.999893 -1.0121 0.0179443 0.412 -0.726)">
+   <stop offset="0" stop-color="#7f7f7f" />
+   <stop offset="1" stop-color="#000000" />
+  </linearGradient>
+  <linearGradient id="LinearGradient_2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="-15.608" y2="-0.562" gradientTransform="translate(21.605 19.57)">
+   <stop offset="0" stop-color="#ffffff" />
+   <stop offset="1" stop-color="#000000" />
+  </linearGradient>
+  <linearGradient id="LinearGradient_3" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="10.475" y2="-2.249" gradientTransform="translate(19.005 18.914)">
+   <stop offset="0" stop-color="#ffffff" />
+   <stop offset="1" stop-color="#000000" />
+  </linearGradient>
+  <linearGradient id="LinearGradient_4" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="2.074" y2="0" gradientTransform="translate(20.302 26.377) rotate(-92.9562) skewX(-1.37685)">
+   <stop offset="0" stop-color="#7f7f7f" />
+   <stop offset="1" stop-color="#000000" />
+  </linearGradient>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <path d="M 4.559,12.003 C 1.766,14.402 3.402,18.864 4.305,21.439 C 5.096,23.706 7.076,25.977 9.829,27.273 C 12.787,28.662 16.684,28.816 20.287,28.716 C 24.182,28.605 26.935,28.818 29.339,27.466 C 31.564,26.215 32.527,23.847 32.816,21.961 C 33.37,18.343 33.547,14.531 30.402,12.003 C 27.527,9.689 23.648,9.568 17.906,9.291 C 12.759,9.043 6.939,9.958 4.559,12.003 Z M 18,13.893 C 20.533,14.066 22.243,14.141 23.512,15.584 C 24.899,17.161 24.82,19.539 24.576,21.795 C 24.448,22.972 24.024,24.449 23.043,25.229 C 21.982,26.073 20.768,25.939 19.05,26.008 C 17.461,26.071 15.742,25.975 14.438,25.108 C 13.223,24.301 12.35,22.884 12.001,21.47 C 11.603,19.864 10.881,17.08 12.113,15.584 C 13.163,14.309 15.73,13.738 18,13.893 Z" stroke-width="1.5" stroke-linejoin="round" stroke="#000000" marker-start="none" marker-end="none" fill="url(#RadialGradient)" />
+  <mask id="TranspMask">
+   <rect x="-10%" y="-10%" width="120%" height="120%" fill="url(#LinearGradient)" stroke="none" />
+  </mask>
+  <ellipse rx="12.067" ry="1.789" transform="translate(17.53 12.522) rotate(-178.965) skewX(-39.2057)" stroke-opacity="0.498039" stroke="none" fill="#ffffff" stroke-width="2.25" stroke-linejoin="round" mask="url(#TranspMask)" />
+  <mask id="TranspMask_1">
+   <rect x="-10%" y="-10%" width="120%" height="120%" fill="url(#LinearGradient_1)" stroke="none" />
+  </mask>
+  <ellipse rx="10.184" ry="1.789" transform="translate(19.804 27.232) rotate(178.773) skewX(34.305)" stroke-opacity="0.498039" stroke="none" fill="#ffffff" stroke-width="2.25" stroke-linejoin="round" mask="url(#TranspMask_1)" />
+  <path d="M 14.438,25.108 C 13.223,24.301 12.35,22.884 12.001,21.47 C 11.603,19.864 10.881,17.08 12.113,15.584 C 13.163,14.309 15.73,13.738 18,13.893 C 20.533,14.066 22.243,14.141 23.512,15.584 C 24.899,17.161 24.82,19.539 24.576,21.795 C 24.448,22.972 24.024,24.449 23.043,25.229 C 21.982,26.073 20.768,25.939 19.05,26.008 C 17.461,26.071 15.742,25.975 14.438,25.108 Z" stroke-linejoin="round" stroke-width="1.5" stroke="#000000" marker-start="none" marker-end="none" />
+  <mask id="TranspMask_2">
+   <rect x="-10%" y="-10%" width="120%" height="120%" fill="url(#LinearGradient_2)" stroke="none" />
+  </mask>
+  <path d="M 13.825,14.134 C 12.045,15.215 11.338,17.297 11.294,19.992 C 6.934,18.024 1.591,16.29 5.2,12.587 C 5.821,11.821 10.207,13.179 13.825,14.134 Z" stroke-width="2.25" stroke="none" fill="#122877" stroke-linejoin="round" marker-start="none" marker-end="none" mask="url(#TranspMask_2)" />
+  <mask id="TranspMask_3">
+   <rect x="-10%" y="-10%" width="120%" height="120%" fill="url(#LinearGradient_3)" stroke="none" />
+  </mask>
+  <path d="M 22.005,14.134 C 23.824,15.601 24.815,17.557 25.074,19.945 C 27.487,17.977 34.918,16.29 30.63,12.587 C 30.009,11.821 25.623,13.179 22.005,14.134 Z" stroke-width="2.25" stroke="none" fill="#122877" stroke-linejoin="round" marker-start="none" marker-end="none" mask="url(#TranspMask_3)" />
+  <mask id="TranspMask_4">
+   <rect x="-10%" y="-10%" width="120%" height="120%" fill="url(#LinearGradient_4)" stroke="none" />
+  </mask>
+  <path d="M 8.119,25.958 C 7.489,25.342 10.117,24.765 14.371,24.485 C 15.675,24.399 14.422,26.039 19.459,26.008 C 23.889,25.898 22.466,24.315 24.17,24.387 C 28.406,24.566 31.664,25.022 32.251,25.596 C 33.074,26.401 28.337,27.138 21.677,27.237 C 15.017,27.336 8.942,26.763 8.119,25.958 Z" stroke-opacity="0.498039" stroke="none" fill="#ffffff" stroke-width="2.25" stroke-linejoin="round" marker-start="none" marker-end="none" mask="url(#TranspMask_4)" />
+  <path d="M 14.438,25.108 C 13.223,24.301 12.35,22.884 12.001,21.47 C 11.603,19.864 10.881,17.08 12.113,15.584 C 13.163,14.309 15.73,13.738 18,13.893 C 20.533,14.066 22.243,14.141 23.512,15.584 C 24.899,17.161 24.82,19.539 24.576,21.795 C 24.448,22.972 24.024,24.449 23.043,25.229 C 21.982,26.073 20.768,25.939 19.05,26.008 C 17.461,26.071 15.742,25.975 14.438,25.108 Z" stroke-linejoin="round" stroke-width="1.5" stroke="#000000" marker-start="none" marker-end="none" />
+  <path d="M 9.829,27.11 C 7.076,25.85 5.096,23.642 4.305,21.439 C 3.402,18.936 1.766,14.598 4.559,12.266 C 6.939,10.278 12.759,9.388 17.906,9.63 C 23.648,9.899 27.527,10.016 30.402,12.266 C 33.547,14.723 33.37,18.429 32.816,21.946 C 32.527,23.78 31.564,26.081 29.339,27.298 C 26.935,28.612 24.182,28.405 20.287,28.513 C 16.684,28.61 12.787,28.46 9.829,27.11 Z" stroke-width="1.5" stroke="#000000" stroke-linejoin="round" marker-start="none" marker-end="none" />
+  <path d="M 11.481,20.319 L 3.906,20.283" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.75" />
+  <path d="M 17.388,13.523 L 17.294,9.023" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.75" />
+  <path d="M 25.027,20.319 L 33.277,20.366" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.75" />
+  <path d="M 23.809,15.633 L 29.617,11.719" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.75" />
+  <path d="M 12.091,15.211 L 5.464,12.304" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.75" />
+  <path d="M 13.591,25.007 L 10.638,26.929" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.75" />
+  <path d="M 22.665,25.487 L 26.621,27.866" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.75" />
+  <path d="M 18.746,26.366 L 18.935,28.536" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.75" />
+ </g>
+</svg>
+  <path class="vt-op" d="M9 12V38H39V12M15 15V32H33V15"/><path class="vt-soft" d="M9 38L15 32M39 38L33 32"/>
 </svg>

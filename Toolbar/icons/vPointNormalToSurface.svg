@@ -1,24 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vPointNormalToSurface toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M5 31L17 21L43 25L31 37Z"/>
-    <path class="soft" d="M12 31L37 27M18 23L30 35"/>
-    <path class="accent" d="M24 28V8"/>
-    <circle class="accent-fill" cx="24" cy="8" r="3.5"/>
-    <circle class="node" cx="24" cy="28" r="2.5"/>
-    <path class="accent" d="M24 23H29V28"/>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <radialGradient id="RadialGradient" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="16.238" gradientTransform="translate(16.811 17.984) rotate(-35.1238) scale(1 0.999692)">
+   <stop offset="0" stop-color="#ffffff" />
+   <stop offset="0.571438133716583" stop-color="#f0f0f0" />
+   <stop offset="0.848319709300995" stop-color="#c5c5c5" />
+   <stop offset="1" stop-color="#c5c5c5" />
+  </radialGradient>
+  <style type="text/css">@import url('https://themes.googleusercontent.com/fonts/css?family=Open Sans:400,600');</style>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <path d="M 12.094,21.874 C 15.894,26.793 22.962,27.699 27.884,23.902 C 32.805,20.104 33.723,13.04 29.927,8.116 C 26.127,3.189 19.05,2.283 14.126,6.087 C 9.208,9.888 8.296,16.954 12.094,21.874 Z" stroke-width="1.492" stroke="#000000" stroke-linejoin="miter" marker-start="none" marker-end="none" fill="url(#RadialGradient)" />
+  <path d="M 16.678,18.222 L 4.651,30.248 L 5.706,31.303 L 17.733,19.277 L 16.678,18.222 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+  <g id="Group" stroke="none">
+   <rect x="-2.242" y="-2.242" width="4.484" height="4.484" transform="translate(5.984 30.012) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 2.995,27.023 L 2.995,32.999 L 8.971,32.999 L 8.971,27.023 L 2.995,27.023 Z M 7.48,28.514 L 7.48,31.508 L 4.486,31.508 L 4.486,28.514 L 7.48,28.514 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
   </g>
+  <g id="Group_1" stroke="none">
+   <rect x="-2.254" y="-2.254" width="4.509" height="4.509" transform="translate(18 18) rotate(90)" fill="#ffffff" stroke-linejoin="miter" />
+   <path d="M 14.999,14.999 L 14.999,21 L 21,21 L 21,14.999 L 14.999,14.999 Z M 19.509,16.49 L 19.509,19.509 L 16.49,19.509 L 16.49,16.49 L 19.509,16.49 Z" stroke-width="0.5" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
+  </g>
+ </g>
+</svg>
+  <path class="vt-fill" d="M7 37L17 29L42 33L31 42Z"/><path class="vt-op" d="M24 32V18M24 27H29V32"/>
 </svg>

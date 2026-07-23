@@ -1,22 +1,41 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vUnrollSrf toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <path d="M5 11Q21 6 24 19Q24 32 8 38Q16 26 5 11Z"/>
-    <path class="soft" d="M8 15Q18 13 18 23Q17 30 11 34"/>
-    <path class="accent" d="M22 15C29 10 35 12 39 17M39 17L33 15M39 17L37 23"/>
-    <path class="accent" d="M27 25H43V39H27Z"/>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <linearGradient id="LinearGradient" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="14.68" y2="0" gradientTransform="translate(33.194 19.829) rotate(-90) skewX(-89.9264)">
+   <stop offset="0" stop-color="#000000" />
+   <stop offset="1" stop-color="#000000" />
+  </linearGradient>
+  <linearGradient id="LinearGradient_1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="14.68" y2="0" gradientTransform="translate(12.333 22.437) skewX(-89.9264)">
+   <stop offset="0" stop-color="#000000" />
+   <stop offset="1" stop-color="#000000" />
+  </linearGradient>
+  <linearGradient id="LinearGradient_2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1.566" y2="-10.364" gradientTransform="translate(24.027 28.387)">
+   <stop offset="0" stop-color="#c5c5c5" />
+   <stop offset="1" stop-color="#6d6364" />
+  </linearGradient>
+  <style type="text/css">@import url('https://themes.googleusercontent.com/fonts/css?family=Open Sans:400,600');</style>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <g id="Group" stroke="none">
+   <path d="M 10.224,13.358 L 21.961,2.183 L 31.148,10.995 L 21.723,20.618 L 10.224,13.358 Z" fill="#6582fc" stroke-linejoin="round" marker-start="none" marker-end="none" />
+   <path d="M 21.447,1.643 L 9.71,12.818 C 9.359,13.152 9.416,13.728 9.826,13.987 L 21.325,21.247 C 21.622,21.434 22.009,21.389 22.254,21.138 L 31.679,11.515 C 31.969,11.22 31.962,10.744 31.663,10.457 L 22.476,1.645 C 22.189,1.37 21.735,1.369 21.447,1.643 Z M 21.959,3.212 L 30.089,11.011 L 21.611,19.667 L 11.429,13.238 L 21.959,3.212 Z" stroke-width="0.5" fill="#ffffff" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="1.000000" />
   </g>
+  <path d="M 17.574,7.133 L 26.695,15.188" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M 26.486,6.933 L 16.974,15.938" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+  <g id="Group_1" stroke-linejoin="round" stroke-linecap="round" stroke-width="1.489">
+   <path d="M 16.411,16.102 C 18.53,18.031 19.858,21.118 19.858,25.563 L 28.861,33.817 C 28.861,28.844 27.36,25.534 25.142,23.525 L 16.411,16.102 Z" stroke="none" marker-start="none" marker-end="none" fill="url(#LinearGradient_2)" />
+   <path d="M 19.329,21.12 C 17.786,21.04 16.178,21.289 14.613,21.811 L 4.86,14.308 C 11.172,12.414 17.485,14.238 19.329,21.12 Z" stroke="none" fill="#ffffff" marker-start="none" marker-end="none" />
+   <path d="M 19.322,21.135 C 17.78,21.056 16.17,21.291 14.606,21.812 L 4.852,14.309 C 12.355,12.058 19.858,15.059 19.858,25.563 L 28.861,33.817 C 28.861,28.844 27.36,25.534 25.142,23.525 L 16.411,16.102" fill="none" stroke="#231f20" />
+  </g>
+ </g>
+</svg>
+  <rect class="vt-node" x="30" y="31" width="5" height="5"/><rect class="vt-node" x="39" y="31" width="5" height="5"/><path class="vt-op" d="M31 39H43"/>
 </svg>

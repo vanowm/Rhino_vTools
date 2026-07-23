@@ -1,22 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vRectangle toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <rect x="6" y="10" width="36" height="28"/>
-    <rect class="node" x="3" y="35" width="6" height="6"/>
-    <rect class="node" x="39" y="7" width="6" height="6"/>
-    <path class="accent" d="M7 38H42V10"/>
-  </g>
+  <svg height="40" viewBox="0 0 48 48" width="40" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="2" y="2"><clipPath id="a"><path clip-rule="evenodd" d="m0 0h36v36h-36z" /></clipPath><g clip-path="url(#a)" transform="matrix(1.3333333 0 0 -1.3333333 0 48)"><path d="m4.476 8.995v18.01h27.021v-18.01zm25.531 1.49v15.03h-24.041v-15.03z" /><path d="m3.745 12.742v-4.505h4.505v4.505z" fill="#fff" fill-rule="evenodd" /><path d="m3 7.492v5.995h5.995v-5.995zm4.505 1.49v3.015h-3.015v-3.015z" /><path d="m27.749 27.761v-4.505h4.505v4.505z" fill="#fff" fill-rule="evenodd" /><path d="m27.004 22.511v5.995h5.995v-5.995zm4.505 1.49v3.015h-3.015v-3.015z" /></g></svg>
+  <path class="vt-op" d="M7 42H41M7 38V46M41 38V46M4 9V39M1 9H7M1 39H7"/>
 </svg>

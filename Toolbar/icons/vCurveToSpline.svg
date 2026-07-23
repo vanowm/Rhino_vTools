@@ -1,24 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">vCurveToSpline toolbar icon</title>
   <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
+    .vt-op{fill:none;stroke:#4a60ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .vt-soft{fill:none;stroke:#7f7f7f;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
+    .vt-fill{fill:#8c96ff;stroke:#231f20;stroke-width:1.25;stroke-linejoin:round}
+    .vt-node{fill:#fff;stroke:#231f20;stroke-width:1.4}
+    .vt-dot{fill:#4a60ff;stroke:#231f20;stroke-width:1}
   </style>
-  <g class="main">
-    <polyline class="soft" points="5,36 14,11 26,32 42,9"/>
-    <path class="accent" d="M5 36C10 18 15 12 22 24S34 26 42 9"/>
-    <rect class="node" x="3" y="34" width="4" height="4"/>
-    <rect class="node" x="12" y="9" width="4" height="4"/>
-    <rect class="node" x="24" y="30" width="4" height="4"/>
-    <rect class="node" x="40" y="7" width="4" height="4"/>
-  </g>
+  <svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" font-family="Times New Roman" font-size="16" style="font-variant-ligatures:none" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" version="1.1" overflow="visible" width="40" height="40" viewBox="0 -36 36 36" x="2" y="2">
+ <defs>
+  <style type="text/css">@import url('https://themes.googleusercontent.com/fonts/css?family=Open Sans:400,600');</style>
+ </defs>
+ <g id="Layer 1" transform="scale(1 -1)">
+  <path d="M 4.905,16.274 C 4.905,20.053 6.877,22.268 8.386,24.343 C 9.878,26.395 11.294,28.685 11.294,33.044 L 14.294,33.044 C 14.294,27.82 12.514,24.919 10.812,22.579 C 9.127,20.262 7.905,18.883 7.905,16.274 C 7.905,10.922 12.597,7.393 17.586,7.393 C 24.806,7.393 28.863,10.764 28.863,17.073 C 28.863,19.483 27.43,21.043 25.142,22.099 C 22.815,23.173 19.859,23.559 17.586,23.559 L 17.586,26.559 C 20.103,26.559 23.535,26.145 26.399,24.823 C 29.319,23.476 31.863,21.037 31.863,17.073 C 31.863,8.932 26.249,4.393 17.586,4.393 C 11.392,4.393 4.905,8.847 4.905,16.274 Z" stroke-width="0.5" stroke="none" fill="#231f20" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.498039" />
+  <path d="M 17.591,4.9 L 5.509,15.254 L 8.894,23.72 L 12.082,33.281 L 13.505,32.806 L 10.303,23.203 L 7.3,15.695 L 17.58,6.885 L 29.109,16.972 L 17.188,24.423 L 17.983,25.694 L 31.616,17.173 L 17.591,4.9 Z" stroke-width="0.5" stroke="none" fill="#000000" fill-rule="evenodd" marker-start="none" marker-end="none" fill-opacity="0.996078" />
+ </g>
+</svg>
+  <path class="vt-soft" d="M6 38L15 29L25 39L42 28"/><path class="vt-op" d="M6 38C14 22 22 44 42 28"/><circle class="vt-dot" cx="6" cy="38" r="2"/><circle class="vt-dot" cx="42" cy="28" r="2"/>
 </svg>

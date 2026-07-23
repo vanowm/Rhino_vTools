@@ -1,23 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
-  <title id="title">vUzipCenter toolbar icon</title>
-  <style>
-    .main{fill:none;stroke:#231f20;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round}
-    .accent{stroke:#122877}
-    .soft{opacity:.38}
-    .dash{stroke-dasharray:3 3}
-    .node{fill:#fff;stroke:#231f20}
-    .accent-node{fill:#fff;stroke:#122877}
-    .accent-fill{fill:#122877;stroke:#122877}
-    .no-stroke{stroke:none}
-    .axis-x{stroke:#c7352d}
-    .axis-y{stroke:#27854a}
-    .axis-z{stroke:#2d62b8}
-  </style>
-  <g class="main">
-    <path d="M7 7V27Q7 42 24 42Q41 42 41 27V7"/>
-    <path class="accent" d="M15 7V27Q15 34 24 34Q33 34 33 27V7"/>
-    <path class="soft" d="M11 7V27Q11 38 24 38Q37 38 37 27V7"/>
-    <rect class="node" x="12" y="4" width="6" height="6"/>
-    <rect class="node" x="30" y="4" width="6" height="6"/>
+<svg fill="none" fill-rule="evenodd" stroke="black" stroke-width="0.501" stroke-linejoin="bevel" stroke-miterlimit="10" xmlns="http://www.w3.org/2000/svg" width="36pt" height="36pt" viewBox="0 -36 36 36">
+  <defs><linearGradient id="centerBlue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8c96ff"/><stop offset="1" stop-color="#4a60ff"/></linearGradient></defs>
+  <g transform="scale(1 -1)">
+    <path d="M5.5 31V15C5.5 6.8 10.3 2.5 18 2.5S30.5 6.8 30.5 15V31" stroke="#7f7f7f" stroke-width="2.7" stroke-linecap="round" opacity="0.55"/>
+    <path d="M11 31V15.4C11 10.3 13.5 7.7 18 7.7S25 10.3 25 15.4V31" stroke="#231f20" stroke-width="4.8" stroke-linecap="round"/>
+    <path d="M11 31V15.4C11 10.3 13.5 7.7 18 7.7S25 10.3 25 15.4V31" stroke="url(#centerBlue)" stroke-width="2.7" stroke-linecap="round"/>
+    <path d="M8.75 28.75V33.25H13.25V28.75ZM11.75 30.25V31.75H10.25V30.25ZM22.75 28.75V33.25H27.25V28.75ZM25.75 30.25V31.75H24.25V30.25Z" fill="#231f20" stroke="none"/>
   </g>
 </svg>
