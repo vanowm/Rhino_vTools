@@ -21,9 +21,22 @@
       <text>
         <locale_1033>vTools</locale_1033>
       </text>
+      <tool_bar_item guid="e07b6c70-b773-48dc-af30-8f7047165b96" button_display_mode="control_only" button_style="normal">
+        <text>
+          <locale_1033>vIsolate / vShow</locale_1033>
+        </text>
+        <left_macro_id>1119e14d-9a8e-40bc-a985-c2aacf2435d6</left_macro_id>
+        <right_macro_id>87976eef-39e5-4f85-856f-69f74a5021cb</right_macro_id>
+        <link style="normal">a8edc5d5-146e-4595-b3ae-4dc971efb239</link>
+      </tool_bar_item>
+    </tool_bar>
+    <tool_bar guid="a8edc5d5-146e-4595-b3ae-4dc971efb239" bitmap_id="1119e14d-9a8e-40bc-a985-c2aacf2435d6" item_display_style="control_only">
+      <text>
+        <locale_1033>vIsolate</locale_1033>
+      </text>
       <tool_bar_item guid="1119e14d-9a8e-40bc-a985-c2aacf2435d6" button_display_mode="control_only" button_style="normal">
         <text>
-          <locale_1033>vIsolate set</locale_1033>
+          <locale_1033>vIsolate</locale_1033>
         </text>
         <left_macro_id>1119e14d-9a8e-40bc-a985-c2aacf2435d6</left_macro_id>
         <right_macro_id>87976eef-39e5-4f85-856f-69f74a5021cb</right_macro_id>
@@ -75,19 +88,19 @@
   <macros>
     <macro_item guid="1119e14d-9a8e-40bc-a985-c2aacf2435d6" bitmap_id="1119e14d-9a8e-40bc-a985-c2aacf2435d6">
       <text>
-        <locale_1033>vIsolate set</locale_1033>
+        <locale_1033>vIsolate</locale_1033>
       </text>
       <tooltip>
-        <locale_1033>vIsolate set</locale_1033>
+        <locale_1033>Isolate objects</locale_1033>
       </tooltip>
       <help_text>
-        <locale_1033>vIsolate set</locale_1033>
+        <locale_1033>vIsolate</locale_1033>
       </help_text>
       <button_text>
-        <locale_1033>vIsolate set</locale_1033>
+        <locale_1033>vIsolate</locale_1033>
       </button_text>
       <menu_text>
-        <locale_1033>vIsolate set</locale_1033>
+        <locale_1033>vIsolate</locale_1033>
       </menu_text>
       <script>'_vIsolate</script>
     </macro_item>
@@ -96,7 +109,7 @@
         <locale_1033>vShow</locale_1033>
       </text>
       <tooltip>
-        <locale_1033>vShow</locale_1033>
+        <locale_1033>Show objects</locale_1033>
       </tooltip>
       <help_text>
         <locale_1033>vShow</locale_1033>

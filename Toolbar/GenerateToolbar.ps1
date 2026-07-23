@@ -6,12 +6,17 @@ param(
 $ErrorActionPreference = "Stop"
 
 $pluginId = "2607512e-a1fc-4cf9-9329-a293431437a0"
-$toolbarId = "f00df249-4c86-4080-9c11-3360fdf269ef"
+$mainToolbarId = "f00df249-4c86-4080-9c11-3360fdf269ef"
+$isolateToolbarId = "a8edc5d5-146e-4595-b3ae-4dc971efb239"
+$isolateFlyoutButtonId = "e07b6c70-b773-48dc-af30-8f7047165b96"
 # Keep toolbar and button IDs stable to preserve user layout. Rotate only an
 # affected LeftMacroId or ShowId when its script changes so Rhino reloads it.
 $buttons = @(
   @{
-    Name = "vIsolate set"
+    Name = "vIsolate"
+    RightName = "vShow"
+    Tooltip = "Isolate objects"
+    RightTooltip = "Show objects"
     Set = $null
     Id = "1119e14d-9a8e-40bc-a985-c2aacf2435d6"
     LeftMacroId = "1119e14d-9a8e-40bc-a985-c2aacf2435d6"
@@ -113,10 +118,10 @@ try {
 
   $writer.WriteStartElement("tool_bar_groups")
   $writer.WriteStartElement("tool_bar_group")
-  $writer.WriteAttributeString("guid", $toolbarId)
-  $writer.WriteAttributeString("dock_bar_guid32", $toolbarId)
-  $writer.WriteAttributeString("dock_bar_guid64", $toolbarId)
-  $writer.WriteAttributeString("active_tool_bar_group", $toolbarId)
+  $writer.WriteAttributeString("guid", $mainToolbarId)
+  $writer.WriteAttributeString("dock_bar_guid32", $mainToolbarId)
+  $writer.WriteAttributeString("dock_bar_guid64", $mainToolbarId)
+  $writer.WriteAttributeString("active_tool_bar_group", $mainToolbarId)
   $writer.WriteAttributeString("single_file", "False")
   $writer.WriteAttributeString("hide_single_tab", "True")
   $writer.WriteStartElement("text")
@@ -127,24 +132,47 @@ try {
   $writer.WriteAttributeString("floating", "True")
   $writer.WriteEndElement()
   $writer.WriteStartElement("tool_bar_group_item")
-  $writer.WriteAttributeString("guid", $toolbarId)
+  $writer.WriteAttributeString("guid", $mainToolbarId)
   $writer.WriteAttributeString("major_version", "1")
   $writer.WriteAttributeString("minor_version", "1")
   $writer.WriteStartElement("text")
   $writer.WriteElementString("locale_1033", "vTools")
   $writer.WriteEndElement()
-  $writer.WriteElementString("tool_bar_id", $toolbarId)
+  $writer.WriteElementString("tool_bar_id", $mainToolbarId)
   $writer.WriteEndElement()
   $writer.WriteEndElement()
   $writer.WriteEndElement()
 
   $writer.WriteStartElement("tool_bars")
   $writer.WriteStartElement("tool_bar")
-  $writer.WriteAttributeString("guid", $toolbarId)
+  $writer.WriteAttributeString("guid", $mainToolbarId)
   $writer.WriteAttributeString("bitmap_id", $buttons[0].Id)
   $writer.WriteAttributeString("item_display_style", "control_only")
   $writer.WriteStartElement("text")
   $writer.WriteElementString("locale_1033", "vTools")
+  $writer.WriteEndElement()
+  $writer.WriteStartElement("tool_bar_item")
+  $writer.WriteAttributeString("guid", $isolateFlyoutButtonId)
+  $writer.WriteAttributeString("button_display_mode", "control_only")
+  $writer.WriteAttributeString("button_style", "normal")
+  $writer.WriteStartElement("text")
+  $writer.WriteElementString("locale_1033", "vIsolate / vShow")
+  $writer.WriteEndElement()
+  $writer.WriteElementString("left_macro_id", $buttons[0].LeftMacroId)
+  $writer.WriteElementString("right_macro_id", $buttons[0].ShowId)
+  $writer.WriteStartElement("link")
+  $writer.WriteAttributeString("style", "normal")
+  $writer.WriteString($isolateToolbarId)
+  $writer.WriteEndElement()
+  $writer.WriteEndElement()
+  $writer.WriteEndElement()
+
+  $writer.WriteStartElement("tool_bar")
+  $writer.WriteAttributeString("guid", $isolateToolbarId)
+  $writer.WriteAttributeString("bitmap_id", $buttons[0].Id)
+  $writer.WriteAttributeString("item_display_style", "control_only")
+  $writer.WriteStartElement("text")
+  $writer.WriteElementString("locale_1033", "vIsolate")
   $writer.WriteEndElement()
   foreach ($button in $buttons) {
     $writer.WriteStartElement("tool_bar_item")
