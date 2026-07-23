@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Rhino.PlugIns;
 
 [assembly: AssemblyTitle("vTools")]
+[assembly: AssemblyDescription("Native Rhino workflow tools for curves, surfaces, objects, annotation, and fabrication.")]
 [assembly: AssemblyProduct("vTools")]
 [assembly: ComVisible(false)]
 [assembly: Guid("2607512e-a1fc-4cf9-9329-a293431437a0")]

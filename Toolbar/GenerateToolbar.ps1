@@ -11,7 +11,7 @@ $toolbarId = "f00df249-4c86-4080-9c11-3360fdf269ef"
 # affected LeftMacroId or ShowId when its script changes so Rhino reloads it.
 $buttons = @(
   @{
-    Name = "vIsolate"
+    Name = "vIsolate set"
     Set = $null
     Id = "1119e14d-9a8e-40bc-a985-c2aacf2435d6"
     LeftMacroId = "1119e14d-9a8e-40bc-a985-c2aacf2435d6"
@@ -57,6 +57,18 @@ $buttons = @(
     LeftMacroId = "e757c304-347e-4b92-8bb8-481816cb83a6"
     ShowId = "481d3c31-714c-4b25-a465-36c10a976761"
     Icon = "vIsolate_E.svg"
+  },
+  @{
+    Name = "Isolate"
+    RightName = "Show"
+    Tooltip = "Isolate objects"
+    RightTooltip = "Show objects"
+    Id = "b9b9a3ff-9b75-4011-9b6f-1afc098154d8"
+    LeftMacroId = "935bdc76-5ed9-44c4-8286-2ee3774f45ce"
+    ShowId = "914df64f-c714-49fc-a38c-baa4598c49eb"
+    LeftScript = '!_Isolate'
+    RightScript = '!_Show'
+    Icon = "Isolate_Show.svg"
   }
 )
 
@@ -158,10 +170,19 @@ try {
     $writer.WriteAttributeString("bitmap_id", $button.Id)
     foreach ($element in @("text", "tooltip", "help_text", "button_text", "menu_text")) {
       $writer.WriteStartElement($element)
-      $writer.WriteElementString("locale_1033", $button.Name)
+      $label = if ($element -eq "tooltip" -and $button.Tooltip) {
+        $button.Tooltip
+      }
+      else {
+        $button.Name
+      }
+      $writer.WriteElementString("locale_1033", $label)
       $writer.WriteEndElement()
     }
-    $leftScript = if ($button.Set) {
+    $leftScript = if ($button.LeftScript) {
+      $button.LeftScript
+    }
+    elseif ($button.Set) {
       "'_vIsolate `"$($button.Set)`""
     }
     else {
@@ -174,13 +195,30 @@ try {
       $writer.WriteStartElement("macro_item")
       $writer.WriteAttributeString("guid", $button.ShowId)
       $writer.WriteAttributeString("bitmap_id", $button.Id)
-      $showName = if ($button.Set) { "vShow $($button.Set)" } else { "vShow" }
+      $showName = if ($button.RightName) {
+        $button.RightName
+      }
+      elseif ($button.Set) {
+        "vShow $($button.Set)"
+      }
+      else {
+        "vShow"
+      }
       foreach ($element in @("text", "tooltip", "help_text", "button_text", "menu_text")) {
         $writer.WriteStartElement($element)
-        $writer.WriteElementString("locale_1033", $showName)
+        $label = if ($element -eq "tooltip" -and $button.RightTooltip) {
+          $button.RightTooltip
+        }
+        else {
+          $showName
+        }
+        $writer.WriteElementString("locale_1033", $label)
         $writer.WriteEndElement()
       }
-      $showScript = if ($button.Set) {
+      $showScript = if ($button.RightScript) {
+        $button.RightScript
+      }
+      elseif ($button.Set) {
         "'_vShow `"$($button.Set)`""
       }
       else {

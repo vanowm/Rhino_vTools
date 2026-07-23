@@ -44,6 +44,8 @@ $hasDocs = $false
 $hasOptions = $false
 $hasViews = $false
 $hasResources = $false
+$hasToolbar = $false
+$hasPluginMetadata = $false
 $hasPluginCode = $false
 $hasDll = $false
 
@@ -51,10 +53,12 @@ foreach ($change in $changes) {
     $path = $change.Path
     if ($path -eq 'README.md') { $hasDocs = $true }
     if ($path -eq 'AGENTS.md' -or $path -eq 'build.ps1' -or $path -eq 'Build.Release.targets' -or
-        $path -eq $projectFile.Name -or $path -eq 'Properties/AssemblyInfo.cs') { $hasBuildWorkflow = $true }
+        $path -eq $projectFile.Name) { $hasBuildWorkflow = $true }
+    if ($path -eq 'Properties/AssemblyInfo.cs') { $hasPluginMetadata = $true }
     if ($path -like 'Options/*.cs') { $hasOptions = $true }
     if ($path -like 'Views/*.cs') { $hasViews = $true }
     if ($path -like 'Resources/*') { $hasResources = $true }
+    if ($path -like 'Toolbar/*') { $hasToolbar = $true }
     if ($path -eq "bin/Release/net7.0-windows/$projectName.dll") { $hasDll = $true }
 
     if ($path -like 'Commands/*.cs') {
@@ -78,6 +82,8 @@ elseif ($commandUpdates.Count -gt 1) { $parts.Add('update commands: ' + (Build-L
 if ($hasOptions) { $parts.Add('options: update') }
 if ($hasViews) { $parts.Add('panel: update') }
 if ($hasResources) { $parts.Add('resources: update') }
+if ($hasToolbar) { $parts.Add('toolbar: update') }
+if ($hasPluginMetadata) { $parts.Add('plugin metadata: update') }
 if ($hasPluginCode) { $parts.Add('plugin: update') }
 if ($hasDocs) { $parts.Add('docs: update') }
 if ($hasBuildWorkflow) { $parts.Add('build: align release workflow') }
