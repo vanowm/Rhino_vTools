@@ -1105,7 +1105,7 @@ public sealed class vFitBox : Command
     {
     }
 
-    var decimals = Math.Max(0, Math.Min(10, doc.DistanceDisplayPrecision));
+    var decimals = Math.Max(0, Math.Min(10, doc.ModelDistanceDisplayPrecision));
     var text = value.ToString($"F{decimals}", CultureInfo.CurrentCulture);
 
     if (text.IndexOf(CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator, StringComparison.Ordinal) >= 0)
@@ -1132,7 +1132,7 @@ public sealed class vFitBox : Command
     {
     }
 
-    var denominator = FractionDenominatorFromPrecision(doc.DistanceDisplayPrecision);
+    var denominator = FractionDenominatorFromPrecision(doc.ModelDistanceDisplayPrecision);
     return FormatFractionalWithPlus(value, denominator);
   }
 

@@ -1,6 +1,6 @@
-# vTools  ·  v26.7.23.1145
+# vTools  ·  v26.7.23.1736
 
-vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for notches, orient, trim/extend, gumball, curve, line, text, tangent/perpendicular alignment workflows and more.
+vTools is a dual-target Rhino 8 and Rhino 9 plug-in project (C# / .NET 7 and .NET 10) that provides native RhinoCommon commands for notches, orient, trim/extend, gumball, curve, line, text, tangent/perpendicular alignment workflows and more.
 
 ## What this project includes
 
@@ -53,8 +53,8 @@ vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoComm
 
 ## Requirements
 
-- Rhino 8 (for RhinoCommon.dll)
-- .NET SDK 7.0+
+- Rhino 8 and Rhino 9 (or Rhino 9 WIP) for their matching RhinoCommon assemblies
+- .NET SDK 10.0+ with the .NET 7 targeting pack
 - Windows
 
 ## Build
@@ -73,7 +73,7 @@ Build behavior:
 
 1. Release builds fail fast if output files are locked (for example, if Rhino holds `vTools.dll`).
 2. After every successful Release build, a timestamped backup snapshot is created automatically.
-3. When `-Publish` produces a changed DLL, the build pushes a full-version tag. GitHub then creates a release containing the DLL and every generated `.rui` file beside it.
+3. When `-Publish` produces either changed DLL, the build commits both runtime outputs once and pushes a full-version tag. GitHub then creates a release containing distinctly named .NET 7 and .NET 10 DLLs plus the toolbar `.rui` file.
 
 ## Output
 
@@ -82,7 +82,10 @@ Release output is written to:
 - bin/Release/net7.0-windows/vTools.dll
 - bin/Release/net7.0-windows/vTools.config.json
 - bin/Release/net7.0-windows/vTools.rui
-- Automatic backups: bin/Release/backups/YY.MM.DD.HHMMSS/
+- bin/Release/net10.0-windows/vTools.dll
+- bin/Release/net10.0-windows/vTools.config.json
+- bin/Release/net10.0-windows/vTools.rui
+- Automatic backups: bin/Release/backups/YY.MM.DD.HHMMSS/&lt;target-framework&gt;/
 
 ## Rhino usage
 

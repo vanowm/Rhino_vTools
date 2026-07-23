@@ -113,6 +113,9 @@ internal static class HideSetState
       ? order
       : obj.RuntimeSerialNumber;
 
+  public static bool IsHidden(RhinoObject obj) =>
+    obj.IsHidden || obj.Attributes.Mode == ObjectMode.Hidden;
+
   public static string NormalizeInput(string? input)
   {
     var value = (input ?? string.Empty).Trim();
@@ -300,9 +303,7 @@ internal static class HideSetState
   {
     var context = _hidePollContext;
     if (context == null ||
-        context.DocumentSerialNumber != e.Document.RuntimeSerialNumber ||
-        e.OldAttributes.Mode == ObjectMode.Hidden ||
-        e.NewAttributes.Mode != ObjectMode.Hidden)
+        context.DocumentSerialNumber != e.Document.RuntimeSerialNumber)
     {
       return;
     }
@@ -330,7 +331,7 @@ internal static class HideSetState
     foreach (var entry in context.PreviousNativeNames)
     {
       var obj = doc.Objects.FindId(entry.Key);
-      if (obj == null || obj.Attributes.Mode != ObjectMode.Hidden)
+      if (obj == null || !IsHidden(obj))
         continue;
 
       var hasNativeName = TryGetNativeName(obj, out var nativeName);

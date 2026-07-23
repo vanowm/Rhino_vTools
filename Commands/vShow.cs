@@ -128,7 +128,7 @@ public sealed class vShow : Command
   {
     var settings = new ObjectEnumeratorSettings
     {
-      NormalObjects = false,
+      NormalObjects = true,
       LockedObjects = false,
       HiddenObjects = true,
       IdefObjects = false,
@@ -142,7 +142,7 @@ public sealed class vShow : Command
     };
 
     var objectHidden = doc.Objects.GetObjectList(settings)
-      .Where(obj => obj.Attributes.Mode == ObjectMode.Hidden)
+      .Where(HideSetState.IsHidden)
       .ToList();
     objectHiddenCount = objectHidden.Count;
     nativeNamedCount = 0;
