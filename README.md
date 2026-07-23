@@ -1,4 +1,4 @@
-Tools  ·  v26.7.23.201
+# vTools  ·  v26.7.23.1145
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for notches, orient, trim/extend, gumball, curve, line, text, tangent/perpendicular alignment workflows and more.
 
@@ -67,12 +67,13 @@ From this folder:
 
 This standalone Release build does not require Git and never commits or pushes.
 Repository maintainers can use `.\build.ps1 -Publish` for the semantic-message,
-signed-commit, and push workflow used by the normal VS Code build task.
+signed-commit, push, and GitHub release workflow used by the normal VS Code build task.
 
 Build behavior:
 
 1. Release builds fail fast if output files are locked (for example, if Rhino holds `vTools.dll`).
 2. After every successful Release build, a timestamped backup snapshot is created automatically.
+3. When `-Publish` produces a changed DLL, the build pushes a full-version tag. GitHub then creates a release containing the DLL and every generated `.rui` file beside it.
 
 ## Output
 
@@ -80,6 +81,7 @@ Release output is written to:
 
 - bin/Release/net7.0-windows/vTools.dll
 - bin/Release/net7.0-windows/vTools.config.json
+- bin/Release/net7.0-windows/vTools.rui
 - Automatic backups: bin/Release/backups/YY.MM.DD.HHMMSS/
 
 ## Rhino usage
@@ -678,11 +680,11 @@ When the plug-in loads, Rhino's command history shows:
 vTools v26.7.3.HMM loaded — N commands: vBiminiParts, vChamfer, ...
 ```
 
-The same line plus the DLL path is written to `vtools.log` beside the loaded DLL.
+The same line plus the DLL path is written to `vTools.log` beside the loaded DLL.
 
 ## Logging
 
-- `vtools.log` beside the loaded DLL — cleared on every Rhino startup. First lines show version and command list. All commands write diagnostics here via `Log.Write(tag, message)`.
+- `vTools.log` beside the loaded DLL — cleared on every Rhino startup. First lines show version and command list. All commands write diagnostics here via `Log.Write(tag, message)`.
 
 ## Versioning
 

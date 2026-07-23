@@ -8,6 +8,7 @@ bin/Release/*
 !bin/Release/net7.0-windows/
 bin/Release/net7.0-windows/*
 !bin/Release/net7.0-windows/vTools.dll
+!bin/Release/net7.0-windows/vTools.rui
 
 # User/IDE files
 .vs/

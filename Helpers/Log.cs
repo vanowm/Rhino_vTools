@@ -77,7 +77,7 @@ internal static class Log
   {
     try
     {
-      return PluginPaths.ResolveFile("vtools.log");
+      return PluginPaths.ResolveFile("vTools.log");
     }
     catch { return string.Empty; }
   }
