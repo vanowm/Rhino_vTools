@@ -4,6 +4,10 @@
     "trim": true,
     "join": false
   },
+  "vCommandFailSound": {
+    "sound": "Default",
+    "audioFile": ""
+  },
   "vCurveToSpline": {
     "joinMode": "Smooth"
   },

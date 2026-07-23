@@ -42,6 +42,7 @@ public class vToolsPlugIn : PlugIn
 
   protected override void OnShutdown()
   {
+    CommandFailSoundMonitor.Stop();
     HideSetState.StopPolling();
     base.OnShutdown();
   }

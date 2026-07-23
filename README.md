@@ -1,13 +1,14 @@
-Tools  ·  v26.7.22.2312
+Tools  ·  v26.7.23.051
 
 vTools is a Rhino 8 plug-in project (C# / .NET 7) that provides native RhinoCommon commands for zipper, orient, trim/extend, gumball, curve, line, text, and tangent/perpendicular alignment workflows.
 
 ## What this project includes
 
 - Rhino plug-in entry point: vToolsPlugIn
-- Native commands (41):
+- Native commands (42):
   - [vBiminiParts](#vbiminiparts-flow) *(26.5.21.1827)* — builds bimini cover pocket parts (facings, main pocket, secondary pockets, center reference line) from a selected boundary curve; pipe size configures pocket depths
   - [vChamfer](#vchamfer-flow) *(26.5.7.723)* — adds a chamfer line perpendicular to the middle curve at an equidistant gap; places the chamfer where the gap between two diverging curves equals the specified length
+  - [vCommandFailSound](#vcommandfailsound-flow) *(26.7.23.045)* — configures and toggles an audible notification when a Rhino command ends with any result other than Success or Cancel
   - [vCurveToSpline](#vcurvetospline-flow) *(26.4.24.934)* — converts selected curves to interpolated splines with join modes
   - [vDiamonds](#vdiamonds-flow) *(26.5.14.928)* — draws an argyle diamond pattern with optional bounding rectangle and size/count labels; supports BySize centering mode
   - [vFacing](#vfacing-flow) *(26.5.29.1333)* — builds a four-piece closed facing boundary from a base curve and two side curves by offsetting the base inward by a specified size; collects inside objects and places the result with a DynamicDraw preview
@@ -89,7 +90,7 @@ Release output is written to:
 
 All command options persist by default unless stated otherwise.
 
-Native commands (41): [vBiminiParts](#vbiminiparts-flow), [vChamfer](#vchamfer-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFacing](#vfacing-flow), [vFitBox](#vfitbox-flow), [vGroup](#vgroup-flow), [vIsolate](#visolate-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMatch](#vmatch-flow), [vMiddleCurve](#vmiddlecurve-flow), [vNotches](#vnotches-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vOverlaps](#voverlaps-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vProjectToSurface](#vprojecttosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSetPt](#vsetpt-flow), [vShow](#vshow-flow), [vSplit](#vsplit-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTitle](#vtitle-flow), [vToggleAxes](#vtoggleaxes-flow), [vToggleControlPoints](#vtogglecontrolpoints-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
+Native commands (42): [vBiminiParts](#vbiminiparts-flow), [vChamfer](#vchamfer-flow), [vCommandFailSound](#vcommandfailsound-flow), [vCurveToSpline](#vcurvetospline-flow), [vDiamonds](#vdiamonds-flow), [vFacing](#vfacing-flow), [vFitBox](#vfitbox-flow), [vGroup](#vgroup-flow), [vIsolate](#visolate-flow), [vLine](#vline-flow), [vLineLength](#vlinelength-flow), [vMatch](#vmatch-flow), [vMiddleCurve](#vmiddlecurve-flow), [vNotches](#vnotches-flow), [vOffset](#voffset-flow), [vOrient2pt](#vorient2pt-flow), [vOrient3pt](#vorient3pt-flow), [vOverlaps](#voverlaps-flow), [vPart](#vpart-flow), [vPerpendicularTo](#vperpendicularto-flow), [vPointNormalToSurface](#vpointnormaltosurface-flow), [vProjectToSurface](#vprojecttosurface-flow), [vPointTrace](#vpointtrace-flow), [vRectangle](#vrectangle-flow), [vScallop](#vscallop-flow), [vSetPt](#vsetpt-flow), [vShow](#vshow-flow), [vSplit](#vsplit-flow), [vSplitAtCorners](#vsplitatcorners-flow), [vTangent](#vtangent-flow), [vTextAligned](#vtextaligned-flow), [vTextFlip](#vtextflip-flow), [vTitle](#vtitle-flow), [vToggleAxes](#vtoggleaxes-flow), [vToggleControlPoints](#vtogglecontrolpoints-flow), [vTogglePerpGumball](#vtoggleperpgumball-flow), [vTrim](#vtrim-flow), [vTrimOff](#vtrimoff-flow), [vUnrollSrf](#vunrollsrf-flow), [vUzip](#vuzip-flow), [vUzipCenter](#vuzipcenter-flow), [vUzipParts](#vuzipparts-flow).
 
 1. Load the plug-in assembly in Rhino.
 1. Run one of the native commands.
@@ -130,6 +131,14 @@ Options:
 Notes:
 - Corner detection uses the closest endpoint pair. Extension stubs (toward a virtual corner) are shown in the preview when `Trim=Yes` and the cut falls inside the extension zone.
 - All options persist to `vTools.config.json` under `vChamfer`.
+
+### vCommandFailSound flow
+
+1. Run `vCommandFailSound` and press Enter to toggle the watcher on or off for the current Rhino session.
+1. `Sound` selects the system default, Asterisk, Exclamation, Hand, Question, or a custom audio file; `AudioFile` opens a file picker and selects `Custom` automatically.
+1. `Preview` plays the current choice without changing the watcher state. Sound choices persist immediately in the shared `vTools.config.json`.
+1. While enabled, the selected sound plays whenever a Rhino command ends with any result other than `Success` or `Cancel`.
+1. The watcher detaches automatically when the plug-in shuts down.
 
 ### vCurveToSpline flow
 
